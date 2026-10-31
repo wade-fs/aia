@@ -25,7 +25,7 @@ var webCmd = &cobra.Command{
 On startup, a cryptographically random one-time login token is generated and printed.
 Use this token to log in from your browser.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runWebServer()
+		return runWebServer(cmd)
 	},
 }
 
@@ -38,17 +38,24 @@ var serverStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the AIA server",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runWebServer()
+		return runWebServer(cmd)
 	},
 }
 
-func runWebServer() error {
-	if envH := os.Getenv("AIA_HOST"); envH != "" && webHost == "127.0.0.1" {
-		webHost = envH
+func runWebServer(cmd *cobra.Command) error {
+	host := webHost
+	if !cmd.Flags().Changed("host") {
+		if envH := os.Getenv("AIA_HOST"); envH != "" {
+			host = envH
+		}
 	}
-	if envP := os.Getenv("AIA_PORT"); envP != "" && webPort == 8080 {
-		if p, err := strconv.Atoi(envP); err == nil && p > 0 {
-			webPort = p
+
+	port := webPort
+	if !cmd.Flags().Changed("port") {
+		if envP := os.Getenv("AIA_PORT"); envP != "" {
+			if p, err := strconv.Atoi(envP); err == nil && p > 0 {
+				port = p
+			}
 		}
 	}
 
@@ -57,7 +64,7 @@ func runWebServer() error {
 		return fmt.Errorf("failed to initialize web host: %w", err)
 	}
 
-	addr := fmt.Sprintf("%s:%d", webHost, webPort)
+	addr := fmt.Sprintf("%s:%d", host, port)
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      webHostInst.Handler(),
@@ -118,11 +125,22 @@ func runWebServer() error {
 }
 
 func init() {
-	webCmd.Flags().StringVar(&webHost, "host", "127.0.0.1", "Web server host address")
-	webCmd.Flags().IntVarP(&webPort, "port", "p", 8080, "Web server port")
+	defaultHost := "127.0.0.1"
+	if h := os.Getenv("AIA_HOST"); h != "" {
+		defaultHost = h
+	}
+	defaultPort := 7777
+	if p := os.Getenv("AIA_PORT"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 {
+			defaultPort = v
+		}
+	}
 
-	serverStartCmd.Flags().StringVar(&webHost, "host", "127.0.0.1", "Web server host address")
-	serverStartCmd.Flags().IntVarP(&webPort, "port", "p", 8080, "Web server port")
+	webCmd.Flags().StringVar(&webHost, "host", defaultHost, "Web server host address (or env $AIA_HOST)")
+	webCmd.Flags().IntVarP(&webPort, "port", "p", defaultPort, "Web server port (or env $AIA_PORT)")
+
+	serverStartCmd.Flags().StringVar(&webHost, "host", defaultHost, "Web server host address (or env $AIA_HOST)")
+	serverStartCmd.Flags().IntVarP(&webPort, "port", "p", defaultPort, "Web server port (or env $AIA_PORT)")
 
 	serverCmd.AddCommand(serverStartCmd)
 

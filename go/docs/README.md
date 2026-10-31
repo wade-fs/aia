@@ -217,18 +217,18 @@ Default settings:
 | Parameter | Default |
 |---|---|
 | Host | `127.0.0.1` |
-| Port | `8080` |
+| Port | `7777` |
 
 Open:
 
 ```text
-http://127.0.0.1:8080
+http://127.0.0.1:7777
 ```
 
 Custom host and port:
 
 ```bash
-./bin/aia web --host 127.0.0.1 --port 8080
+./bin/aia web --host 127.0.0.1 --port 7777
 ```
 
 The Web server generates a cryptographically random one-time login token at startup and prints it to the terminal.

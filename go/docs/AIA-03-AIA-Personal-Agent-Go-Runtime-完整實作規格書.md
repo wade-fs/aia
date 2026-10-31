@@ -650,7 +650,7 @@ var FS embed.FS
 
 ```go
 http.Server{
-    Addr:              "127.0.0.1:8080",
+    Addr:              "127.0.0.1:7777",
     Handler:           handler,
     ReadHeaderTimeout: 5 * time.Second,
     ReadTimeout:       15 * time.Second,
@@ -899,7 +899,7 @@ harness:
 web:
   enabled: true
   host: "127.0.0.1"
-  port: 8080
+  port: 7777
   session_timeout_minutes: 60
   sse_enabled: true
 ```

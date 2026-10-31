@@ -242,8 +242,13 @@ show_status() {
     systemctl --user status "${SERVICE_NAME}" --no-pager || true
 
     echo -e "\n${BLUE}🌐 連線資訊：${NC}"
-    local port="${AIA_PORT:-${DEFAULT_PORT}}"
-    echo -e "   Web 儀表板位址 : ${GREEN}http://127.0.0.1:${port}/${NC}"
+    local port
+    port="$(resolve_var "AIA_PORT")"
+    port="${port:-${DEFAULT_PORT}}"
+    local host
+    host="$(resolve_var "AIA_HOST")"
+    host="${host:-${DEFAULT_HOST}}"
+    echo -e "   Web 儀表板位址 : ${GREEN}http://${host}:${port}/${NC}"
     echo -e "   金鑰配置檔案   : ${ENV_FILE} (chmod 600)"
     echo -e "   取得登入 Token : ${YELLOW}make token${NC}"
     echo -e "   即時查看日誌   : ${YELLOW}make logs_service${NC}"

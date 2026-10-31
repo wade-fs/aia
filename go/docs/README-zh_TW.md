@@ -217,18 +217,18 @@ make uninstall_service
 | 參數 | 預設值 |
 |---|---|
 | Host | `127.0.0.1` |
-| Port | `8080` |
+| Port | `7777` |
 
 瀏覽器開啟：
 
 ```text
-http://127.0.0.1:8080
+http://127.0.0.1:7777
 ```
 
 自訂 Host 與 Port：
 
 ```bash
-./bin/aia web --host 127.0.0.1 --port 8080
+./bin/aia web --host 127.0.0.1 --port 7777
 ```
 
 Web Server 啟動時，會產生一組經過密碼學安全隨機數產生器產生的一次性登入 Token，並將 Token 印出至終端機。

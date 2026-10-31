@@ -43,3 +43,13 @@ logging:
   level: info
   format: json
   retain_days: 30
+
+# Optional External Data Sources & Notification Keys (AIA-05 §6)
+# Note: AI LLM uses local 'agy' CLI authentication and does NOT require any API key here.
+# TWSE, TPEx, MOPS, and SEC EDGAR are public and free without API keys.
+data_sources:
+  fred_api_key: ""          # Optional: St. Louis Fed FRED API key (free at https://fred.stlouisfed.org)
+  finmind_token: ""         # Optional: FinMind Taiwan stock history token (free tier)
+  alpha_vantage_key: ""     # Optional: Alpha Vantage global market key (free tier)
+  telegram_bot_token: ""    # Optional: Telegram bot token for trade proposal push alerts
+  telegram_chat_id: ""      # Optional: Telegram user/group chat ID

@@ -18,6 +18,15 @@ type Config struct {
 	Memory       MemoryConfig       `yaml:"memory"`
 	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
 	Logging      LoggingConfig      `yaml:"logging"`
+	DataSources  DataSourcesConfig  `yaml:"data_sources"`
+}
+
+type DataSourcesConfig struct {
+	FREDKey         string `yaml:"fred_api_key"`
+	FinMindToken    string `yaml:"finmind_token"`
+	AlphaVantageKey string `yaml:"alpha_vantage_key"`
+	TelegramToken   string `yaml:"telegram_bot_token"`
+	TelegramChatID  string `yaml:"telegram_chat_id"`
 }
 
 type SystemConfig struct {
@@ -166,6 +175,23 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Runtime.DataDir = ExpandPath(cfg.Runtime.DataDir)
 	cfg.Runtime.WorkspaceDir = ExpandPath(cfg.Runtime.WorkspaceDir)
 	cfg.Database.Path = ExpandPath(cfg.Database.Path)
+
+	// Environment variable overrides for data sources
+	if k := os.Getenv("FRED_API_KEY"); k != "" {
+		cfg.DataSources.FREDKey = k
+	}
+	if k := os.Getenv("FINMIND_TOKEN"); k != "" {
+		cfg.DataSources.FinMindToken = k
+	}
+	if k := os.Getenv("ALPHA_VANTAGE_KEY"); k != "" {
+		cfg.DataSources.AlphaVantageKey = k
+	}
+	if k := os.Getenv("TELEGRAM_BOT_TOKEN"); k != "" {
+		cfg.DataSources.TelegramToken = k
+	}
+	if k := os.Getenv("TELEGRAM_CHAT_ID"); k != "" {
+		cfg.DataSources.TelegramChatID = k
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)

@@ -166,6 +166,7 @@ func (s *Service) Execute(ctx context.Context, t *task.Task, ag *agent.Agent, pr
 
 	execRecord.ConversationID = result.ConversationID
 	execRecord.ResultStatus = result.Status
+	_ = s.execRepo.Update(ctx, execRecord)
 
 	// 8. Result Validation
 	valReq := validation.ValidationRequest{

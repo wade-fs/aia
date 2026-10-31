@@ -6,9 +6,14 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/wade/aia/internal/domain"
 	"github.com/wade/aia/internal/domain/execution"
 	"github.com/wade/aia/internal/domain/task"
+	"github.com/wade/aia/internal/provider"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
+	"github.com/wade/aia/internal/validation"
+	"github.com/wade/aia/internal/workspace"
 )
 
 type Summary struct {
@@ -21,6 +26,9 @@ type Manager struct {
 	taskRepo      *repository.TaskRepository
 	executionRepo *repository.ExecutionRepository
 	auditRepo     *repository.AuditRepository
+	validator     validation.Validator
+	wsMgr         *workspace.Manager
+	artRepo       *repository.ArtifactRepository
 }
 
 func NewManager(
@@ -33,6 +41,18 @@ func NewManager(
 		executionRepo: executionRepo,
 		auditRepo:     auditRepo,
 	}
+}
+
+func (m *Manager) SetValidator(v validation.Validator) {
+	m.validator = v
+}
+
+func (m *Manager) SetWorkspaceManager(ws *workspace.Manager) {
+	m.wsMgr = ws
+}
+
+func (m *Manager) SetArtifactRepository(repo *repository.ArtifactRepository) {
+	m.artRepo = repo
 }
 
 func (m *Manager) Recover(ctx context.Context) (*Summary, error) {
@@ -49,11 +69,81 @@ func (m *Manager) Recover(ctx context.Context) (*Summary, error) {
 		alreadySucceeded := false
 		if err == nil {
 			for _, ex := range execs {
-				// Check if result was already achieved before crash
-				if ex.Status == execution.StatusCompleted || ex.ResultStatus == "SUCCESS" {
+				// Case A: Execution already fully completed before crash
+				if ex.Status == execution.StatusCompleted {
 					alreadySucceeded = true
 					break
 				}
+
+				// Case B: Execution finished with SUCCESS, but crashed before/during validation
+				if ex.ResultStatus == "SUCCESS" && ex.Status != execution.StatusCompleted {
+					if m.validator != nil {
+						valReq := validation.ValidationRequest{
+							Task:      t,
+							Execution: ex,
+							Result: provider.ProviderResult{
+								Status:         ex.ResultStatus,
+								ConversationID: ex.ConversationID,
+								Response:       "Recovered execution result",
+							},
+							Workspace: ex.Workspace,
+						}
+						valRes, valErr := m.validator.Validate(ctx, valReq)
+						if valErr == nil && valRes != nil && valRes.Accepted {
+							ex.Status = execution.StatusCompleted
+							now := time.Now().UTC()
+							if ex.EndedAt == nil {
+								ex.EndedAt = &now
+							}
+							_ = m.executionRepo.Update(ctx, &ex)
+							if m.wsMgr != nil && m.artRepo != nil {
+								artifacts, _ := m.wsMgr.CollectArtifacts(t.ID, ex.ID, ex.Workspace)
+								for _, art := range artifacts {
+									_ = m.artRepo.Create(ctx, &art)
+								}
+							}
+							if m.auditRepo != nil {
+								_ = m.auditRepo.Append(ctx, &repository.AuditLogEntry{
+									ID:           uuid.New().String(),
+									ActorType:    "SYSTEM",
+									ActorID:      "RECOVERY",
+									Action:       "RECOVERY_VALIDATION_PASSED",
+									ResourceType: "TASK",
+									ResourceID:   t.ID,
+									Outcome:      "SUCCESS",
+								})
+							}
+							alreadySucceeded = true
+							break
+						} else {
+							ex.Status = execution.StatusFailed
+							if valRes != nil && len(valRes.Findings) > 0 {
+								ex.ErrorMessage = fmt.Sprintf("Validation failed during recovery: %s", valRes.Findings[0].Description)
+							} else {
+								ex.ErrorMessage = "Validation failed during recovery"
+							}
+							now := time.Now().UTC()
+							if ex.EndedAt == nil {
+								ex.EndedAt = &now
+							}
+							_ = m.executionRepo.Update(ctx, &ex)
+							if m.auditRepo != nil {
+								_ = m.auditRepo.Append(ctx, &repository.AuditLogEntry{
+									ID:           uuid.New().String(),
+									ActorType:    "SYSTEM",
+									ActorID:      "RECOVERY",
+									Action:       "RECOVERY_VALIDATION_FAILED",
+									ResourceType: "TASK",
+									ResourceID:   t.ID,
+									Outcome:      "FAILURE",
+								})
+							}
+							continue
+						}
+					}
+				}
+
+				// Case C: Execution interrupted before completion
 				if ex.Status == execution.StatusRunning || ex.Status == execution.StatusStarting {
 					ex.Status = execution.StatusInterrupted
 					ex.ErrorMessage = "Process interrupted by unexpected runtime shutdown"
@@ -67,13 +157,29 @@ func (m *Manager) Recover(ctx context.Context) (*Summary, error) {
 
 		if alreadySucceeded {
 			_ = m.taskRepo.UpdateStatus(ctx, t.ID, task.StatusCompleted)
-			slog.Info("recovered completed task from already succeeded execution", "task_id", t.ID)
+			slog.Info("recovered completed task from validated execution", "task_id", t.ID)
 			summary.RecoveredTasks++
 			continue
 		}
 
-		// Reconcile task state
-		if t.RetryCount < t.MaxRetries {
+		// Reconcile task state:
+		// Check whether task has external side effects before blind retry
+		hasSideEffects := t.Risk == domain.RiskHigh || t.Risk == domain.RiskCritical
+		if hasSideEffects {
+			_ = m.taskRepo.UpdateStatus(ctx, t.ID, task.StatusWaitingApproval)
+			if m.auditRepo != nil {
+				_ = m.auditRepo.Append(ctx, &repository.AuditLogEntry{
+					ID:           uuid.New().String(),
+					ActorType:    "SYSTEM",
+					ActorID:      "RECOVERY",
+					Action:       "RECOVERY_SIDE_EFFECTS_BLOCKED",
+					ResourceType: "TASK",
+					ResourceID:   t.ID,
+					Outcome:      "WAITING_APPROVAL",
+				})
+			}
+			slog.Warn("task may have caused external side effects before crash; marked WAITING_APPROVAL to prevent duplicate side effects", "task_id", t.ID)
+		} else if t.RetryCount < t.MaxRetries {
 			t.RetryCount++
 			_ = m.taskRepo.Update(ctx, &t)
 			_ = m.taskRepo.UpdateStatus(ctx, t.ID, task.StatusReady)

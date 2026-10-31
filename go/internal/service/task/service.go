@@ -24,13 +24,22 @@ type CreateTaskRequest struct {
 	MaxRetries   int
 }
 
+type HealthChecker interface {
+	HealthCheck(ctx context.Context) error
+}
+
 type Service struct {
-	repo      *repository.TaskRepository
-	auditRepo *repository.AuditRepository
+	repo          *repository.TaskRepository
+	auditRepo     *repository.AuditRepository
+	healthChecker HealthChecker
 }
 
 func NewService(repo *repository.TaskRepository, auditRepo *repository.AuditRepository) *Service {
 	return &Service{repo: repo, auditRepo: auditRepo}
+}
+
+func (s *Service) SetHealthChecker(hc HealthChecker) {
+	s.healthChecker = hc
 }
 
 func (s *Service) Create(ctx context.Context, req CreateTaskRequest) (*task.Task, error) {
@@ -131,7 +140,12 @@ func (s *Service) Resume(ctx context.Context, id domain.ID) error {
 	if err != nil {
 		return err
 	}
-	if t.Status == task.StatusBlocked || t.Status == task.StatusFailed || t.Status == task.StatusWaitingAuth {
+	if t.Status == task.StatusBlocked || t.Status == task.StatusFailed || t.Status == task.StatusWaitingAuth || t.Status == task.StatusWaitingApproval {
+		if s.healthChecker != nil {
+			if err := s.healthChecker.HealthCheck(ctx); err != nil {
+				return fmt.Errorf("health check failed before resume: %w", err)
+			}
+		}
 		return s.UpdateStatus(ctx, id, task.StatusReady)
 	}
 	return fmt.Errorf("task status %s cannot be resumed", t.Status)

@@ -2,8 +2,10 @@ package integration
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,20 +17,31 @@ import (
 )
 
 func checkAgyInstalled(t *testing.T) string {
+	// 1. Check environment variable for configured agy path
+	for _, envKey := range []string{"AGY_PATH", "AIA_AGY_PATH", "AGY_EXECUTABLE"} {
+		if val := strings.TrimSpace(os.Getenv(envKey)); val != "" {
+			if path, err := exec.LookPath(val); err == nil {
+				return path
+			}
+			t.Skipf("Configured agy executable '%s' via %s not found; skipping real agy integration test", val, envKey)
+		}
+	}
+
+	// 2. Fall back to standard PATH
 	path, err := exec.LookPath("agy")
 	if err != nil {
-		t.Skip("agy CLI not found on PATH; skipping real agy integration test")
+		t.Skip("agy CLI not found on PATH or via AGY_PATH / AIA_AGY_PATH; skipping real agy integration test")
 	}
 	return path
 }
 
 func TestAgy_RealIntegration_AG01_Version(t *testing.T) {
-	checkAgyInstalled(t)
+	agyPath := checkAgyInstalled(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	adapter := antigravity.NewAdapter(config.AntigravityConfig{
-		Executable:      "agy",
+		Executable:      agyPath,
 		RequiredVersion: "1.4.12",
 	})
 
@@ -46,7 +59,7 @@ func TestAgy_RealIntegration_AG01_Version(t *testing.T) {
 }
 
 func TestAgy_RealIntegration_AG02_AG04_StreamJson(t *testing.T) {
-	checkAgyInstalled(t)
+	agyPath := checkAgyInstalled(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -54,7 +67,7 @@ func TestAgy_RealIntegration_AG02_AG04_StreamJson(t *testing.T) {
 	wsDir := filepath.Join(tmpDir, "real_ws")
 
 	adapter := antigravity.NewAdapter(config.AntigravityConfig{
-		Executable:      "agy",
+		Executable:      agyPath,
 		RequiredVersion: "1.4.12",
 	})
 

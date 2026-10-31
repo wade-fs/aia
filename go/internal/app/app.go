@@ -81,11 +81,15 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	projSvc := projectService.NewService(projRepo)
 	agSvc := agentService.NewService(agRepo)
 	taskSvc := taskService.NewService(taskRepo, auditRepo)
+	taskSvc.SetHealthChecker(prov)
 	execSvc := execService.NewService(execRepo, taskRepo, artRepo, auditRepo, prov, wsMgr, validator)
 	memSvc := memoryService.NewService(memRepo)
 
 	// 6. Recovery
 	recMgr := recovery.NewManager(taskRepo, execRepo, auditRepo)
+	recMgr.SetValidator(validator)
+	recMgr.SetWorkspaceManager(wsMgr)
+	recMgr.SetArtifactRepository(artRepo)
 
 	// 7. Orchestrator & Memory Retrieval
 	retriever := retrieval.NewRetriever(memRepo, cfg.Memory)

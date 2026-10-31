@@ -93,12 +93,16 @@ Description=AIA - Personal Autonomous Intelligence Architecture Daemon
 Documentation=https://github.com/wade/aia
 After=network.target
 
+# Anti-Flapping / Crash Loop Protection (避免持續性錯誤導致反覆重啟風暴)
+StartLimitIntervalSec=60s
+StartLimitBurst=4
+
 [Service]
 Type=simple
 Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=-%h/.config/aia/service.env
 ExecStart=%h/.local/bin/aia server start
-Restart=always
+Restart=on-failure
 RestartSec=5s
 KillMode=control-group
 StandardOutput=journal
@@ -142,12 +146,14 @@ install_service() {
 
     if [[ "${already_installed}" == "true" ]]; then
         echo -e "${YELLOW}⚡ AIA 背景服務已存在（冪等檢測通過）。更新執行檔與設定，正在平滑重啟...${NC}"
+        systemctl --user reset-failed "${SERVICE_NAME}" 2>/dev/null || true
         systemctl --user restart "${SERVICE_NAME}"
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo -e "${GREEN}✓ AIA 背景服務已成功更新並重啟！未產生重複服務。${NC}"
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     else
         echo -e "${BLUE}🚀 啟用並啟動 AIA 服務...${NC}"
+        systemctl --user reset-failed "${SERVICE_NAME}" 2>/dev/null || true
         systemctl --user enable --now "${SERVICE_NAME}"
         echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo -e "${GREEN}✓ AIA 背景服務已成功安裝並啟動！${NC}"
@@ -212,6 +218,7 @@ restart_service() {
         exit 1
     fi
     echo -e "${BLUE}🔄 重啟 AIA 背景服務...${NC}"
+    systemctl --user reset-failed "${SERVICE_NAME}" 2>/dev/null || true
     systemctl --user restart "${SERVICE_NAME}"
     echo -e "${GREEN}✓ AIA 服務已重啟。${NC}"
     sleep 1

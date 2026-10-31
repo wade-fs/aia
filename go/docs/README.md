@@ -168,19 +168,39 @@ Start the AIA Server Process:
 ./bin/aia server start
 ```
 
-Show available Server commands:
+## 7. Server & Background Service Management
+
+Start the AIA Server Process manually:
 
 ```bash
-./bin/aia server --help
+./bin/aia server start
 ```
 
-The currently exposed Server subcommand is:
+### Systemd User Background Service (Recommended)
 
-```text
-start
+To run AIA reliably as a continuous background daemon with automatic startup, crash recovery, and scheduled task processing:
+
+```bash
+# 1. Idempotent install (automatically avoids duplicate installations & restarts smoothly)
+make install_service
+
+# 2. Check service status
+make status_service
+
+# 3. Retrieve latest One-Time Login Token
+make token
+
+# 4. View live logs
+make logs_service
+
+# 5. Restart service
+make restart_service
+
+# 6. Completely stop & uninstall service
+make uninstall_service
 ```
 
-Do not assume `server stop`, `server shutdown`, or `server restart` are available unless they are added to the CLI.
+Environment variables and secret credentials (such as `FRED_API_KEY` and `FINMIND_TOKEN`) are securely managed in `~/.config/aia/service.env` with `0600` permissions.
 
 ---
 

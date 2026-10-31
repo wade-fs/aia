@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -42,6 +43,15 @@ var serverStartCmd = &cobra.Command{
 }
 
 func runWebServer() error {
+	if envH := os.Getenv("AIA_HOST"); envH != "" && webHost == "127.0.0.1" {
+		webHost = envH
+	}
+	if envP := os.Getenv("AIA_PORT"); envP != "" && webPort == 8080 {
+		if p, err := strconv.Atoi(envP); err == nil && p > 0 {
+			webPort = p
+		}
+	}
+
 	webHostInst, token, err := appInst.CreateWebHost()
 	if err != nil {
 		return fmt.Errorf("failed to initialize web host: %w", err)
@@ -63,6 +73,28 @@ func runWebServer() error {
 	fmt.Println("👉 Note: This token can only be redeemed ONCE. Keep it confidential.")
 	fmt.Println("=======================================================================")
 
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	defer bgCancel()
+
+	// Background ticker for scheduled tasks and due items
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-bgCtx.Done():
+				return
+			case <-ticker.C:
+				if appInst.ScheduleSvc != nil {
+					_, _ = appInst.ScheduleSvc.ProcessDueSchedules(bgCtx)
+				}
+				if appInst.Scheduler != nil {
+					_, _ = appInst.Scheduler.ProcessReadyTasks(bgCtx)
+				}
+			}
+		}
+	}()
+
 	errCh := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -78,6 +110,7 @@ func runWebServer() error {
 		return fmt.Errorf("server error: %w", err)
 	case <-sigCh:
 		fmt.Println("\nShutting down web server gracefully...")
+		bgCancel()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return srv.Shutdown(ctx)

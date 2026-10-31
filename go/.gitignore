@@ -7,3 +7,6 @@ workspaces/
 *.db-shm
 *.tgz
 *.tar.gz
+*.env
+service.env
+.DS_Store

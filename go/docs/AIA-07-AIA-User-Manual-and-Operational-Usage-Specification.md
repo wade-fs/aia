@@ -185,9 +185,16 @@ aia server start
 
 Server 負責 AIA Server Process 的啟動。
 
-目前 CLI Help 尚未顯示 `stop`、`shutdown` 或 `restart` 子命令，因此本文件不宣稱這些命令已經存在。
+目前 CLI 原生命令僅提供 `start` 子命令，如需在 Linux 環境常駐背景運作，AIA 官方提供 systemd user service 管理腳本與 Makefile 目標：
 
-Server 的背景執行方式、程序鎖定、IPC、停止方式及重啟 Recovery 行為，應依實際實作與後續測試確認。
+- `make install_service`：冪等安裝並啟用 systemd 常駐服務（具備重複安裝檢測、自動更新執行檔與環境變數重載重啟功能）。
+- `make status_service`：檢視背景常駐服務狀態。
+- `make token`：從 journal 安全讀取最新的一組一次性登入 Token。
+- `make restart_service`：平滑重啟服務。
+- `make logs_service`：檢視服務日誌。
+- `make uninstall_service`：停止並完全解除服務註冊。
+
+資料來源所需之 API Key（如 `FRED_API_KEY`、`FINMIND_TOKEN`）皆隔離存放在 `~/.config/aia/service.env`（`chmod 0600`），避免明文洩漏或被版本控制追蹤。
 
 ## 5.2 Embedded Web UI
 

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,11 +19,16 @@ import (
 )
 
 type TaskWorker struct {
-	mgr *Manager
+	mgr         *Manager
+	activeTasks atomic.Int32
 }
 
 func newTaskWorker(mgr *Manager) *TaskWorker {
 	return &TaskWorker{mgr: mgr}
+}
+
+func (w *TaskWorker) ActiveTasks() int32 {
+	return w.activeTasks.Load()
 }
 
 // Run executes the task execution loop.
@@ -77,7 +83,9 @@ func (w *TaskWorker) processPendingTasks(ctx context.Context) (int, error) {
 		wg.Add(1)
 
 		go func(targetTask task.Task) {
+			w.activeTasks.Add(1)
 			defer func() {
+				w.activeTasks.Add(-1)
 				<-sem
 				wg.Done()
 			}()

@@ -2,8 +2,11 @@ package worker
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	invService "github.com/wade/aia/internal/service/investment"
 	scheduleService "github.com/wade/aia/internal/service/schedule"
 	taskService "github.com/wade/aia/internal/service/task"
+	"github.com/wade/aia/internal/storage/sqlite"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 )
 
@@ -56,9 +60,21 @@ type WorkerRunSummary struct {
 	ExecutedTasks       int `json:"executed_tasks"`
 }
 
+// ActivityMonitorSnapshot presents the unified activity metrics (AIA Activity Monitor).
+type ActivityMonitorSnapshot struct {
+	Runtime                string `json:"runtime"`                  // "RUNNING" or "STOPPED"
+	ScheduleWorker         string `json:"schedule_worker"`          // "RUNNING" or "STOPPED"
+	TaskWorker             string `json:"task_worker"`              // "IDLE" or "BUSY" / "RUNNING"
+	LastDataSync           string `json:"last_data_sync"`           // "YYYY-MM-DD HH:MM" or "never"
+	LastInvestmentResearch string `json:"last_investment_research"` // "YYYY-MM-DD HH:MM" or "never"
+	PendingTasks           int    `json:"pending_tasks"`            // e.g. 0
+	NextScheduledRun       string `json:"next_scheduled_run"`       // "YYYY-MM-DD HH:MM" or "none"
+}
+
 // Manager coordinates all AIA background workers (Schedule Worker and Task Worker).
 type Manager struct {
 	cfg            WorkerConfig
+	db             *sqlite.DB
 	scheduleSvc    *scheduleService.Service
 	taskSvc        *taskService.Service
 	invSvc         *invService.Service
@@ -79,6 +95,7 @@ type Manager struct {
 // NewManager creates a new background worker runtime manager.
 func NewManager(
 	cfg WorkerConfig,
+	db *sqlite.DB,
 	schedSvc *scheduleService.Service,
 	taskSvc *taskService.Service,
 	invSvc *invService.Service,
@@ -100,6 +117,7 @@ func NewManager(
 
 	m := &Manager{
 		cfg:          cfg,
+		db:           db,
 		scheduleSvc:  schedSvc,
 		taskSvc:      taskSvc,
 		invSvc:       invSvc,
@@ -223,3 +241,100 @@ func (m *Manager) DispatchDue(ctx context.Context) (int, error) {
 func (m *Manager) ProcessReady(ctx context.Context) (int, error) {
 	return m.taskWorker.processPendingTasks(ctx)
 }
+
+// GetActivityMonitor provides real-time status and operational timestamps for the AIA Activity Monitor.
+func (m *Manager) GetActivityMonitor(ctx context.Context) (*ActivityMonitorSnapshot, error) {
+	m.mu.RLock()
+	isRunning := m.stats.Running
+	m.mu.RUnlock()
+
+	snap := &ActivityMonitorSnapshot{
+		Runtime:                "STOPPED",
+		ScheduleWorker:         "STOPPED",
+		TaskWorker:             "STOPPED",
+		LastDataSync:           "never",
+		LastInvestmentResearch: "never",
+		PendingTasks:           0,
+		NextScheduledRun:       "none",
+	}
+
+	if isRunning {
+		snap.Runtime = "RUNNING"
+		snap.ScheduleWorker = "RUNNING"
+		if m.taskWorker != nil && m.taskWorker.ActiveTasks() > 0 {
+			snap.TaskWorker = "BUSY"
+		} else {
+			snap.TaskWorker = "IDLE"
+		}
+	} else {
+		// Probe if local background daemon is listening on port 7777
+		port := "7777"
+		if envP := os.Getenv("AIA_PORT"); envP != "" {
+			port = envP
+		}
+		host := "127.0.0.1"
+		if envH := os.Getenv("AIA_HOST"); envH != "" {
+			host = envH
+		}
+		client := &http.Client{Timeout: 300 * time.Millisecond}
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://%s:%s/api/v1/system/health", host, port), nil)
+		if resp, err := client.Do(req); err == nil && resp.StatusCode == http.StatusOK {
+			_ = resp.Body.Close()
+			snap.Runtime = "RUNNING"
+			snap.ScheduleWorker = "RUNNING"
+			snap.TaskWorker = "IDLE"
+		} else if m.db != nil && m.db.Ping(ctx) == nil {
+			snap.Runtime = "IDLE"
+			snap.ScheduleWorker = "IDLE"
+			snap.TaskWorker = "IDLE"
+		}
+	}
+
+	if m.db == nil {
+		return snap, nil
+	}
+
+	rawDB := m.db.RawDB()
+
+	// Query Last Data Sync (TWSE market bar or raw documents)
+	var lastDataSyncRaw sql.NullString
+	_ = rawDB.QueryRowContext(ctx, `SELECT MAX(fetched_at) FROM investment_market_data`).Scan(&lastDataSyncRaw)
+	if !lastDataSyncRaw.Valid || lastDataSyncRaw.String == "" {
+		_ = rawDB.QueryRowContext(ctx, `SELECT MAX(fetched_at) FROM investment_raw_documents`).Scan(&lastDataSyncRaw)
+	}
+	if lastDataSyncRaw.Valid && lastDataSyncRaw.String != "" {
+		if t, err := time.Parse(time.RFC3339, lastDataSyncRaw.String); err == nil {
+			snap.LastDataSync = t.Local().Format("2006-01-02 15:04")
+		}
+	}
+
+	// Query Last Investment Research
+	var lastResearchRaw sql.NullString
+	_ = rawDB.QueryRowContext(ctx, `SELECT MAX(created_at) FROM investment_decisions`).Scan(&lastResearchRaw)
+	if lastResearchRaw.Valid && lastResearchRaw.String != "" {
+		if t, err := time.Parse(time.RFC3339, lastResearchRaw.String); err == nil {
+			snap.LastInvestmentResearch = t.Local().Format("2006-01-02 15:04")
+		}
+	}
+
+	// Query Pending Tasks
+	var pendingCount int
+	_ = rawDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE status = 'READY'`).Scan(&pendingCount)
+	snap.PendingTasks = pendingCount
+
+	// Query Next Scheduled Run
+	var nextRunRaw sql.NullString
+	_ = rawDB.QueryRowContext(ctx, `
+		SELECT next_run_at FROM schedules
+		WHERE is_active = 1
+		ORDER BY next_run_at ASC LIMIT 1
+	`).Scan(&nextRunRaw)
+	if nextRunRaw.Valid && nextRunRaw.String != "" {
+		if t, err := time.Parse(time.RFC3339, nextRunRaw.String); err == nil {
+			snap.NextScheduledRun = t.Local().Format("2006-01-02 15:04")
+		}
+	}
+
+	return snap, nil
+}
+

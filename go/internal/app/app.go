@@ -141,6 +141,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 
 	workerMgr := worker.NewManager(
 		worker.DefaultWorkerConfig(),
+		db,
 		schedSvc,
 		taskSvc,
 		invSvc,

@@ -94,6 +94,57 @@
           </div>
         </div>
 
+        <!-- AIA Activity Monitor Card -->
+        <div class="card mb-4" style="margin-top: 1.5rem; margin-bottom: 1.5rem;">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 1.25rem;">📊</span>
+              <h3 style="margin: 0;">AIA Activity Monitor</h3>
+            </div>
+            <span class="badge badge-success" id="activity-runtime-badge">RUNNING</span>
+          </div>
+          <div class="table-responsive">
+            <table class="table" style="margin-bottom: 0;">
+              <thead>
+                <tr>
+                  <th style="width: 45%;">項目</th>
+                  <th style="width: 55%;">狀態 / 時間</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Runtime</strong></td>
+                  <td><span class="badge badge-success" id="act-runtime">RUNNING</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Schedule Worker</strong></td>
+                  <td><span class="badge badge-primary" id="act-schedule-worker">RUNNING</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Task Worker</strong></td>
+                  <td><span class="badge badge-subtle" id="act-task-worker">IDLE</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Last Data Sync</strong></td>
+                  <td id="act-last-data-sync" style="font-family: monospace; font-size: 0.95rem;">-</td>
+                </tr>
+                <tr>
+                  <td><strong>Last Investment Research</strong></td>
+                  <td id="act-last-research" style="font-family: monospace; font-size: 0.95rem;">-</td>
+                </tr>
+                <tr>
+                  <td><strong>Pending Tasks</strong></td>
+                  <td><span class="badge badge-neutral" id="act-pending-tasks">0</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Next Scheduled Run</strong></td>
+                  <td id="act-next-run" style="font-family: monospace; font-size: 0.95rem; color: #f59e0b;">-</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="dashboard-grid">
           <div class="card">
             <div class="card-header">

@@ -114,9 +114,49 @@ var workerProcessCmd = &cobra.Command{
 	},
 }
 
+var monitorCmd = &cobra.Command{
+	Use:   "monitor",
+	Short: "Show real-time AIA Activity Monitor dashboard",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runActivityMonitor(cmd)
+	},
+}
+
+func runActivityMonitor(cmd *cobra.Command) error {
+	if appInst.WorkerMgr == nil {
+		return fmt.Errorf("worker manager not initialized")
+	}
+	ctx := context.Background()
+	snap, err := appInst.WorkerMgr.GetActivityMonitor(ctx)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("=== AIA Activity Monitor ===")
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "項目\t狀態 / 時間")
+	fmt.Fprintln(w, "----\t-----------")
+	fmt.Fprintf(w, "Runtime\t%s\n", snap.Runtime)
+	fmt.Fprintf(w, "Schedule Worker\t%s\n", snap.ScheduleWorker)
+	fmt.Fprintf(w, "Task Worker\t%s\n", snap.TaskWorker)
+	fmt.Fprintf(w, "Last Data Sync\t%s\n", snap.LastDataSync)
+	fmt.Fprintf(w, "Last Investment Research\t%s\n", snap.LastInvestmentResearch)
+	fmt.Fprintf(w, "Pending Tasks\t%d\n", snap.PendingTasks)
+	fmt.Fprintf(w, "Next Scheduled Run\t%s\n", snap.NextScheduledRun)
+	w.Flush()
+	return nil
+}
+
 func init() {
 	workerCmd.AddCommand(workerStatusCmd)
 	workerCmd.AddCommand(workerRunOnceCmd)
 	workerCmd.AddCommand(workerDispatchCmd)
 	workerCmd.AddCommand(workerProcessCmd)
+	workerCmd.AddCommand(&cobra.Command{
+		Use:   "monitor",
+		Short: "Show real-time AIA Activity Monitor dashboard",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runActivityMonitor(cmd)
+		},
+	})
 }

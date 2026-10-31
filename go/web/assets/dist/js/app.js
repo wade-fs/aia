@@ -261,6 +261,43 @@ const app = {
       document.getElementById('sys-provider').textContent = sys.provider.name;
       document.getElementById('sys-provider-status').textContent = sys.provider.status;
 
+      // Activity Monitor
+      try {
+        const act = await this.apiCall('/api/v1/system/activity');
+        if (act) {
+          const runBadge = document.getElementById('activity-runtime-badge');
+          if (runBadge) {
+            runBadge.textContent = act.runtime;
+            runBadge.className = act.runtime === 'RUNNING' ? 'badge badge-success' : 'badge badge-neutral';
+          }
+          const actRuntime = document.getElementById('act-runtime');
+          if (actRuntime) {
+            actRuntime.textContent = act.runtime;
+            actRuntime.className = act.runtime === 'RUNNING' ? 'badge badge-success' : 'badge badge-neutral';
+          }
+          const schedWorker = document.getElementById('act-schedule-worker');
+          if (schedWorker) {
+            schedWorker.textContent = act.schedule_worker;
+            schedWorker.className = act.schedule_worker === 'RUNNING' ? 'badge badge-primary' : 'badge badge-neutral';
+          }
+          const taskWorker = document.getElementById('act-task-worker');
+          if (taskWorker) {
+            taskWorker.textContent = act.task_worker;
+            taskWorker.className = (act.task_worker === 'BUSY' || act.task_worker === 'RUNNING') ? 'badge badge-warning' : 'badge badge-subtle';
+          }
+          const lastSync = document.getElementById('act-last-data-sync');
+          if (lastSync) lastSync.textContent = act.last_data_sync;
+          const lastRes = document.getElementById('act-last-research');
+          if (lastRes) lastRes.textContent = act.last_investment_research;
+          const pendingEl = document.getElementById('act-pending-tasks');
+          if (pendingEl) pendingEl.textContent = act.pending_tasks;
+          const nextRun = document.getElementById('act-next-run');
+          if (nextRun) nextRun.textContent = act.next_scheduled_run;
+        }
+      } catch (e) {
+        console.warn('Activity monitor load failed', e);
+      }
+
       // Pending count
       const pending = await this.apiCall('/api/v1/pending');
       document.getElementById('stat-pending-count').textContent = pending ? pending.total_count : 0;

@@ -299,3 +299,30 @@ func TestRuntimeWorker_MaterialityGatedInvestmentResearch(t *testing.T) {
 	}
 	_ = summary
 }
+
+func TestActivityMonitor_EndpointAndSnapshot(t *testing.T) {
+	application, _ := createTestApp(t)
+	defer application.Close()
+
+	ctx := context.Background()
+	// Start worker loop
+	_ = application.WorkerMgr.Start(ctx)
+
+	// Fetch via Go API
+	snap, err := application.WorkerMgr.GetActivityMonitor(ctx)
+	if err != nil {
+		t.Fatalf("failed to get activity monitor: %v", err)
+	}
+	if snap.Runtime != "RUNNING" {
+		t.Errorf("expected Runtime RUNNING, got %s", snap.Runtime)
+	}
+	if snap.ScheduleWorker != "RUNNING" {
+		t.Errorf("expected ScheduleWorker RUNNING, got %s", snap.ScheduleWorker)
+	}
+	if snap.TaskWorker != "IDLE" {
+		t.Errorf("expected TaskWorker IDLE, got %s", snap.TaskWorker)
+	}
+	if snap.NextScheduledRun == "none" || snap.NextScheduledRun == "" {
+		t.Errorf("expected valid NextScheduledRun from seeded schedules, got %s", snap.NextScheduledRun)
+	}
+}

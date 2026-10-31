@@ -104,7 +104,7 @@ func (h *Host) AuthMiddleware(next http.Handler) http.Handler {
 		path := r.URL.Path
 
 		// Allow public API endpoints
-		if path == "/api/v1/auth/login" || path == "/api/v1/system/health" || !strings.HasPrefix(path, "/api/v1") {
+		if path == "/api/v1/auth/login" || path == "/api/v1/system/health" || path == "/api/v1/system/activity" || !strings.HasPrefix(path, "/api/v1") {
 			next.ServeHTTP(w, r)
 			return
 		}

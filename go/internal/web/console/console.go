@@ -39,9 +39,10 @@ func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
 	mux.HandleFunc("/api/v1/auth/logout", s.handleAuthLogout)
 	mux.HandleFunc("/api/v1/auth/session", s.handleAuthSession)
 
-	// 2. System Status
+	// 2. System Status & Activity Monitor
 	mux.HandleFunc("/api/v1/system/status", s.handleSystemStatus)
 	mux.HandleFunc("/api/v1/system/health", s.handleSystemHealth)
+	mux.HandleFunc("/api/v1/system/activity", s.handleActivityMonitor)
 
 	// 3. Tasks
 	mux.HandleFunc("/api/v1/tasks", s.handleTasks)
@@ -165,8 +166,10 @@ func (s *ConsoleServices) handleSystemStatus(w http.ResponseWriter, r *http.Requ
 	schemaVer, _ := s.DB.SchemaVersion(ctx)
 
 	var workerStatus any
+	var activitySnap any
 	if s.WorkerMgr != nil {
 		workerStatus = s.WorkerMgr.Status()
+		activitySnap, _ = s.WorkerMgr.GetActivityMonitor(ctx)
 	}
 
 	host.WriteJSON(w, http.StatusOK, map[string]any{
@@ -174,11 +177,27 @@ func (s *ConsoleServices) handleSystemStatus(w http.ResponseWriter, r *http.Requ
 		"database":       dbStatus,
 		"schema_version": schemaVer,
 		"workers":        workerStatus,
+		"activity":       activitySnap,
 		"provider": map[string]string{
 			"name":   provName,
 			"status": provStatus,
 		},
 	}, reqID)
+}
+
+func (s *ConsoleServices) handleActivityMonitor(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if s.WorkerMgr == nil {
+		host.WriteError(w, http.StatusInternalServerError, "WORKER_UNAVAILABLE", "worker manager not initialized", reqID)
+		return
+	}
+	snap, err := s.WorkerMgr.GetActivityMonitor(ctx)
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "MONITOR_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, snap, reqID)
 }
 
 // -------------------------------------------------------------

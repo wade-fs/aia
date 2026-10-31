@@ -36,6 +36,18 @@ Investment Agent 是 AIA Personal Agent 的第一個實際應用領域。
 
 本系統不假設能取得法人內部資料、未公開資訊或特殊市場情報。
 
+## 1.1 階段性實作範疇與版本完成度 (Implementation Phases)
+
+配合系統架構驗證進度，AIA Investment Agent 採分期實作與驗證：
+
+| 階段與模組 | 範圍與能力 | 當前狀態 | 說明 |
+|---|---|---|---|
+| **P3 Investment 核心** | 投資組合 Profile/Snapshot 管理、資金與部位上限驗證、Go 建議股數計算、交易手續費與稅費計算（`CostConfig`）、Trade Proposal 產生與駁回審計 | **IMPLEMENTED** | 已由 Go 核心服務與 Web API/UI 完整交付，通過單元與整合測試 |
+| **P6 Investment Web UI** | 投資組合快照檢視、持倉標的盈虧狀態、交易決策與提案列表、駁回原因檢視 | **IMPLEMENTED** | 已整合於原生 Embedded Web Console，透過 Agent 專屬隔離路由提供 |
+| **P4 實際資料抓取** | 台灣證券交易所 (TWSE)、櫃買中心 (TPEx)、公開資訊觀測站 (MOPS)、各大財經新聞與公告爬取整合 | **PLANNED** | 下一階段實作 |
+| **P5 預測與評估** | 歷史判斷追蹤、事後收益與風險回測、預測校準評估、策略自我改善反思實驗 | **PLANNED** | 下一階段實作 |
+| **CLI-INV 頂層命令** | 頂層終端機命令 `aia investment` | **PLANNED** | 下一階段實作（目前透過 Go Service 與 Web 介面操作） |
+
 ---
 
 # 2. 設計原則
@@ -250,6 +262,31 @@ AIA 在投資決策與提案產生過程中，嚴格落實「agy 負責研究與
    - **超限自動調整或駁回**：超出限制時由 Go 負責向下調整建議股數或直接駁回，並完整記錄駁回原因至 `investment_decision_rejections` 資料表。
 
 **核心原則**：嚴禁讓 LLM 自己算完金額就直接交付結果，LLM 的輸出絕不允許未經 Go 驗證就直接成為有效交易提案。
+
+### 4.1.2 交易成本計算規則與可配置性 (Transaction Cost Configurability)
+
+為了確保投資提案之財務數字精確且具法律與合規一致性，交易費用、稅額與淨收支一律由 Go Runtime 程式碼實作（位於 `internal/domain/investment/calculator.go`），LLM 不得介入計算。
+
+1. **現行實作之預設計算參數（Default Parameters）**：
+   目前實作採用台灣證券市場一般現股交易標準費率作為系統預設值：
+   - **標準券商手續費率 (`FeeRate`)**：`0.001425`（即 `0.1425%`，買入與賣出雙向收取）。
+   - **電子下單折扣率 (`FeeDiscountRate`)**：預設 `1.0`（無折扣）。
+   - **最低手續費門檻 (`MinFee`)**：預設 `20 TWD`（未滿 20 元以 20 元計收）。
+   - **證券交易稅率 (`TaxRate`)**：預設 `0.003`（即 `0.3%`，僅於賣出時課徵，買入為 0）。
+
+2. **參數可配置性設計（Configurability）**：
+   上述費率僅為當前預設基準，絕非不可修改之硬編碼商業限制。為因應日後市場制度變革、券商個別費率折讓或跨商品交易，Go Runtime 提供 `CostConfig` 與 Profile 擴充配置機制：
+   - **券商專屬折讓配置**：支援於 Portfolio Profile 的 `configuration_json` 中定義專屬折扣（例如各大券商常見之 6 折 `0.6`、2.8 折 `0.28` 等），計算公式為 `floor(gross * FeeRate * FeeDiscountRate)`。
+   - **活動最低手續費**：支援個別券商活動之低門檻手續費設定（例如 NT$1 元優惠）。
+   - **不同商品與法規稅率調整**：支援特定證券商品稅率客製化（例如 ETF / 指數股票型基金法定證券交易稅為 `0.1%`、現股當日沖銷法定降稅優惠為 `0.15%`、或未來主管機關修訂稅率）。
+   - **多市場/多資產擴充介面**：架構上保留 `CostConfig` 注入介面，日後擴展美股（SEC Fee、TAF、零手續費）或其他海外資產時，得動態替換計算策略，避免文件或程式碼產生過時死規則。
+
+3. **計算公式與整數截斷規範**：
+   - **成交名目金額 (Gross Amount)**：`round(quantity * price)`
+   - **券商手續費 (Broker Fee)**：`max(MinFee, floor(GrossAmount * FeeRate * FeeDiscountRate))`
+   - **證券交易稅 (Transaction Tax)**：買入為 `0`；賣出為 `floor(GrossAmount * TaxRate)`
+   - **買入總支出 (Total Buy Cost)**：`GrossAmount + BrokerFee`
+   - **賣出淨現金收益 (Net Sell Proceeds)**：`GrossAmount - BrokerFee - TransactionTax`
 
 ## 4.2 重要架構區分
 

@@ -248,7 +248,7 @@ AIA 必須檢查依賴關係，禁止循環依賴。
 - `READY`
 - `RUNNING`
 - `WAITING_FOR_AUTH`
-- `WAITING_FOR_APPROVAL`
+- `WAITING_APPROVAL`
 - `WAITING_FOR_INPUT`
 - `VALIDATING`
 - `RETRYING`
@@ -584,7 +584,7 @@ Headless Mode 無法直接提供一般互動式核准流程。
 因此 AIA 的核准流程為：
 
 1. 偵測被拒絕的工具操作。
-2. 將 Task 設為 `WAITING_FOR_APPROVAL`。
+2. 將 Task 設為 `WAITING_APPROVAL`。
 3. 顯示操作內容及風險。
 4. 等待 OWNER 決定。
 5. 若核准，重新建立符合授權範圍的 Execution。

@@ -363,7 +363,7 @@ AIA 已定義的 Task 狀態如下：
 | CREATED | Task 已建立，尚未進入可執行狀態 |
 | READY | 已具備執行條件 |
 | RUNNING | 正在執行 |
-| WAITING_FOR_APPROVAL | 等待使用者核准 |
+| WAITING_APPROVAL | 等待使用者核准 |
 | WAITING_FOR_AUTH | 等待使用者完成外部身分驗證 |
 | RETRY_WAIT | 等待重試 |
 | COMPLETED | 工作完成並通過必要驗證 |
@@ -761,7 +761,25 @@ Go Runtime：
 
 AI 不得直接決定或繞過 Go 的資金限制。
 
-## 13.3 第一階段限制
+## 13.3 交易成本計算與可配置性 (Transaction Cost Configurability)
+
+為了確保投資提案之財務數字精確且具法規與券商一致性，交易費用、稅額與淨收支一律由 Go Runtime 程式碼實作，LLM 不得介入計算。
+
+1. **現行實作之預設計算參數（Default Parameters）**：
+   目前實作採用台灣證券市場一般現股交易標準費率作為系統預設值：
+   - **標準券商手續費率 (`FeeRate`)**：`0.1425%`（買賣雙向）。
+   - **電子下單折扣率 (`FeeDiscountRate`)**：預設 `1.0`（無折扣）。
+   - **最低手續費門檻 (`MinFee`)**：預設 `NT$20`（未滿 20 元以 20 元計收）。
+   - **證券交易稅率 (`TaxRate`)**：預設 `0.3%`（僅於賣出時課徵，買入為 0）。
+
+2. **參數可配置性（Configurability）**：
+   上述費率僅為當前預設基準，絕非不可修改之硬編碼限制。為因應日後市場制度變更、券商個別費率折讓或跨商品交易，Go Runtime 定義 `CostConfig` 與 Profile 擴充配置機制：
+   - **券商專屬折讓**：支援於 Portfolio Profile 中定義專屬折扣（如 6 折 `0.6`、2.8 折 `0.28` 等）。
+   - **活動最低手續費**：支援個別券商活動之低門檻手續費設定（如 NT$1 元優惠）。
+   - **不同商品與法規稅率調整**：支援特定證券商品稅率客製化（如 ETF 證交稅為 `0.1%`、現股當沖降稅為 `0.15%`、或未來主管機關修訂稅率）。
+   - **多市場/多資產擴充介面**：架構上保留 `CostConfig` 注入介面，日後擴展美股或其他海外市場時動態套用，避免文件或程式碼產生過時死規則。
+
+## 13.4 第一階段限制
 
 - 不自動下單。
 - 不持有使用者資金。
@@ -837,7 +855,7 @@ Policy 的目的：
 
 目前 Task 狀態包含：
 
-`WAITING_FOR_APPROVAL`
+`WAITING_APPROVAL`
 
 這代表 Task 可以進入等待人工核准的狀態。
 
@@ -933,29 +951,31 @@ agy OAuth Token 由 agy 自行管理；AIA 不讀取、不複製、不解析其 
 
 ---
 
-# 19. 目前 CLI 功能與未來規劃對照
+# 19. 目前系統功能實作與階段規劃對照 (Version Maturity Baseline)
 
-| 功能 | 目前狀態 |
-|---|---|
-| CLI 基本入口 | IMPLEMENTED |
-| Server Start | IMPLEMENTED |
-| Embedded Web 啟動 | IMPLEMENTED |
-| 一次性登入 Token | IMPLEMENTED |
-| Personal Agent Chat | IMPLEMENTED |
-| Task Create / List / Show | IMPLEMENTED |
-| Task Run / Resume / Cancel | IMPLEMENTED |
-| Agent List / Show / Enable / Disable | IMPLEMENTED |
-| Execution Show / Events | IMPLEMENTED |
-| Memory List / Search / Candidate | IMPLEMENTED |
-| Project Create / List / Show / Archive | IMPLEMENTED |
-| Doctor / Status / Version | IMPLEMENTED |
-| Schedule 管理 CLI | PLANNED |
-| Investment 管理 CLI | PLANNED |
-| 完整 Web Console | 依模組逐步完成 |
-| 多使用者 | NOT IN V1 |
-| 遠端 Web 管理 | NOT IN V1 |
-| 動態 Go Plugin | NOT IN V1 |
-| 自動金融交易 | NOT IN V1 |
+目前系統已完成 **P1–P3、P6** 核心與 Web 基準，並明確標記當前完成度與下一階段（P4/P5、排程與專屬 CLI）規劃：
+
+| 模組代號 | 功能項目 | 目前狀態 | 實作現況說明 |
+|---|---|---|---|
+| CLI | CLI 基本入口與工具 | IMPLEMENTED | `aia --help`, `doctor`, `status`, `version` |
+| CLI | Personal Agent Chat | IMPLEMENTED | `aia chat`（對話、意圖識別與 Task 派發） |
+| CLI | Task 管理 | IMPLEMENTED | `aia task create/list/show/run/resume/cancel` |
+| CLI | Agent 管理 | IMPLEMENTED | `aia agent list/show/enable/disable` |
+| CLI | Execution 追蹤 | IMPLEMENTED | `aia execution show/events` |
+| CLI | Memory 管理 | IMPLEMENTED | `aia memory list/search/candidate` |
+| CLI | Project 管理 | IMPLEMENTED | `aia project create/list/show/archive` |
+| **P1** | Embedded Web 基礎設施 | IMPLEMENTED | Web Host、一次性 Token 啟動產生與單次兌換、Server-Side Session、REST/SSE API、CSRF/Origin 安全中介軟體 |
+| **P2** | Global Web Console | IMPLEMENTED | Dashboard 系統摘要、Task 列表與生命週期操作、Agent 狀態檢視、Memory 檢視與 Candidate 審批、待處理事項（Pending Review）、Audit Trail 稽核軌跡 |
+| **P3** | Investment 核心能力 | IMPLEMENTED | 投資組合 Profile/Snapshot 管理、資金與持倉比例限制檢查、Go 建議股數計算、交易手續費與稅費計算（`CostConfig` 可配置）、Trade Proposal 產生與駁回審計 |
+| **P6** | Agent UI 模組 | IMPLEMENTED | 原生前端（HTML/CSS/JS）、Agent 專屬 mux 隔離路由、Portfolio 持倉檢視、Decision / Trade Proposal 檢視 |
+| **P4** | 實際資料抓取 | PLANNED | 下一階段實作：TWSE / TPEx 行情爬取、重大訊息、公開資訊觀測站 (MOPS) 與財經新聞整合 |
+| **P5** | 預測與評估 | PLANNED | 下一階段實作：歷史預測事後追蹤、報酬與風險校準回測、策略自我改善反思實驗 |
+| SCHED | Schedule 管理 CLI 與 Cron | PLANNED | 下一階段實作：`aia schedule` CLI、Cron 自動定時週期觸發與 Misfire Policy（目前支援 Task 相依依賴與佇列執行） |
+| CLI-INV | Investment 管理 CLI | PLANNED | 下一階段實作：`aia investment` CLI（目前核心功能由 Go Service 及 Web UI 提供） |
+| CORE | 多使用者隔離 | NOT IN V1 | 單機單使用者 Personal Agent 架構 |
+| CORE | 遠端 Web 暴露管理 | NOT IN V1 | 預設僅監聽 127.0.0.1 本機安全防護 |
+| CORE | 動態 Go Plugin | NOT IN V1 | 採用標準 Go 編譯整合 |
+| CORE | 自動券商下單交易 | NOT IN V1 | 第一階段堅守不自動交易、不持有憑證原則 |
 
 ---
 

@@ -234,7 +234,7 @@ Real Harness 測試必須明確記錄 agy 版本、測試環境及通過範圍�
 | RC-T03 | Retry | 正常 |
 | RC-T04 | Retry Limit | FAILED |
 | RC-T05 | Auth Failure | WAITING_FOR_AUTH |
-| RC-T06 | Approval Pending | WAITING_FOR_APPROVAL |
+| RC-T06 | Approval Pending | WAITING_APPROVAL |
 | RC-T07 | Dependency Pending | WAITING_FOR_DEPENDENCY |
 | RC-T08 | SUCCESS 未更新 Task | 進入 Validation |
 | RC-T09 | 重啟後重複恢復 | 不重複執行成功結果 |

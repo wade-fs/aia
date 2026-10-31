@@ -55,6 +55,21 @@ AIA Runtime 是整個系統的核心，負責：
 
 Go 版本以專案建置設定及 CI 實際驗證版本為準，不得將開發機版本視為所有部署環境的最低版本。
 
+## 2.1 實作範疇與版本完成度矩陣 (Version Maturity Baseline)
+
+AIA 目前處於 **v1.0 (Core & Web Baseline)** 實作交付階段，嚴格區分本輪已交付範圍與下一階段規劃：
+
+| 模組代號 | 範圍與能力 | 實作狀態 | 說明 |
+|---|---|---|---|
+| **P1** | Web 基礎設施 | **IMPLEMENTED** | Web Host、一次性 Token 登入兌換、Server-Side Session、HTTP API、SSE 事件串流、安全機制（CSRF、Origin、Host Header） |
+| **P2** | Global Console | **IMPLEMENTED** | Dashboard、Task 建立/執行/取消/恢復、Agent 狀態檢視與啟用/停用、Memory 檢視與 Candidate、待處理事項（Pending Review）、Audit Trail |
+| **P3** | Investment 核心 | **IMPLEMENTED** | 投資組合 Profile/Snapshot、資金限制檢查、Go 建議股數計算、交易手續費與稅費計算（`CostConfig`）、Trade Proposal 產生與超限駁回 |
+| **P6** | Agent UI 模組 | **IMPLEMENTED** | 原生前端（HTML/CSS/JS 無外部打包）、Agent 專屬 mux 隔離路由、Portfolio 檢視、Decision / Proposal 檢視 |
+| **P4** | 實際資料抓取 | **PLANNED** | 下一階段實作：TWSE / TPEx 公開行情、重大訊息、公告觀測站與財經新聞爬取 |
+| **P5** | 預測與評估 | **PLANNED** | 下一階段實作：預測校準評估、歷史事後驗證、策略收益歸因與自我改善實驗 |
+| **SCHED** | 定時排程 Cron | **PLANNED** | 下一階段實作：Cron 自動週期觸發與 Misfire Policy（目前支援 Task 相依依賴與佇列執行） |
+| **CLI-INV** | 頂層投資 CLI | **PLANNED** | 下一階段實作：`aia investment` 命令列介面（目前由 Go 核心服務與 Web API/UI 提供） |
+
 # 3. Repository Structure
 
 建議目錄：
@@ -254,7 +269,7 @@ CREATED
 READY
 RUNNING
 WAITING_FOR_DEPENDENCY
-WAITING_FOR_APPROVAL
+WAITING_APPROVAL
 WAITING_FOR_AUTH
 RETRYING
 VALIDATING
@@ -327,7 +342,7 @@ type RecoveryManager interface {
 | SUCCESS 未 Validation | 回到 VALIDATING |
 | Auth Failure | WAITING_FOR_AUTH |
 | Retry Limit | FAILED |
-| Approval Required | WAITING_FOR_APPROVAL |
+| Approval Required | WAITING_APPROVAL |
 | Dependency Pending | WAITING_FOR_DEPENDENCY |
 | Cancel Requested | 執行取消流程 |
 
@@ -756,7 +771,9 @@ Go Runtime 與 AI Provider (agy) 之間具有不可妥協的責任邊界：
   1. 接收並驗證股票代號（Symbol/Exchange）是否存在且活躍。
   2. 驗證操作方向（BUY / SELL / HOLD）及信心度閾值。
   3. 依市場規則（如台股 1,000 股整股或零股）精確計算建議股數。
-  4. 精確計算券商手續費（0.1425%，最低 NT$20，含折扣）與證券交易稅（賣出 0.3%），估算總交易成本。
+  4. 精確計算交易成本與稅費：Go 依交易方向、股數與估計市價計算手續費與證交稅。
+     - **預設計算參數（Default Parameters）**：以現行台灣證券市場常態為基準（券商手續費率 `0.1425%`、最低手續費 `NT$20`、賣出證券交易稅率 `0.3%`）。
+     - **參數可配置性（Configurability）**：Runtime 定義 `CostConfig` 結構（包含 `FeeRate`、`FeeDiscountRate`、`MinFee`、`TaxRate`），支援從投資組合設定檔（Profile `configuration_json`）或執行環境動態載入。允許彈性設定券商電子下單折讓率（如 6 折、2.8 折）、不同商品稅率（如 ETF 證交稅 0.1%、當沖降稅 0.15%）或未來法定費率調整，避免將常數硬編碼為不可變過時規則。
   5. 嚴格檢查可用現金（Available Cash）、投資組合資金上限（Capital Limit）、單一持倉比例上限（`max_position_pct`）及最低現金儲備比率（`min_cash_pct`）。
   6. 產生最終正式 Trade Proposal；超出限制時由 Go 負責拒絕或調整建議股數，並記錄駁回原因至 `investment_decision_rejections`。
   7. **嚴禁將 LLM 的直接輸出未經 Go 計算與限制驗證就作為有效交易提案交付。**

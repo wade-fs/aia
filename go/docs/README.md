@@ -301,7 +301,7 @@ Task states:
 - `CREATED`
 - `READY`
 - `RUNNING`
-- `WAITING_FOR_APPROVAL`
+- `WAITING_APPROVAL`
 - `WAITING_FOR_AUTH`
 - `RETRY_WAIT`
 - `COMPLETED`
@@ -409,4 +409,42 @@ Review candidates before treating their contents as established long-term inform
 
 ---
 
-##
+## 14. Investment Core & Cost Calculation
+
+AIA enforces a strict architectural boundary between AI analysis and Go Runtime financial execution:
+- **agy / LLM**: Responsible for market research, news synthesis, reasoning, and proposing trade ideas (BUY / SELL / HOLD).
+- **Go Runtime**: Validates symbols, calculates exact share sizing (1,000 shares lot or odd lot), checks available cash and portfolio capital limits, computes transaction costs and taxes, and produces formal Trade Proposals. LLM output is never allowed to directly become an executable trade.
+
+### Transaction Cost Parameters & Configurability
+
+Transaction costs and taxes are calculated natively in Go (`internal/domain/investment/calculator.go`):
+
+1. **Default Parameters (Taiwan Equities)**:
+   - **Broker Fee Rate (`FeeRate`)**: `0.1425%` (0.001425) for both BUY and SELL.
+   - **Broker Discount (`FeeDiscountRate`)**: Default `1.0` (no discount).
+   - **Minimum Broker Fee (`MinFee`)**: Default `NT$20`.
+   - **Transaction Tax (`TaxRate`)**: `0.3%` (0.003) on SELL; 0 on BUY.
+
+2. **Configurability**:
+   These rates are not static or hardcoded business limits. The Go Runtime utilizes a `CostConfig` structure that can be customized per portfolio profile (via `configuration_json`) or runtime configuration:
+   - **Broker Discount Rates**: Supports customized broker electronic discounts (e.g. 60% of base rate `0.6`, 28% `0.28`).
+   - **Special Minimum Fees**: Supports promotional minimum fees (e.g. NT$1).
+   - **Asset/Regulation Specific Tax Rates**: Supports ETF statutory tax rate (`0.1%`), day-trading tax concessions (`0.15%`), or future statutory adjustments.
+   - **Multi-market Extensibility**: Prepares the engine for US equities or foreign assets without breaking documentation or calculation rules.
+
+---
+
+## 15. Implementation & Version Maturity Baseline
+
+AIA is currently at **v1.0 (Core & Web Baseline)**. The system implementation baseline is categorized as follows:
+
+| Component | Scope | Implementation Status | Notes |
+|---|---|---|---|
+| **P1 Web Infrastructure** | Web Host, Session, API, SSE, Security | **IMPLEMENTED** | Localhost-only (127.0.0.1), one-time bootstrap token, HttpOnly session cookie, CSRF/Origin protection |
+| **P2 Global Web Console** | Dashboard, Tasks, Agents, Memory, Pending Review, Audit | **IMPLEMENTED** | Native HTML/CSS/JS frontend embedded via `go:embed`, unified approval overview for Tasks and Memory Candidates |
+| **P3 Investment Core** | Portfolio Profile/Snapshot, Sizing, Limits, Cost Calculation, Proposals | **IMPLEMENTED** | Go calculation boundary, dynamic `CostConfig`, proposal rejection logging |
+| **P6 Agent Web UI** | Dedicated Agent UI & Namespaced Mux | **IMPLEMENTED** | Agent routing isolation (`/api/v1/agents/{id}/`), Investment portfolio and proposal UI |
+| **P4 Data Ingestion** | TWSE, TPEx, MOPS, Financial News Scraping | **PLANNED** | Scheduled for next implementation phase |
+| **P5 Prediction & Eval** | Forecast Calibration, Backtesting, Self-Improvement | **PLANNED** | Scheduled for next implementation phase |
+| **SCHED Automation** | Cron Scheduling & Misfire Policies | **PLANNED** | Scheduled for next implementation phase (Task dependency scheduling currently active) |
+| **CLI-INV Top-Level CLI** | `aia investment` CLI suite | **PLANNED** | Scheduled for next implementation phase (Currently fully operable via Go service and Web UI) |

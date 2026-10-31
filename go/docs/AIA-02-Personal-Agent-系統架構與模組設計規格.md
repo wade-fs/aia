@@ -704,7 +704,7 @@ AIA 不得等待一個不存在的互動式核准視窗。
 1. 記錄 Tool Denied Event。
 2. 停止後續不必要的工作。
 3. 標記 Execution 為 BLOCKED。
-4. Task 設為 WAITING_FOR_APPROVAL。
+4. Task 設為 WAITING_APPROVAL。
 5. 顯示工具、目標、參數及風險。
 6. OWNER 核准後建立新的 Execution。
 
@@ -726,7 +726,7 @@ READY
 RUNNING
    │
    ├── WAITING_FOR_AUTH
-   ├── WAITING_FOR_APPROVAL
+   ├── WAITING_APPROVAL
    ├── WAITING_FOR_INPUT
    ├── SUSPENDED
    ├── FAILED
@@ -744,7 +744,7 @@ VALIDATING
 - `CREATED → READY`：Plan 及必要欄位驗證成功。
 - `READY → RUNNING`：至少一個 Execution 已啟動。
 - `RUNNING → WAITING_FOR_AUTH`：確認需要重新登入。
-- `RUNNING → WAITING_FOR_APPROVAL`：需要 OWNER 核准。
+- `RUNNING → WAITING_APPROVAL`：需要 OWNER 核准。
 - `RUNNING → WAITING_FOR_INPUT`：缺少必要資訊。
 - `RUNNING → VALIDATING`：收到最終結果。
 - `VALIDATING → COMPLETED`：驗收通過。

@@ -92,6 +92,16 @@ const app = {
     const btnEval = document.getElementById('btn-eval-predictions');
     if (btnEval) btnEval.addEventListener('click', () => this.handleEvaluatePredictions());
 
+    // Investment Symbol Selectors Linkage
+    const selEval = document.getElementById('inv-eval-symbol');
+    if (selEval) {
+      selEval.addEventListener('change', (e) => this.onSymbolChange(e.target.value));
+    }
+    const selSync = document.getElementById('inv-sync-symbol');
+    if (selSync) {
+      selSync.addEventListener('change', (e) => this.onSymbolChange(e.target.value));
+    }
+
     // Audit Query
     document.getElementById('btn-refresh-audit').addEventListener('click', () => this.loadAudit());
   },
@@ -568,19 +578,9 @@ const app = {
         histTbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">無交易提案歷史</td></tr>';
       }
 
-      // Load MOPS documents
-      const docs = await this.apiCall('/api/v1/agents/investment/documents?limit=5');
-      const docsTbody = document.querySelector('#inv-docs-table tbody');
-      if (docs && docs.length > 0) {
-        docsTbody.innerHTML = docs.map(d => `
-          <tr>
-            <td><span class="badge badge-info">${d.content_type}</span></td>
-            <td><strong>${d.title}</strong></td>
-            <td><small class="text-muted">${d.summary || '-'}</small></td>
-            <td><small>${new Date(d.published_at).toLocaleDateString()}</small></td>
-          </tr>
-        `).join('');
-      }
+      // Auto-trigger symbol details & documents for currently selected symbol
+      const currentSym = document.getElementById('inv-eval-symbol')?.value || '2317';
+      await this.onSymbolChange(currentSym);
 
       // Load Predictions & Calibration
       const preds = await this.apiCall('/api/v1/agents/investment/predictions?limit=10');
@@ -617,6 +617,82 @@ const app = {
     }
   },
 
+  async onSymbolChange(symbol) {
+    if (!symbol) return;
+    const selEval = document.getElementById('inv-eval-symbol');
+    if (selEval && selEval.value !== symbol) selEval.value = symbol;
+    const selSync = document.getElementById('inv-sync-symbol');
+    if (selSync && selSync.value !== symbol) selSync.value = symbol;
+
+    const stockReasoning = {
+      '2317': 'AI 伺服器機櫃拉貨動能強勁，GB200 市佔領先，營收與毛利展望優於預期。',
+      '2330': '先進製程 2nm/3nm 產能供不應求，CoWoS 先進封裝持續擴產，維持產業主導地位。',
+      '2454': '天璣 9400 旗艦手機晶片出貨動能強勁，邊緣 AI 晶片市佔率擴大。',
+      '0050': '追蹤台灣前 50 大龍頭權值股，受惠科技權值股長期獲利增長與穩健配息。'
+    };
+
+    if (stockReasoning[symbol] && document.getElementById('inv-eval-reasoning')) {
+      document.getElementById('inv-eval-reasoning').value = stockReasoning[symbol];
+    }
+
+    try {
+      // 1. Fetch latest market data for this symbol
+      const data = await this.apiCall(`/api/v1/agents/investment/market-data?symbol=${symbol}&limit=1`);
+      if (data && data.length > 0) {
+        let b = {};
+        try { b = JSON.parse(data[0].value_json); } catch(e) {}
+        if (b.close) {
+          const priceInput = document.getElementById('inv-eval-price');
+          if (priceInput) priceInput.value = b.close;
+          const hintEl = document.getElementById('inv-eval-price-hint');
+          if (hintEl) hintEl.textContent = `(TWSE 最新收盤價: $${b.close})`;
+          const targetInput = document.getElementById('inv-eval-target');
+          if (targetInput) targetInput.value = Math.round(b.close * 1000);
+
+          // Update Market Data Summary Card
+          const sumBox = document.getElementById('inv-market-data-summary');
+          if (sumBox) {
+            sumBox.className = 'alert alert-info mb-3';
+            sumBox.innerHTML = `
+              <strong>📊 ${symbol} 最新盤後行情數據 (TWSE OpenAPI)</strong><br>
+              • 收盤價：<strong>$${b.close} TWD</strong> (漲跌：${b.change || 0} / ${b.change_percent ? b.change_percent.toFixed(2) : 0}%)<br>
+              • 成交量：${(b.volume || 0).toLocaleString()} 股 | 開高低：${b.open || '-'} / ${b.high || '-'} / ${b.low || '-'}<br>
+              • 資料有效時間：${new Date(data[0].effective_at).toLocaleString()}
+            `;
+            sumBox.classList.remove('hidden');
+          }
+        }
+      }
+
+      // 2. Fetch MOPS documents specifically for this symbol
+      await this.loadDocumentsForSymbol(symbol);
+    } catch (err) {
+      console.warn('Failed to load market data for', symbol, err);
+    }
+  },
+
+  async loadDocumentsForSymbol(symbol) {
+    const docsTbody = document.querySelector('#inv-docs-table tbody');
+    if (!docsTbody) return;
+    try {
+      const docs = await this.apiCall(`/api/v1/agents/investment/documents?symbol=${symbol}&limit=5`);
+      if (docs && docs.length > 0) {
+        docsTbody.innerHTML = docs.map(d => `
+          <tr>
+            <td><span class="badge badge-info">${d.content_type}</span></td>
+            <td><strong>${this.escape(d.title)}</strong></td>
+            <td><small class="text-muted">${this.escape(d.summary || '-')}</small></td>
+            <td><small>${new Date(d.published_at).toLocaleDateString()}</small></td>
+          </tr>
+        `).join('');
+      } else {
+        docsTbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">${symbol} 目前無公告紀錄，可點擊「同步最新行情」自動擷取</td></tr>`;
+      }
+    } catch (e) {
+      docsTbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">載入公告失敗</td></tr>`;
+    }
+  },
+
   async handleSyncMarketData() {
     const symbol = document.getElementById('inv-sync-symbol').value || '2330';
     const sumBox = document.getElementById('inv-market-data-summary');
@@ -640,7 +716,7 @@ const app = {
           • 已同步匯入 ${res.documents_cnt || 0} 則重大訊息與財經公告
         `;
       }
-      this.loadInvestment();
+      await this.onSymbolChange(symbol);
     } catch (err) {
       sumBox.className = 'alert alert-danger mb-3';
       sumBox.textContent = '同步失敗: ' + (err.message || err);

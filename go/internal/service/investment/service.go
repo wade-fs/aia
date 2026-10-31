@@ -492,7 +492,13 @@ func (s *Service) ListHistoricalData(ctx context.Context, symbol string, limit i
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.ListHistoricalMarketData(ctx, inst.ID, limit)
+	bars, err := s.repo.ListHistoricalMarketData(ctx, inst.ID, limit)
+	if err == nil && len(bars) == 0 {
+		if md, syncErr := s.SyncMarketData(ctx, symbol); syncErr == nil && md != nil {
+			bars = append(bars, *md)
+		}
+	}
+	return bars, err
 }
 
 func (s *Service) ListRawDocuments(ctx context.Context, symbol string, limit int) ([]investment.RawDocument, error) {
@@ -503,7 +509,11 @@ func (s *Service) ListRawDocuments(ctx context.Context, symbol string, limit int
 			instID = inst.ID
 		}
 	}
-	return s.repo.ListRawDocuments(ctx, instID, limit)
+	docs, err := s.repo.ListRawDocuments(ctx, instID, limit)
+	if err == nil && len(docs) == 0 && symbol != "" {
+		docs, _ = s.SyncAnnouncements(ctx, symbol)
+	}
+	return docs, err
 }
 
 // CreatePrediction records a verifiable forecast produced by agy (AIA-05 §16.1).

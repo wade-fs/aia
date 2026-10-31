@@ -53,15 +53,48 @@ func (d *DB) Migrate() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, err := d.db.ExecContext(ctx, migrations.InitialSchema)
-	if err != nil {
-		return fmt.Errorf("error executing initial migration: %w", err)
+	if _, err := d.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL
+)`); err != nil {
+		return fmt.Errorf("failed to ensure schema_migrations: %w", err)
 	}
 
-	// Record migration version 1
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, _ = d.db.ExecContext(ctx, "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (1, ?)", now)
+	for _, m := range migrations.All() {
+		var exists int
+		if err := d.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM schema_migrations WHERE version = ?", m.Version).Scan(&exists); err != nil {
+			return fmt.Errorf("failed to read migration state: %w", err)
+		}
+		if exists > 0 {
+			continue
+		}
+		err := d.WithTx(ctx, func(tx *sql.Tx) error {
+			if _, err := tx.ExecContext(ctx, m.SQL); err != nil {
+				return err
+			}
+			now := time.Now().UTC().Format(time.RFC3339)
+			_, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", m.Version, now)
+			return err
+		})
+		if err != nil {
+			return fmt.Errorf("error executing migration %d (%s): %w", m.Version, m.Name, err)
+		}
+	}
 	return nil
+}
+
+// SchemaVersion returns the highest applied migration version.
+func (d *DB) SchemaVersion(ctx context.Context) (int, error) {
+	var v sql.NullInt64
+	if err := d.db.QueryRowContext(ctx, "SELECT MAX(version) FROM schema_migrations").Scan(&v); err != nil {
+		return 0, err
+	}
+	return int(v.Int64), nil
+}
+
+// Ping verifies the database connection is usable.
+func (d *DB) Ping(ctx context.Context) error {
+	return d.db.PingContext(ctx)
 }
 
 func (d *DB) WithTx(ctx context.Context, fn func(tx *sql.Tx) error) error {

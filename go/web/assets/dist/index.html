@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AIA — Personal Agent Console</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22 width=%2232%22 height=%2232%22><text y=%2226%22 font-size=%2228%22>⚡</text></svg>">
+</head>
+<body class="dark-theme">
+  <!-- Login Overlay (shown if unauthenticated) -->
+  <div id="login-overlay" class="modal-backdrop hidden">
+    <div class="modal login-box">
+      <div class="modal-header">
+        <div class="logo">⚡ AIA Console</div>
+        <p class="subtitle">Personal Agent Embedded Web Interface</p>
+      </div>
+      <div class="modal-body">
+        <p class="login-instruction">請輸入啟動 AIA 時在終端機輸出的一次性登入 Token：</p>
+        <div class="form-group">
+          <label for="token-input">One-Time Login Token</label>
+          <input type="password" id="token-input" placeholder="貼上 64 位元 Hex Token..." autocomplete="off">
+        </div>
+        <div id="login-error" class="alert alert-error hidden"></div>
+        <button id="btn-login" class="btn btn-primary btn-block">驗證並進入 Console</button>
+      </div>
+      <div class="modal-footer">
+        <small class="text-muted">AIA 採用一次性兌換與 Server-Side Session，Token 使用後立即失效。</small>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main App Shell -->
+  <div id="app-shell" class="app-container">
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand">
+          <span class="brand-icon">⚡</span>
+          <span class="brand-title">AIA Console</span>
+          <span class="badge badge-subtle">v1.0</span>
+        </div>
+        <nav class="nav-tabs" id="main-nav">
+          <button class="nav-tab active" data-tab="overview">總覽</button>
+          <button class="nav-tab" data-tab="tasks">任務 <span id="tasks-badge" class="nav-badge hidden">0</span></button>
+          <button class="nav-tab" data-tab="pending">待核准 <span id="pending-badge" class="nav-badge alert-badge hidden">0</span></button>
+          <button class="nav-tab" data-tab="investment">投資 Agent</button>
+          <button class="nav-tab" data-tab="memory">記憶庫</button>
+          <button class="nav-tab" data-tab="agents">Agents</button>
+          <button class="nav-tab" data-tab="audit">稽核紀錄</button>
+        </nav>
+      </div>
+      <div class="header-right">
+        <div id="sse-status" class="sse-indicator" title="即時 SSE 推播連線狀態">
+          <span class="status-dot"></span>
+          <span class="status-text">連線中...</span>
+        </div>
+        <div class="user-menu">
+          <span id="user-display" class="user-pill">Admin</span>
+          <button id="btn-logout" class="btn btn-sm btn-ghost" title="登出">登出</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="app-content">
+      <!-- 1. Overview Tab -->
+      <section id="tab-overview" class="tab-pane active">
+        <div class="section-title">
+          <h2>系統狀態總覽</h2>
+          <span class="text-muted">Runtime、資料庫與 AI Provider 運行指標</span>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">系統運行狀態</div>
+            <div class="stat-value" id="sys-status">檢查中...</div>
+            <div class="stat-hint" id="sys-schema-ver">Schema Version: -</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">AI Provider</div>
+            <div class="stat-value text-accent" id="sys-provider">Antigravity CLI</div>
+            <div class="stat-hint" id="sys-provider-status">OK</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">待處理核准事項</div>
+            <div class="stat-value text-warning" id="stat-pending-count">0</div>
+            <div class="stat-hint">等待使用者決策</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">活躍任務數</div>
+            <div class="stat-value text-primary" id="stat-active-tasks">0</div>
+            <div class="stat-hint">READY / RUNNING</div>
+          </div>
+        </div>
+
+        <div class="dashboard-grid">
+          <div class="card">
+            <div class="card-header">
+              <h3>最近任務 (Recent Tasks)</h3>
+              <button class="btn btn-sm btn-outline" onclick="app.switchTab('tasks')">查看全部</button>
+            </div>
+            <div class="table-responsive">
+              <table class="table" id="overview-tasks-table">
+                <thead>
+                  <tr>
+                    <th>標題</th>
+                    <th>Agent</th>
+                    <th>狀態</th>
+                    <th>建立時間</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="4" class="text-center text-muted">載入中...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3>待核准事項摘要</h3>
+              <button class="btn btn-sm btn-outline" onclick="app.switchTab('pending')">立即審查</button>
+            </div>
+            <div id="overview-pending-list" class="list-group">
+              <div class="text-center text-muted p-4">目前沒有等待核准的項目</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. Tasks Tab -->
+      <section id="tab-tasks" class="tab-pane">
+        <div class="section-header-row">
+          <div>
+            <h2>任務管理 (Tasks)</h2>
+            <span class="text-muted">狀態機遵循 READY → RUNNING → COMPLETED / FAILED / WAITING_APPROVAL</span>
+          </div>
+          <div>
+            <button id="btn-create-task-modal" class="btn btn-primary">+ 新增任務</button>
+          </div>
+        </div>
+
+        <div class="filter-bar">
+          <span class="filter-label">篩選狀態：</span>
+          <button class="chip active" data-task-filter="">全部</button>
+          <button class="chip" data-task-filter="READY">READY</button>
+          <button class="chip" data-task-filter="RUNNING">RUNNING</button>
+          <button class="chip" data-task-filter="WAITING_APPROVAL">WAITING_APPROVAL</button>
+          <button class="chip" data-task-filter="COMPLETED">COMPLETED</button>
+          <button class="chip" data-task-filter="FAILED">FAILED</button>
+          <button class="chip" data-task-filter="CANCELLED">CANCELLED</button>
+        </div>
+
+        <div class="card mt-3">
+          <div class="table-responsive">
+            <table class="table" id="tasks-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>標題</th>
+                  <th>負責 Agent</th>
+                  <th>優先級</th>
+                  <th>風險等級</th>
+                  <th>狀態</th>
+                  <th>更新時間</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="8" class="text-center text-muted">載入中...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Pending Approvals Tab -->
+      <section id="tab-pending" class="tab-pane">
+        <div class="section-title">
+          <h2>待處理事項 (Pending Review)</h2>
+          <span class="text-muted">整合等待核准的 Task、Memory 候選及投資提案 (無虛構 Approval 實體)</span>
+        </div>
+
+        <div class="pending-section mt-3">
+          <h3>📌 待核准任務 (Tasks Awaiting Approval)</h3>
+          <div class="card mt-2">
+            <div class="table-responsive">
+              <table class="table" id="pending-tasks-table">
+                <thead>
+                  <tr>
+                    <th>任務標題</th>
+                    <th>負責 Agent</th>
+                    <th>風險等級</th>
+                    <th>說明與驗收條件</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="5" class="text-center text-muted">無待核准任務</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="pending-section mt-4">
+          <h3>📈 投資交易提案 (Investment Trade Proposals)</h3>
+          <div class="card mt-2">
+            <div class="table-responsive">
+              <table class="table" id="pending-proposals-table">
+                <thead>
+                  <tr>
+                    <th>標的 / 方向</th>
+                    <th>Go 計算股數</th>
+                    <th>預估價格</th>
+                    <th>總成本 / 預期款項</th>
+                    <th>費用明細 (Go 驗證)</th>
+                    <th>有效期限</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="7" class="text-center text-muted">無待審核投資提案</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="pending-section mt-4">
+          <h3>🧠 記憶候選項目 (Memory Candidates)</h3>
+          <div class="card mt-2">
+            <div class="table-responsive">
+              <table class="table" id="pending-memory-table">
+                <thead>
+                  <tr>
+                    <th>主題 / Key</th>
+                    <th>分類</th>
+                    <th>信心度</th>
+                    <th>記憶內容</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="5" class="text-center text-muted">無待審核記憶候選</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. Investment Agent Tab -->
+      <section id="tab-investment" class="tab-pane">
+        <div class="section-title">
+          <h2>Investment Agent (投資決策與風險核心)</h2>
+          <span class="text-muted">AIA-05 規格：agy 負責研究與判斷，Go 負責數字、手續費、證交稅、資金限制與最終決策資料有效性</span>
+        </div>
+
+        <!-- Portfolio Overview Bar -->
+        <div class="stats-grid mt-3">
+          <div class="stat-card">
+            <div class="stat-label">投資組合 (Profile)</div>
+            <div class="stat-value" id="inv-prof-name">載入中...</div>
+            <div class="stat-hint" id="inv-prof-market">Market: TW (TWD)</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">可用現金 (Available Cash)</div>
+            <div class="stat-value text-accent" id="inv-cash">$0</div>
+            <div class="stat-hint" id="inv-cash-ratio">保留比率檢查中</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">資金上限 (Capital Limit)</div>
+            <div class="stat-value text-primary" id="inv-capital-limit">$0</div>
+            <div class="stat-hint" id="inv-capital-basis">Basis: TOTAL_EQUITY</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">投資總資產 (Total Value)</div>
+            <div class="stat-value text-warning" id="inv-total-value">$0</div>
+            <div class="stat-hint">包含現金與持倉現值</div>
+          </div>
+        </div>
+
+        <div class="dashboard-grid mt-4">
+          <!-- Positions -->
+          <div class="card">
+            <div class="card-header">
+              <h3>目前持倉部位 (Positions)</h3>
+            </div>
+            <div class="table-responsive">
+              <table class="table" id="inv-positions-table">
+                <thead>
+                  <tr>
+                    <th>代號 / 名稱</th>
+                    <th>股數</th>
+                    <th>均價</th>
+                    <th>市價</th>
+                    <th>市值</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="5" class="text-center text-muted">無持倉</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Risk Constraints -->
+          <div class="card">
+            <div class="card-header">
+              <h3>風控限制 (Portfolio Constraints)</h3>
+            </div>
+            <div class="table-responsive">
+              <table class="table" id="inv-constraints-table">
+                <thead>
+                  <tr>
+                    <th>限制規則</th>
+                    <th>設定值</th>
+                    <th>狀態</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="3" class="text-center text-muted">載入中...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Interactive Research & Proposal Evaluator -->
+        <div class="card mt-4">
+          <div class="card-header">
+            <h3>🔬 投資決策研究與 Go 限制計算驗證</h3>
+            <span class="text-muted">模擬或接收 agy LLM 判斷，由 Go 驗證代號、方向、計算股數與交易成本</span>
+          </div>
+          <div class="card-body">
+            <form id="form-evaluate-investment" class="grid-form">
+              <div class="form-group">
+                <label>標的代號 (Symbol)</label>
+                <select id="inv-eval-symbol">
+                  <option value="2330">2330 台積電 (TWSE)</option>
+                  <option value="2317" selected>2317 鴻海 (TWSE)</option>
+                  <option value="2454">2454 聯發科 (TWSE)</option>
+                  <option value="0050">0050 元大台灣50 (TWSE)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>操作方向 (Action)</label>
+                <select id="inv-eval-action">
+                  <option value="BUY">BUY (買進)</option>
+                  <option value="SELL">SELL (賣出)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>目前估計市價 (TWD)</label>
+                <input type="number" id="inv-eval-price" value="150" step="0.5" required>
+              </div>
+              <div class="form-group">
+                <label>建議配置金額 (Target TWD)</label>
+                <input type="number" id="inv-eval-target" value="160000" step="1000">
+              </div>
+              <div class="form-group">
+                <label>判斷信心度 (0.0 ~ 1.0)</label>
+                <input type="number" id="inv-eval-conf" value="0.85" min="0" max="1" step="0.05">
+              </div>
+              <div class="form-group">
+                <label>預期投資週期 (Horizon)</label>
+                <input type="text" id="inv-eval-horizon" value="3-6 個月">
+              </div>
+              <div class="form-group full-width">
+                <label>agy 推理分析摘要 (Reasoning)</label>
+                <input type="text" id="inv-eval-reasoning" value="AI 伺服器機櫃拉貨動能強勁，GB200 市佔領先。">
+              </div>
+              <div class="form-group full-width">
+                <button type="submit" class="btn btn-primary">提交至 Go 核心驗證並生成 Trade Proposal</button>
+              </div>
+            </form>
+            <div id="inv-eval-result" class="alert hidden mt-3"></div>
+          </div>
+        </div>
+
+        <!-- Proposals List -->
+        <div class="card mt-4">
+          <div class="card-header">
+            <h3>交易提案歷史 (Trade Proposals)</h3>
+          </div>
+          <div class="table-responsive">
+            <table class="table" id="inv-proposals-history-table">
+              <thead>
+                <tr>
+                  <th>標的</th>
+                  <th>方向</th>
+                  <th>計算股數</th>
+                  <th>預估價格</th>
+                  <th>手續費</th>
+                  <th>證交稅</th>
+                  <th>總金額 (Go 計算)</th>
+                  <th>狀態</th>
+                  <th>備註 / 限制調整</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="9" class="text-center text-muted">無交易提案</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. Memory Tab -->
+      <section id="tab-memory" class="tab-pane">
+        <div class="section-title">
+          <h2>記憶庫管理 (Memory)</h2>
+          <span class="text-muted">個人 AI 核心長短期記憶與偏好知識</span>
+        </div>
+        <div class="card mt-3">
+          <div class="table-responsive">
+            <table class="table" id="memory-table">
+              <thead>
+                <tr>
+                  <th>類型</th>
+                  <th>標題 / Key</th>
+                  <th>記憶內容</th>
+                  <th>信心度</th>
+                  <th>可信度</th>
+                  <th>建立時間</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="6" class="text-center text-muted">載入中...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6. Agents Tab -->
+      <section id="tab-agents" class="tab-pane">
+        <div class="section-title">
+          <h2>Agent Registry</h2>
+          <span class="text-muted">已註冊的 Personal Agent 與 Domain Agents</span>
+        </div>
+        <div class="agents-grid mt-3" id="agents-cards-container">
+          <!-- Populated by JS -->
+        </div>
+      </section>
+
+      <!-- 7. Audit Tab -->
+      <section id="tab-audit" class="tab-pane">
+        <div class="section-title">
+          <h2>操作與安全稽核 (Audit Logs)</h2>
+          <span class="text-muted">記錄來源 (CLI, Web, Runtime, Agent, Recovery)、Request ID 與遮蔽機密之 Metadata</span>
+        </div>
+
+        <div class="filter-bar mt-2">
+          <label>來源：</label>
+          <select id="audit-source-filter">
+            <option value="">全部來源</option>
+            <option value="WEB">WEB</option>
+            <option value="CLI">CLI</option>
+            <option value="RUNTIME">RUNTIME</option>
+            <option value="AGENT">AGENT</option>
+            <option value="RECOVERY">RECOVERY</option>
+          </select>
+          <label class="ml-2">Request ID：</label>
+          <input type="text" id="audit-reqid-filter" placeholder="篩選 request_id...">
+          <button id="btn-refresh-audit" class="btn btn-sm btn-outline ml-2">查詢</button>
+        </div>
+
+        <div class="card mt-3">
+          <div class="table-responsive">
+            <table class="table" id="audit-table">
+              <thead>
+                <tr>
+                  <th>Seq</th>
+                  <th>來源 (Source)</th>
+                  <th>Request ID</th>
+                  <th>操作者 (Actor)</th>
+                  <th>動作 (Action)</th>
+                  <th>資源類型</th>
+                  <th>結果</th>
+                  <th>Metadata</th>
+                  <th>時間</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="9" class="text-center text-muted">載入中...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Create Task Modal -->
+  <div id="create-task-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>新增背景任務</h3>
+        <button class="close-btn" onclick="app.closeTaskModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-create-task">
+          <div class="form-group">
+            <label for="new-task-title">任務標題 *</label>
+            <input type="text" id="new-task-title" required placeholder="例如：分析台積電 Q3 財報展望">
+          </div>
+          <div class="form-group">
+            <label for="new-task-agent">指派 Agent</label>
+            <select id="new-task-agent">
+              <option value="coding-agent">Coding Agent</option>
+              <option value="investment-agent" selected>Investment Agent</option>
+              <option value="writing-agent">Writing Agent</option>
+              <option value="video-agent">Video Agent</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="new-task-desc">任務說明</label>
+            <textarea id="new-task-desc" rows="3" placeholder="詳細說明任務目標..."></textarea>
+          </div>
+          <div class="form-group">
+            <label for="new-task-priority">優先級 (1-100)</label>
+            <input type="number" id="new-task-priority" value="50" min="1" max="100">
+          </div>
+          <div class="form-group">
+            <label for="new-task-risk">風險等級</label>
+            <select id="new-task-risk">
+              <option value="LOW" selected>LOW</option>
+              <option value="MEDIUM">MEDIUM</option>
+              <option value="HIGH">HIGH (中斷恢復需核准)</option>
+              <option value="CRITICAL">CRITICAL</option>
+            </select>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-ghost" onclick="app.closeTaskModal()">取消</button>
+            <button type="submit" class="btn btn-primary">建立任務 (狀態為 READY)</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notification Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

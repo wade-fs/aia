@@ -1,0 +1,382 @@
+package investment
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/wade/aia/internal/domain"
+	"github.com/wade/aia/internal/domain/investment"
+	"github.com/wade/aia/internal/eventbus"
+	"github.com/wade/aia/internal/storage/sqlite/repository"
+)
+
+type AuditWriter interface {
+	Append(ctx context.Context, entry *repository.AuditLogEntry) error
+}
+
+type Service struct {
+	repo      *repository.InvestmentRepository
+	auditRepo AuditWriter
+	bus       eventbus.Publisher
+	costCfg   investment.CostConfig
+}
+
+func NewService(repo *repository.InvestmentRepository, auditRepo AuditWriter, bus eventbus.Publisher) *Service {
+	return &Service{
+		repo:      repo,
+		auditRepo: auditRepo,
+		bus:       bus,
+		costCfg:   investment.DefaultTWCostConfig(),
+	}
+}
+
+// EnsureDefaultProfile guarantees an active investment portfolio is initialized.
+func (s *Service) EnsureDefaultProfile(ctx context.Context) (*investment.PortfolioProfile, error) {
+	return s.repo.EnsureDefaultProfile(ctx)
+}
+
+func (s *Service) GetProfile(ctx context.Context) (*investment.PortfolioProfile, error) {
+	return s.repo.EnsureDefaultProfile(ctx)
+}
+
+func (s *Service) GetSnapshot(ctx context.Context) (*investment.PortfolioSnapshot, []investment.Position, error) {
+	prof, err := s.GetProfile(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	snap, err := s.repo.GetLatestSnapshot(ctx, prof.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	positions, err := s.repo.ListPositions(ctx, snap.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return snap, positions, nil
+}
+
+func (s *Service) ListInstruments(ctx context.Context) ([]investment.Instrument, error) {
+	return s.repo.ListInstruments(ctx)
+}
+
+func (s *Service) ListConstraints(ctx context.Context) ([]investment.Constraint, error) {
+	prof, err := s.GetProfile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListConstraints(ctx, prof.ID)
+}
+
+func (s *Service) ListDecisions(ctx context.Context, limit int) ([]investment.Decision, error) {
+	prof, err := s.GetProfile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListDecisions(ctx, prof.ID, limit)
+}
+
+func (s *Service) ListRejections(ctx context.Context, limit int) ([]investment.DecisionRejection, error) {
+	prof, err := s.GetProfile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListDecisionRejections(ctx, prof.ID, limit)
+}
+
+func (s *Service) ListProposals(ctx context.Context, status investment.ProposalStatus, limit int) ([]investment.TradeProposal, error) {
+	prof, err := s.GetProfile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListTradeProposals(ctx, prof.ID, status, limit)
+}
+
+// ProcessAgyDecision receives raw investment reasoning from Antigravity CLI / LLM,
+// validates all domain rules and constraints in Go, calculates fees/taxes and position sizing,
+// and produces a valid TradeProposal (or records a rejection).
+func (s *Service) ProcessAgyDecision(ctx context.Context, input investment.AgyDecisionInput, price float64) (*investment.TradeProposal, error) {
+	prof, err := s.GetProfile(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get profile: %w", err)
+	}
+
+	snap, positions, err := s.GetSnapshot(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get snapshot: %w", err)
+	}
+
+	rawInputJSON, _ := json.Marshal(input)
+	now := time.Now().UTC()
+
+	// 1. Validate Instrument Symbol
+	symbol := strings.TrimSpace(input.Symbol)
+	inst, err := s.repo.GetInstrumentBySymbol(ctx, input.Exchange, symbol)
+	if err != nil || inst == nil || !inst.IsActive {
+		rej := &investment.DecisionRejection{
+			ID:                 uuid.New().String(),
+			PortfolioProfileID: prof.ID,
+			RawOutput:          string(rawInputJSON),
+			ErrorsJSON:         fmt.Sprintf(`["unrecognized or inactive instrument symbol: %s"]`, symbol),
+			Source:             "VALIDATION_GO",
+			CreatedAt:          now,
+		}
+		_ = s.repo.SaveDecisionRejection(ctx, rej)
+		return nil, fmt.Errorf("invalid instrument symbol: %s", symbol)
+	}
+
+	// 2. Validate Action
+	action := strings.ToUpper(strings.TrimSpace(input.Action))
+	if action != "BUY" && action != "SELL" && action != "HOLD" {
+		rej := &investment.DecisionRejection{
+			ID:                 uuid.New().String(),
+			PortfolioProfileID: prof.ID,
+			RawOutput:          string(rawInputJSON),
+			ErrorsJSON:         fmt.Sprintf(`["unsupported action: %s"]`, input.Action),
+			Source:             "VALIDATION_GO",
+			CreatedAt:          now,
+		}
+		_ = s.repo.SaveDecisionRejection(ctx, rej)
+		return nil, fmt.Errorf("unsupported action: %s", input.Action)
+	}
+
+	// 3. Validate Confidence (Minimum 0.50 required for actionable trade proposal)
+	if input.Confidence < 0.50 {
+		rej := &investment.DecisionRejection{
+			ID:                 uuid.New().String(),
+			PortfolioProfileID: prof.ID,
+			RawOutput:          string(rawInputJSON),
+			ErrorsJSON:         fmt.Sprintf(`["confidence %.2f is below threshold 0.50"]`, input.Confidence),
+			Source:             "VALIDATION_GO",
+			CreatedAt:          now,
+		}
+		_ = s.repo.SaveDecisionRejection(ctx, rej)
+		return nil, fmt.Errorf("decision confidence %.2f is below actionable threshold (0.50)", input.Confidence)
+	}
+
+	// 4. Save Decision Record
+	reasoningJSON, _ := json.Marshal(input.Reasoning)
+	risksJSON, _ := json.Marshal(input.Risks)
+	invalJSON, _ := json.Marshal(input.InvalidationRules)
+
+	dec := &investment.Decision{
+		ID:                         uuid.New().String(),
+		PortfolioProfileID:         prof.ID,
+		InstrumentID:               inst.ID,
+		PortfolioSnapshotID:        snap.ID,
+		DecisionType:               investment.DecisionType(action),
+		Confidence:                 input.Confidence,
+		ReasoningJSON:              string(reasoningJSON),
+		RisksJSON:                  string(risksJSON),
+		InvalidationConditionsJSON: string(invalJSON),
+		ExpectedHorizon:            input.ExpectedHorizon,
+		StrategyVersion:            input.StrategyVersion,
+		RawInputJSON:               string(rawInputJSON),
+		Source:                     "ANTIGRAVITY_LLM",
+		CreatedAt:                  now,
+	}
+
+	if err := s.repo.SaveDecision(ctx, dec); err != nil {
+		return nil, fmt.Errorf("failed to save decision: %w", err)
+	}
+
+	if dec.DecisionType == investment.DecisionHold {
+		// HOLD does not generate a trade proposal
+		if s.bus != nil {
+			s.bus.Publish(eventbus.InvestmentUpdated, map[string]any{"type": "decision", "action": "HOLD", "symbol": symbol})
+		}
+		return nil, nil
+	}
+
+	// 5. Check constraints & calculate quantity and costs in Go
+	constraints, err := s.repo.ListConstraints(ctx, prof.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list constraints: %w", err)
+	}
+
+	var currentQty int64 = 0
+	for _, p := range positions {
+		if p.InstrumentID == inst.ID {
+			currentQty = p.Quantity
+			break
+		}
+	}
+
+	sizing := investment.EvaluateTradeLimits(
+		prof,
+		snap,
+		constraints,
+		dec.DecisionType,
+		input.TargetAmount,
+		price,
+		currentQty,
+		s.costCfg,
+	)
+
+	if sizing.Rejected {
+		rej := &investment.DecisionRejection{
+			ID:                 uuid.New().String(),
+			PortfolioProfileID: prof.ID,
+			RawOutput:          string(rawInputJSON),
+			ErrorsJSON:         fmt.Sprintf(`["risk limits check failed: %s"]`, sizing.RejectionError),
+			Source:             "LIMITS_CHECK_GO",
+			CreatedAt:          now,
+		}
+		_ = s.repo.SaveDecisionRejection(ctx, rej)
+		return nil, fmt.Errorf("trade rejected by investment limits: %s", sizing.RejectionError)
+	}
+
+	// 6. Generate TradeProposal
+	proposalPayload := map[string]any{
+		"symbol":           symbol,
+		"instrument_name":  inst.Name,
+		"action":           string(dec.DecisionType),
+		"quantity":         sizing.Quantity,
+		"estimated_price":  price,
+		"gross_amount":     sizing.Cost.GrossAmount,
+		"broker_fee":       sizing.Cost.BrokerFee,
+		"transaction_tax":  sizing.Cost.TransactionTax,
+		"total_cost":       sizing.Cost.TotalCost,
+		"effective_rate":   sizing.Cost.EffectiveRate,
+		"was_adjusted":     sizing.WasAdjusted,
+		"adjustment_note":  sizing.AdjustmentNote,
+		"confidence":       input.Confidence,
+		"expected_horizon": input.ExpectedHorizon,
+	}
+	propJSON, _ := json.Marshal(proposalPayload)
+
+	proposal := &investment.TradeProposal{
+		ID:                   uuid.New().String(),
+		PortfolioProfileID:   prof.ID,
+		DecisionID:           dec.ID,
+		PortfolioSnapshotID:  snap.ID,
+		AllocationProposalID: "",
+		InstrumentID:         inst.ID,
+		Action:               dec.DecisionType,
+		Quantity:             sizing.Quantity,
+		EstimatedPrice:       price,
+		EstimatedGrossAmount: sizing.Cost.GrossAmount,
+		EstimatedTotalCost:   sizing.Cost.TotalCost,
+		ProposalJSON:         string(propJSON),
+		Status:               investment.ProposalPending,
+		StatusReason:         sizing.AdjustmentNote,
+		CreatedAt:            now,
+		ExpiresAt:            now.Add(24 * time.Hour),
+		UpdatedAt:            now,
+	}
+
+	if err := s.repo.SaveTradeProposal(ctx, proposal); err != nil {
+		return nil, fmt.Errorf("failed to save trade proposal: %w", err)
+	}
+
+	// Write audit log
+	if s.auditRepo != nil {
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:           uuid.New().String(),
+			ActorType:    "AGENT",
+			ActorID:      "investment-agent",
+			Action:       "INVESTMENT_PROPOSAL_GENERATED",
+			ResourceType: "INVESTMENT_PROPOSAL",
+			ResourceID:   proposal.ID,
+			Outcome:      "SUCCESS",
+			Details:      json.RawMessage(propJSON),
+			CreatedAt:    now,
+		})
+	}
+
+	// Emit bus event
+	if s.bus != nil {
+		s.bus.Publish(eventbus.InvestmentUpdated, map[string]any{
+			"type":        "trade_proposal",
+			"proposal_id": proposal.ID,
+			"symbol":      symbol,
+			"action":      string(proposal.Action),
+			"quantity":    proposal.Quantity,
+			"total_cost":  proposal.EstimatedTotalCost,
+		})
+	}
+
+	return proposal, nil
+}
+
+func (s *Service) ApproveProposal(ctx context.Context, proposalID domain.ID) error {
+	p, err := s.repo.GetTradeProposal(ctx, proposalID)
+	if err != nil {
+		return fmt.Errorf("proposal not found: %w", err)
+	}
+	if p.Status != investment.ProposalPending {
+		return fmt.Errorf("proposal is not in PENDING state (current: %s)", p.Status)
+	}
+
+	if err := s.repo.UpdateTradeProposalStatus(ctx, proposalID, investment.ProposalApproved, "Approved by user via Web Console"); err != nil {
+		return err
+	}
+
+	if s.auditRepo != nil {
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:           uuid.New().String(),
+			ActorType:    "USER",
+			ActorID:      "console-user",
+			Action:       "INVESTMENT_PROPOSAL_APPROVED",
+			ResourceType: "INVESTMENT_PROPOSAL",
+			ResourceID:   proposalID,
+			Outcome:      "SUCCESS",
+			Details:      json.RawMessage(fmt.Sprintf(`{"proposal_id": "%s", "action": "APPROVED"}`, proposalID)),
+			CreatedAt:    time.Now().UTC(),
+		})
+	}
+
+	if s.bus != nil {
+		s.bus.Publish(eventbus.InvestmentUpdated, map[string]any{
+			"type":        "proposal_approved",
+			"proposal_id": proposalID,
+		})
+	}
+
+	return nil
+}
+
+func (s *Service) RejectProposal(ctx context.Context, proposalID domain.ID, reason string) error {
+	p, err := s.repo.GetTradeProposal(ctx, proposalID)
+	if err != nil {
+		return fmt.Errorf("proposal not found: %w", err)
+	}
+	if p.Status != investment.ProposalPending {
+		return fmt.Errorf("proposal is not in PENDING state (current: %s)", p.Status)
+	}
+
+	if reason == "" {
+		reason = "Rejected by user via Web Console"
+	}
+
+	if err := s.repo.UpdateTradeProposalStatus(ctx, proposalID, investment.ProposalRejected, reason); err != nil {
+		return err
+	}
+
+	if s.auditRepo != nil {
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:           uuid.New().String(),
+			ActorType:    "USER",
+			ActorID:      "console-user",
+			Action:       "INVESTMENT_PROPOSAL_REJECTED",
+			ResourceType: "INVESTMENT_PROPOSAL",
+			ResourceID:   proposalID,
+			Outcome:      "SUCCESS",
+			Details:      json.RawMessage(fmt.Sprintf(`{"proposal_id": "%s", "reason": "%s"}`, proposalID, reason)),
+			CreatedAt:    time.Now().UTC(),
+		})
+	}
+
+	if s.bus != nil {
+		s.bus.Publish(eventbus.InvestmentUpdated, map[string]any{
+			"type":        "proposal_rejected",
+			"proposal_id": proposalID,
+			"reason":      reason,
+		})
+	}
+
+	return nil
+}

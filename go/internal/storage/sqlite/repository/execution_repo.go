@@ -72,6 +72,20 @@ func (r *ExecutionRepository) Get(ctx context.Context, id domain.ID) (*execution
 		&e.Workspace, &convID, &e.ProcessID, &status, &exitCode,
 		&resStatus, &errCode, &errMsg, &startedAt, &endedAt, &createdAt,
 	)
+	if err == sql.ErrNoRows && len(id) >= 6 {
+		prefixQuery := `
+			SELECT id, task_id, agent_id, provider, profile_id, profile_version,
+			       workspace, conversation_id, process_id, status, exit_code,
+			       result_status, error_code, error_message, started_at, ended_at, created_at
+			FROM executions WHERE id LIKE ? || '%' LIMIT 1
+		`
+		row = r.db.RawDB().QueryRowContext(ctx, prefixQuery, id)
+		err = row.Scan(
+			&e.ID, &e.TaskID, &e.AgentID, &e.Provider, &profileID, &e.ProfileVersion,
+			&e.Workspace, &convID, &e.ProcessID, &status, &exitCode,
+			&resStatus, &errCode, &errMsg, &startedAt, &endedAt, &createdAt,
+		)
+	}
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("execution not found: %s", id)
@@ -234,6 +248,13 @@ func (r *ExecutionRepository) AppendEvent(ctx context.Context, event *execution.
 }
 
 func (r *ExecutionRepository) ListEvents(ctx context.Context, executionID domain.ID, afterSeq uint64) ([]execution.ExecutionEvent, error) {
+	if len(executionID) >= 6 && len(executionID) < 36 {
+		var fullID string
+		_ = r.db.RawDB().QueryRowContext(ctx, "SELECT id FROM executions WHERE id LIKE ? || '%' LIMIT 1", executionID).Scan(&fullID)
+		if fullID != "" {
+			executionID = fullID
+		}
+	}
 	query := `
 		SELECT id, execution_id, sequence, event_type, source, payload_json, created_at
 		FROM execution_events

@@ -7,7 +7,10 @@ import (
 	"os"
 
 	"github.com/wade/aia/internal/config"
+	"github.com/wade/aia/internal/domain"
 	"github.com/wade/aia/internal/domain/agent"
+	"github.com/wade/aia/internal/domain/task"
+	"github.com/wade/aia/internal/eventbus"
 	"github.com/wade/aia/internal/memory/retrieval"
 	"github.com/wade/aia/internal/orchestrator"
 	"github.com/wade/aia/internal/policy"
@@ -16,13 +19,18 @@ import (
 	"github.com/wade/aia/internal/recovery"
 	agentService "github.com/wade/aia/internal/service/agent"
 	execService "github.com/wade/aia/internal/service/execution"
+	invService "github.com/wade/aia/internal/service/investment"
 	memoryService "github.com/wade/aia/internal/service/memory"
 	projectService "github.com/wade/aia/internal/service/project"
 	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 	"github.com/wade/aia/internal/validation"
+	"github.com/wade/aia/internal/web/agents"
+	"github.com/wade/aia/internal/web/console"
+	"github.com/wade/aia/internal/web/host"
 	"github.com/wade/aia/internal/workspace"
+	"github.com/wade/aia/web/assets"
 )
 
 type App struct {
@@ -35,6 +43,10 @@ type App struct {
 	TaskSvc       *taskService.Service
 	ExecutionSvc  *execService.Service
 	MemorySvc     *memoryService.Service
+	AuditRepo     *repository.AuditRepository
+	EventBus      *eventbus.Bus
+	InvRepo       *repository.InvestmentRepository
+	InvSvc        *invService.Service
 	RecoveryMgr   *recovery.Manager
 	Scheduler     *orchestrator.Scheduler
 	PersonalAgent *orchestrator.PersonalAgent
@@ -52,7 +64,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		return nil, fmt.Errorf("failed to initialize sqlite database: %w", err)
 	}
 
-	// 2. Repositories
+	// 2. Repositories & Notification Bus
+	bus := eventbus.New(1000)
 	projRepo := repository.NewProjectRepository(db)
 	agRepo := repository.NewAgentRepository(db)
 	taskRepo := repository.NewTaskRepository(db)
@@ -60,6 +73,23 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	memRepo := repository.NewMemoryRepository(db)
 	artRepo := repository.NewArtifactRepository(db)
 	auditRepo := repository.NewAuditRepository(db)
+	invRepo := repository.NewInvestmentRepository(db)
+
+	taskRepo.SetChangeHook(func(ctx context.Context, taskID domain.ID, status task.TaskStatus, created bool) {
+		if bus != nil {
+			evType := eventbus.TaskUpdated
+			if created {
+				evType = eventbus.TaskCreated
+			} else if status == task.StatusCompleted {
+				evType = eventbus.TaskCompleted
+			} else if status == task.StatusFailed {
+				evType = eventbus.TaskFailed
+			} else if status == task.StatusWaitingApproval {
+				evType = eventbus.TaskWaitingApproval
+			}
+			bus.Publish(evType, map[string]any{"task_id": taskID, "status": status})
+		}
+	})
 
 	// 3. Provider
 	var prov provider.Provider
@@ -84,6 +114,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	taskSvc.SetHealthChecker(prov)
 	execSvc := execService.NewService(execRepo, taskRepo, artRepo, auditRepo, prov, wsMgr, validator)
 	memSvc := memoryService.NewService(memRepo)
+	invSvc := invService.NewService(invRepo, auditRepo, bus)
 
 	// 6. Recovery
 	recMgr := recovery.NewManager(taskRepo, execRepo, auditRepo)
@@ -107,6 +138,10 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		TaskSvc:       taskSvc,
 		ExecutionSvc:  execSvc,
 		MemorySvc:     memSvc,
+		AuditRepo:     auditRepo,
+		EventBus:      bus,
+		InvRepo:       invRepo,
+		InvSvc:        invSvc,
 		RecoveryMgr:   recMgr,
 		Scheduler:     scheduler,
 		PersonalAgent: pa,
@@ -127,10 +162,53 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 }
 
 func (a *App) Close() error {
+	if a.EventBus != nil {
+		a.EventBus.Close()
+	}
 	if a.DB != nil {
 		return a.DB.Close()
 	}
 	return nil
+}
+
+// CreateWebHost initializes the embedded web host, generates a one-time login token,
+// registers console endpoints, and registers domain agent modules.
+func (a *App) CreateWebHost() (*host.Host, string, error) {
+	// Initialize default investment profile
+	_, _ = a.InvSvc.EnsureDefaultProfile(context.Background())
+
+	authMgr := host.NewAuthManager(false)
+	token, err := authMgr.GenerateOneTimeToken()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate one-time login token: %w", err)
+	}
+
+	h := host.NewHost(authMgr, a.EventBus, a.AuditRepo, assets.Sub())
+
+	// 1. Register Global Console Routes
+	console.RegisterConsoleRoutes(h.APIMux(), &console.ConsoleServices{
+		TaskSvc:   a.TaskSvc,
+		AgentSvc:  a.AgentSvc,
+		MemorySvc: a.MemorySvc,
+		AuditRepo: a.AuditRepo,
+		InvSvc:    a.InvSvc,
+		DB:        a.DB,
+		Provider:  a.Provider,
+		Host:      h,
+	})
+
+	// 2. Register Agent Modules with isolated dedicated muxes
+	if err := h.RegisterAgentModule(agents.NewInvestmentWebModule(a.InvSvc)); err != nil {
+		return nil, "", fmt.Errorf("failed to register investment web module: %w", err)
+	}
+	if err := h.RegisterAgentModule(agents.NewCodingWebModule(a.AgentSvc)); err != nil {
+		return nil, "", fmt.Errorf("failed to register coding web module: %w", err)
+	}
+	if err := h.RegisterAgentModule(agents.NewWritingWebModule(a.AgentSvc)); err != nil {
+		return nil, "", fmt.Errorf("failed to register writing web module: %w", err)
+	}
+
+	return h, token, nil
 }
 
 func (a *App) seedDefaultAgents(ctx context.Context) {

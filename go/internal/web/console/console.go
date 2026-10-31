@@ -1,0 +1,540 @@
+package console
+
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/wade/aia/internal/domain"
+	"github.com/wade/aia/internal/domain/investment"
+	domainMemory "github.com/wade/aia/internal/domain/memory"
+	"github.com/wade/aia/internal/domain/task"
+	"github.com/wade/aia/internal/provider"
+	agentService "github.com/wade/aia/internal/service/agent"
+	invService "github.com/wade/aia/internal/service/investment"
+	memoryService "github.com/wade/aia/internal/service/memory"
+	taskService "github.com/wade/aia/internal/service/task"
+	"github.com/wade/aia/internal/storage/sqlite"
+	"github.com/wade/aia/internal/storage/sqlite/repository"
+	"github.com/wade/aia/internal/web/host"
+)
+
+type ConsoleServices struct {
+	TaskSvc   *taskService.Service
+	AgentSvc  *agentService.Service
+	MemorySvc *memoryService.Service
+	AuditRepo *repository.AuditRepository
+	InvSvc    *invService.Service
+	DB        *sqlite.DB
+	Provider  provider.Provider
+	Host      *host.Host
+}
+
+func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
+	// 1. Auth routes
+	mux.HandleFunc("/api/v1/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("/api/v1/auth/logout", s.handleAuthLogout)
+	mux.HandleFunc("/api/v1/auth/session", s.handleAuthSession)
+
+	// 2. System Status
+	mux.HandleFunc("/api/v1/system/status", s.handleSystemStatus)
+	mux.HandleFunc("/api/v1/system/health", s.handleSystemHealth)
+
+	// 3. Tasks
+	mux.HandleFunc("/api/v1/tasks", s.handleTasks)
+	mux.HandleFunc("/api/v1/tasks/", s.handleTaskSubroutes)
+
+	// 4. Agents
+	mux.HandleFunc("/api/v1/agents", s.handleAgents)
+	mux.HandleFunc("/api/v1/agents/", s.handleAgentDetail)
+
+	// 5. Memory
+	mux.HandleFunc("/api/v1/memory", s.handleMemory)
+	mux.HandleFunc("/api/v1/memory/", s.handleMemorySubroutes)
+
+	// 6. Pending Approvals (Unified: Tasks + Memory Candidates + Trade Proposals)
+	// Does NOT create fictitious approval entity; aggregates directly from real models.
+	mux.HandleFunc("/api/v1/pending", s.handlePendingList)
+	mux.HandleFunc("/api/v1/pending/", s.handlePendingAction)
+
+	// 7. Audit
+	mux.HandleFunc("/api/v1/audit", s.handleAudit)
+}
+
+func getReqID(r *http.Request) string {
+	return r.Header.Get("X-Request-ID")
+}
+
+// -------------------------------------------------------------
+// Auth Handlers
+// -------------------------------------------------------------
+
+func (s *ConsoleServices) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Token) == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_INPUT", "A valid one-time login token is required", reqID)
+		return
+	}
+
+	sess, err := s.Host.AuthMgr.RedeemOneTimeToken(strings.TrimSpace(req.Token))
+	if err != nil {
+		host.WriteError(w, http.StatusUnauthorized, "LOGIN_FAILED", err.Error(), reqID)
+		return
+	}
+
+	s.Host.AuthMgr.SetSessionCookie(w, sess.ID)
+	host.WriteJSON(w, http.StatusOK, map[string]any{
+		"authenticated": true,
+		"session_id":    sess.ID,
+		"actor_id":      sess.ActorID,
+	}, reqID)
+}
+
+func (s *ConsoleServices) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	if cookie, err := r.Cookie("aia_session"); err == nil && cookie.Value != "" {
+		s.Host.AuthMgr.InvalidateSession(cookie.Value)
+	}
+	s.Host.AuthMgr.ClearSessionCookie(w)
+	host.WriteJSON(w, http.StatusOK, map[string]bool{"logged_out": true}, reqID)
+}
+
+func (s *ConsoleServices) handleAuthSession(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	cookie, err := r.Cookie("aia_session")
+	if err != nil || cookie.Value == "" {
+		host.WriteError(w, http.StatusUnauthorized, "NOT_LOGGED_IN", "No active session", reqID)
+		return
+	}
+	sess, ok := s.Host.AuthMgr.ValidateSession(cookie.Value)
+	if !ok {
+		host.WriteError(w, http.StatusUnauthorized, "SESSION_EXPIRED", "Session expired", reqID)
+		return
+	}
+
+	host.WriteJSON(w, http.StatusOK, map[string]any{
+		"authenticated": true,
+		"session_id":    sess.ID,
+		"actor_id":      sess.ActorID,
+		"nav_items":     s.Host.Modules.AllNavItems(),
+	}, reqID)
+}
+
+// -------------------------------------------------------------
+// System Handlers
+// -------------------------------------------------------------
+
+func (s *ConsoleServices) handleSystemHealth(w http.ResponseWriter, r *http.Request) {
+	host.WriteJSON(w, http.StatusOK, map[string]string{"status": "UP"}, getReqID(r))
+}
+
+func (s *ConsoleServices) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+
+	provName := "unknown"
+	provStatus := "OK"
+	if s.Provider != nil {
+		provName = s.Provider.Name()
+		if err := s.Provider.HealthCheck(ctx); err != nil {
+			provStatus = "DEGRADED: " + err.Error()
+		}
+	}
+
+	dbStatus := "OK"
+	if err := s.DB.Ping(ctx); err != nil {
+		dbStatus = "ERROR: " + err.Error()
+	}
+
+	schemaVer, _ := s.DB.SchemaVersion(ctx)
+
+	host.WriteJSON(w, http.StatusOK, map[string]any{
+		"runtime":        "AIA Personal Agent v1.0",
+		"database":       dbStatus,
+		"schema_version": schemaVer,
+		"provider": map[string]string{
+			"name":   provName,
+			"status": provStatus,
+		},
+	}, reqID)
+}
+
+// -------------------------------------------------------------
+// Tasks Handlers (READY instead of QUEUED)
+// -------------------------------------------------------------
+
+func (s *ConsoleServices) handleTasks(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+
+	switch r.Method {
+	case http.MethodGet:
+		statusFilter := task.TaskStatus(r.URL.Query().Get("status"))
+		limit := 50
+		if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+			limit = l
+		}
+		tasks, err := s.TaskSvc.List(ctx, repository.TaskFilter{Status: statusFilter, Limit: limit})
+		if err != nil {
+			host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, tasks, reqID)
+
+	case http.MethodPost:
+		var req struct {
+			Title       string           `json:"title"`
+			Description string           `json:"description"`
+			AgentID     domain.ID        `json:"agent_id"`
+			Priority    int              `json:"priority"`
+			Risk        domain.RiskLevel `json:"risk"`
+			Acceptance  []string         `json:"acceptance"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Title) == "" {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_INPUT", "Task title is required", reqID)
+			return
+		}
+
+		tk, err := s.TaskSvc.Create(ctx, taskService.CreateTaskRequest{
+			Title:       req.Title,
+			Description: req.Description,
+			AgentID:     req.AgentID,
+			Priority:    req.Priority,
+			Risk:        req.Risk,
+			Acceptance:  req.Acceptance,
+		})
+		if err != nil {
+			host.WriteError(w, http.StatusInternalServerError, "TASK_CREATE_FAILED", err.Error(), reqID)
+			return
+		}
+
+		// Returns READY (never QUEUED)
+		host.WriteJSON(w, http.StatusCreated, tk, reqID)
+
+	default:
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+	}
+}
+
+func (s *ConsoleServices) handleTaskSubroutes(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+
+	// Parse /api/v1/tasks/{id} or /api/v1/tasks/{id}/{action}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/tasks/"), "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_PATH", "Task ID required", reqID)
+		return
+	}
+	taskID := parts[0]
+
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		tk, err := s.TaskSvc.Get(ctx, taskID)
+		if err != nil {
+			host.WriteError(w, http.StatusNotFound, "TASK_NOT_FOUND", "Task not found", reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, tk, reqID)
+		return
+	}
+
+	action := parts[1]
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	switch action {
+	case "cancel":
+		if err := s.TaskSvc.Cancel(ctx, taskID); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "CANCEL_FAILED", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "CANCELLED"}, reqID)
+
+	case "resume":
+		if err := s.TaskSvc.Resume(ctx, taskID); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "RESUME_FAILED", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "READY"}, reqID)
+
+	case "approve":
+		if err := s.TaskSvc.UpdateStatus(ctx, taskID, task.StatusReady); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "APPROVE_FAILED", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "READY"}, reqID)
+
+	case "reject":
+		if err := s.TaskSvc.UpdateStatus(ctx, taskID, task.StatusCancelled); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "REJECT_FAILED", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "CANCELLED"}, reqID)
+
+	default:
+		host.WriteError(w, http.StatusNotFound, "ACTION_NOT_FOUND", "Unknown task action", reqID)
+	}
+}
+
+// -------------------------------------------------------------
+// Agents Handlers
+// -------------------------------------------------------------
+
+func (s *ConsoleServices) handleAgents(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	if r.Method != http.MethodGet {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+	agents, err := s.AgentSvc.List(r.Context())
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, agents, reqID)
+}
+
+func (s *ConsoleServices) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	if r.Method != http.MethodGet {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+	agentID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/agents/"), "/")
+	// If sub-path belongs to agent module, let host sub-mux handle it
+	if strings.Contains(agentID, "/") {
+		return
+	}
+	ag, err := s.AgentSvc.Get(r.Context(), agentID)
+	if err != nil {
+		host.WriteError(w, http.StatusNotFound, "AGENT_NOT_FOUND", "Agent not found", reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, ag, reqID)
+}
+
+// -------------------------------------------------------------
+// Memory Handlers
+// -------------------------------------------------------------
+
+func (s *ConsoleServices) handleMemory(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	if r.Method != http.MethodGet {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+	limit := 50
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+		limit = l
+	}
+	memories, err := s.MemorySvc.Search(r.Context(), repository.MemoryQuery{Limit: limit})
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, memories, reqID)
+}
+
+func (s *ConsoleServices) handleMemorySubroutes(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/memory/"), "/"), "/")
+	if len(parts) < 2 {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_PATH", "Action required", reqID)
+		return
+	}
+	memID, action := parts[0], parts[1]
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	switch action {
+	case "approve":
+		if err := s.MemorySvc.ApproveCandidate(ctx, memID); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "APPROVE_FAILED", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "ACTIVE"}, reqID)
+
+	case "reject":
+		if err := s.MemorySvc.RejectCandidate(ctx, memID); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "REJECT_FAILED", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "REJECTED"}, reqID)
+
+	default:
+		host.WriteError(w, http.StatusNotFound, "ACTION_NOT_FOUND", "Unknown action", reqID)
+	}
+}
+
+// -------------------------------------------------------------
+// Pending Approvals (Unified: Tasks + Memory Candidates + Trade Proposals)
+// -------------------------------------------------------------
+
+func (s *ConsoleServices) handlePendingList(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if r.Method != http.MethodGet {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	// 1. Tasks in WAITING_APPROVAL
+	tasks, err := s.TaskSvc.List(ctx, repository.TaskFilter{Status: task.StatusWaitingApproval, Limit: 100})
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+
+	// 2. Memory Candidates
+	candidates, err := s.MemorySvc.ListCandidates(ctx, domainMemory.ReviewPending)
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+
+	// 3. Trade Proposals in PENDING
+	var tradeProposals []investment.TradeProposal
+	if s.InvSvc != nil {
+		tradeProposals, _ = s.InvSvc.ListProposals(ctx, investment.ProposalPending, 100)
+	}
+
+	totalPending := len(tasks) + len(candidates) + len(tradeProposals)
+
+	host.WriteJSON(w, http.StatusOK, map[string]any{
+		"total_count":     totalPending,
+		"tasks":           tasks,
+		"memories":        candidates,
+		"trade_proposals": tradeProposals,
+	}, reqID)
+}
+
+func (s *ConsoleServices) handlePendingAction(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	// Format: /api/v1/pending/{type}/{id}/{approve|reject}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/pending/"), "/"), "/")
+	if len(parts) < 3 {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_PATH", "Format: /api/v1/pending/{type}/{id}/{action}", reqID)
+		return
+	}
+	itemType, itemID, action := parts[0], parts[1], parts[2]
+
+	switch itemType {
+	case "tasks":
+		if action == "approve" {
+			if err := s.TaskSvc.UpdateStatus(ctx, itemID, task.StatusReady); err != nil {
+				host.WriteError(w, http.StatusBadRequest, "APPROVE_FAILED", err.Error(), reqID)
+				return
+			}
+		} else if action == "reject" {
+			if err := s.TaskSvc.UpdateStatus(ctx, itemID, task.StatusCancelled); err != nil {
+				host.WriteError(w, http.StatusBadRequest, "REJECT_FAILED", err.Error(), reqID)
+				return
+			}
+		} else {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be approve or reject", reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "UPDATED"}, reqID)
+
+	case "memory":
+		if action == "approve" {
+			if err := s.MemorySvc.ApproveCandidate(ctx, itemID); err != nil {
+				host.WriteError(w, http.StatusBadRequest, "APPROVE_FAILED", err.Error(), reqID)
+				return
+			}
+		} else if action == "reject" {
+			if err := s.MemorySvc.RejectCandidate(ctx, itemID); err != nil {
+				host.WriteError(w, http.StatusBadRequest, "REJECT_FAILED", err.Error(), reqID)
+				return
+			}
+		} else {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be approve or reject", reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "UPDATED"}, reqID)
+
+	case "proposals":
+		if s.InvSvc == nil {
+			host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Investment service not enabled", reqID)
+			return
+		}
+		if action == "approve" {
+			if err := s.InvSvc.ApproveProposal(ctx, itemID); err != nil {
+				host.WriteError(w, http.StatusBadRequest, "APPROVE_FAILED", err.Error(), reqID)
+				return
+			}
+		} else if action == "reject" {
+			if err := s.InvSvc.RejectProposal(ctx, itemID, "Rejected via pending console"); err != nil {
+				host.WriteError(w, http.StatusBadRequest, "REJECT_FAILED", err.Error(), reqID)
+				return
+			}
+		} else {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be approve or reject", reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "UPDATED"}, reqID)
+
+	default:
+		host.WriteError(w, http.StatusBadRequest, "INVALID_TYPE", "Pending type must be tasks, memory, or proposals", reqID)
+	}
+}
+
+// -------------------------------------------------------------
+// Audit Handlers
+// -------------------------------------------------------------
+
+func (s *ConsoleServices) handleAudit(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	if r.Method != http.MethodGet {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	filter := repository.AuditFilter{
+		Limit:        50,
+		Source:       r.URL.Query().Get("source"),
+		ResourceType: r.URL.Query().Get("resource_type"),
+		ResourceID:   r.URL.Query().Get("resource_id"),
+		RequestID:    r.URL.Query().Get("request_id"),
+	}
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+		filter.Limit = l
+	}
+
+	logs, err := s.AuditRepo.Query(r.Context(), filter)
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, logs, reqID)
+}

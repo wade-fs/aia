@@ -174,6 +174,16 @@ type AgentWebModule interface {
 }
 ```
 
+其中 `mux` 必須是 Web Host 為該 Agent 專屬建立的獨立 ServeMux，不得讓 Agent 接觸全域 mux。
+
+Host 負責：
+- 建立專屬 mux。
+- 驗證 Agent ID。
+- 將專屬 mux 掛載到命名空間 `/api/v1/agents/{agent_id}/`。
+- 防止路由衝突。
+- 套用統一的 Authentication、Authorization、Audit Middleware。
+Agent 不得註冊或覆蓋全域保留路徑。
+
 NavItem：
 
 ```go
@@ -296,9 +306,9 @@ AgentServices 僅包含該 Agent 被授權使用的 Service。
 | GET | `/api/v1/agents` | Agent 清單 |
 | GET | `/api/v1/agents/{id}` | Agent 詳情 |
 | GET | `/api/v1/memory` | Memory 查詢 |
-| GET | `/api/v1/approvals` | 待核准項目 |
-| POST | `/api/v1/approvals/{id}/approve` | 核准 |
-| POST | `/api/v1/approvals/{id}/reject` | 拒絕 |
+| GET | `/api/v1/pending` | 待處理事項 (聚合 WAITING_APPROVAL Tasks、Memory 候選及投資提案，不建立虛構 Approval Entity) |
+| POST | `/api/v1/pending/{type}/{id}/approve` | 待處理項目核准 |
+| POST | `/api/v1/pending/{type}/{id}/reject` | 待處理項目拒絕 |
 | GET | `/api/v1/audit` | Audit 查詢 |
 
 所有 API 都必須使用 Runtime Service。
@@ -311,11 +321,10 @@ Domain Agent 可在自己的 Namespace 下註冊 API。
 
 ```text
 /api/v1/agents/investment/profile
-/api/v1/agents/investment/watchlist
-/api/v1/agents/investment/portfolio
-/api/v1/agents/investment/research
+/api/v1/agents/investment/snapshot
 /api/v1/agents/investment/decisions
-/api/v1/agents/investment/predictions
+/api/v1/agents/investment/proposals
+/api/v1/agents/investment/evaluate
 ```
 
 Domain API 的業務規則仍由 Agent Domain Service 負責。
@@ -343,12 +352,12 @@ API 應建立 Task 後立即回傳：
   "success": true,
   "data": {
     "task_id": "task_123",
-    "status": "QUEUED"
+    "status": "READY"
   }
 }
 ```
 
-UI 透過 Task API 或 SSE 查詢進度。
+UI 透過 Task API 或 SSE 查詢進度。注意：狀態機以正式 Task State Machine 為唯一依據，初始就緒狀態為 `READY`，嚴禁使用虛構的 `QUEUED`。
 
 ## 5.2 Server-Sent Events
 
@@ -357,7 +366,7 @@ UI 透過 Task API 或 SSE 查詢進度。
 Endpoint：
 
 ```text
-GET /events/
+GET /api/v1/events
 ```
 
 事件類型：
@@ -395,34 +404,31 @@ SSE 不得被視為唯一資料來源。前端重新連線後，仍須透過 RES
 
 ## 6.1 Embedded Assets
 
-Web UI 靜態資源必須在建置時嵌入 Go Binary。
-
-使用：
+Web UI 靜態資源必須在建置時嵌入 Go Binary。明確規定 embed package 位置為 `go/web/assets`，靜態目錄位於 `go/web/assets/dist/`：
 
 ```go
-//go:embed web/dist/*
-var webAssets embed.FS
+package assets
+
+import "embed"
+
+//go:embed dist
+var FS embed.FS
 ```
 
-不得要求使用者另外安裝 Node.js、Nginx 或其他 Web Server 才能啟動 AIA。
+這樣 `//go:embed` 指令只處理該套件目錄底下的檔案，不會遇到跨目錄嵌入限制。
 
-前端可以使用獨立的建置工具，但正式執行環境只需 AIA Binary。
+不得要求使用者另外安裝 Node.js、npm、Nginx 或其他 Web Server 才能啟動 AIA，部署時只需要單一 Go 執行檔。
 
-## 6.2 UI 技術選擇
+## 6.2 前端技術選擇：原生 HTML / CSS / JavaScript
 
-第一階段不強制指定前端框架。
+正式採用原生前端（Vanilla HTML / CSS / JavaScript），不使用 Vite，也不引入 React、Vue 等大型框架。
 
-應符合：
-
-- 靜態 HTML/CSS/JavaScript。
-- 可編譯成靜態資源。
-- 支援 REST API。
-- 支援 SSE。
-- 不要求瀏覽器外掛。
-- 不在前端保存敏感 Credential。
-- 不將前端視為安全邊界。
-
-前端框架由實作階段決定，必須記錄版本及建置方式。
+理由：
+1. **單機、單使用者 Personal Agent**：不需要大型前端工程體系與複雜 Node.js 建置流程。
+2. **功能適配度高**：Global Console 與各 Agent UI 以設定、資料檢視、即時監控與任務核准為主，原生技術足以支援且反應極快。
+3. **無建置鏈負擔**：免除 Node.js、npm/pnpm、Vite 及相依套件版本變更風險。
+4. **單一 Binary 交付**：前端資源直接由 `go:embed` 編入 Go 二進位檔，維護成本降至最低。
+5. **安全邊界清晰**：前端純為操作介面與展示層，嚴禁保存機密憑證或視為安全邊界。
 
 ## 6.3 UI Namespace
 
@@ -458,21 +464,18 @@ var webAssets embed.FS
 - 未授權 API 操作。
 - 惡意第三方網站透過瀏覽器發送本機請求。
 
-## 7.2 Session
+## 7.2 登入與 Session 流程
 
-建議採用 Server-Side Session。
+AIA 採用高熵一次性登入 Token 與 Server-Side Session 流程：
 
-Cookie 應設定：
-
-- HttpOnly。
-- SameSite=Strict 或經安全評估的設定。
-- Secure：HTTPS 部署時必須啟用。
-- 合理的 Max-Age。
-- Session Rotation。
-
-不得將 Session ID 放入 URL。
-
-不得將 agy OAuth Token 放入 Web Session 或前端。
+1. **啟動生成**：AIA 啟動時於記憶體中產生高熵（32 位元組，64 字元 Hex）的一次性登入 Token。
+2. **終端呈現**：Token 僅於本機終端機命令列輸出一次，供使用者在本機登入頁輸入。
+3. **單次兌換**：Server 接收登入請求驗證 Token 後，立即使該 Token 失效（One-Time Redemption），不可重複使用。
+4. **建立 Session**：Server 建立具備閒置逾時（預設 30 分鐘）與絕對逾時（預設 12 小時）的 Server-Side Session。
+5. **安全 Cookie**：使用 `HttpOnly`、`SameSite=Strict` Cookie（名稱 `aia_session`）保存 Session ID；不將 Session ID 放入 URL。
+6. **每請求驗證**：每個 API Request 均重新驗證 Session 有效性、來源及權限。
+7. **過期與登出**：Session 逾期或使用者點擊登出後，Session 立即作廢並清除 Cookie，再次登入需重新由終端取得或生成一次性 Token。
+8. **憑證保護**：登入 Token 具備 15 分鐘有效期限；驗證資料妥善保存於記憶體，嚴禁將明文 Token 寫入資料庫或 Log。不得將 agy OAuth Token 放入 Web Session 或前端。
 
 ## 7.3 CSRF
 
@@ -530,18 +533,21 @@ investment.decision.read
 
 所有具備業務影響的 UI 操作都必須留下 Audit Record。
 
-最低欄位：
+Audit 資料結構透過 SQLite Versioned Migration（`002_audit_request_source_metadata`）正式擴充版本歷程，完整欄位包括：
 
-- actor_id
-- actor_type
-- action
-- resource_type
-- resource_id
-- request_id
-- timestamp
-- result
-- source（CLI / WEB / API）
-- metadata
+- `id`：全域唯一識別碼。
+- `sequence`：單調遞增序號。
+- `actor_type`：操作主體類型（USER / AGENT / SYSTEM）。
+- `actor_id`：操作者 ID。
+- `action`：具體動作名稱（如 `HTTP_POST`、`INVESTMENT_PROPOSAL_APPROVED`）。
+- `resource_type`：受影響資源類型（如 `TASK`、`INVESTMENT_PROPOSAL`、`MEMORY`）。
+- `resource_id`：目標資源識別碼。
+- `outcome`：執行結果（`SUCCESS` / `FAILED`）。
+- `details_json`：細部操作負載。
+- `request_id`：串聯端到端追蹤（HTTP `X-Request-ID` 或內部 Context Trace ID）。
+- `source`：操作來源，嚴格區分為 `CLI`、`WEB`、`RUNTIME`、`AGENT`、`RECOVERY`。
+- `metadata_json`：結構化 Context 資訊，自動遮蔽（Sanitize）敏感 Token、Cookie、密碼或金鑰。
+- `created_at`：UTC 時間戳。
 
 不可將密碼、Token、Cookie、API Key 或完整敏感內容寫入 Audit。
 

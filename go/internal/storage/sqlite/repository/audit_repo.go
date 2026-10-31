@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/wade/aia/internal/audit"
 	"github.com/wade/aia/internal/domain"
 	"github.com/wade/aia/internal/storage/sqlite"
 )
@@ -21,7 +23,19 @@ type AuditLogEntry struct {
 	ResourceID   string          `json:"resource_id"`
 	Outcome      string          `json:"outcome"`
 	Details      json.RawMessage `json:"details"`
+	RequestID    string          `json:"request_id"`
+	Source       string          `json:"source"`
+	Metadata     json.RawMessage `json:"metadata"`
 	CreatedAt    time.Time       `json:"created_at"`
+}
+
+// AuditFilter narrows audit queries.
+type AuditFilter struct {
+	Limit        int
+	Source       string
+	ResourceType string
+	ResourceID   string
+	RequestID    string
 }
 
 type AuditRepository struct {
@@ -32,7 +46,31 @@ func NewAuditRepository(db *sqlite.DB) *AuditRepository {
 	return &AuditRepository{db: db}
 }
 
+// Append writes an immutable audit record. Request ID, source and actor are
+// filled from the context origin when not set explicitly. Sensitive metadata
+// keys are redacted before persisting.
 func (r *AuditRepository) Append(ctx context.Context, entry *AuditLogEntry) error {
+	if o, ok := audit.FromContext(ctx); ok {
+		if entry.RequestID == "" {
+			entry.RequestID = o.RequestID
+		}
+		if entry.Source == "" {
+			entry.Source = string(o.Source)
+		}
+		// Human actors (web/cli users) take precedence over the generic
+		// SYSTEM actor used by services, so operations remain attributable.
+		if o.ActorID != "" && (entry.ActorID == "" || entry.ActorType == "SYSTEM") {
+			entry.Metadata = mergeActor(entry.Metadata, entry.ActorType, entry.ActorID)
+			entry.ActorType = o.ActorType
+			entry.ActorID = o.ActorID
+		}
+	}
+	if entry.Source == "" {
+		entry.Source = string(audit.SourceRuntime)
+	}
+	entry.Metadata = audit.SanitizeRaw(entry.Metadata)
+	entry.Details = audit.SanitizeRaw(entry.Details)
+
 	return r.db.WithTx(ctx, func(tx *sql.Tx) error {
 		var maxSeq sql.NullInt64
 		_ = tx.QueryRowContext(ctx, "SELECT MAX(sequence) FROM audit_logs").Scan(&maxSeq)
@@ -50,18 +88,15 @@ func (r *AuditRepository) Append(ctx context.Context, entry *AuditLogEntry) erro
 
 		query := `
 			INSERT INTO audit_logs (
-				id, sequence, actor_type, actor_id, action, resource_type, resource_id, outcome, details_json, created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				id, sequence, actor_type, actor_id, action, resource_type, resource_id, outcome, details_json,
+				request_id, source, metadata_json, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`
-		details := string(entry.Details)
-		if details == "" {
-			details = "{}"
-		}
-
 		_, err := tx.ExecContext(
 			ctx, query,
 			entry.ID, entry.Sequence, entry.ActorType, entry.ActorID, entry.Action,
-			entry.ResourceType, entry.ResourceID, entry.Outcome, details, entry.CreatedAt.Format(time.RFC3339),
+			entry.ResourceType, entry.ResourceID, entry.Outcome, string(entry.Details),
+			entry.RequestID, entry.Source, string(entry.Metadata), entry.CreatedAt.Format(time.RFC3339),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to append audit log: %w", err)
@@ -70,16 +105,54 @@ func (r *AuditRepository) Append(ctx context.Context, entry *AuditLogEntry) erro
 	})
 }
 
-func (r *AuditRepository) List(ctx context.Context, limit int) ([]AuditLogEntry, error) {
-	if limit <= 0 {
-		limit = 100
+func mergeActor(meta json.RawMessage, actorType, actorID string) json.RawMessage {
+	m := map[string]any{}
+	if len(meta) > 0 {
+		_ = json.Unmarshal(meta, &m)
 	}
-	query := fmt.Sprintf(`
-		SELECT id, sequence, actor_type, actor_id, action, resource_type, resource_id, outcome, details_json, created_at
-		FROM audit_logs ORDER BY sequence DESC LIMIT %d
-	`, limit)
+	if actorID != "" {
+		m["service_actor"] = actorType + ":" + actorID
+	}
+	b, _ := json.Marshal(m)
+	return b
+}
 
-	rows, err := r.db.RawDB().QueryContext(ctx, query)
+func (r *AuditRepository) List(ctx context.Context, limit int) ([]AuditLogEntry, error) {
+	return r.Query(ctx, AuditFilter{Limit: limit})
+}
+
+// Query lists audit records newest first using the given filter.
+func (r *AuditRepository) Query(ctx context.Context, f AuditFilter) ([]AuditLogEntry, error) {
+	if f.Limit <= 0 || f.Limit > 1000 {
+		f.Limit = 100
+	}
+	var where []string
+	var args []any
+	if f.Source != "" {
+		where = append(where, "source = ?")
+		args = append(args, f.Source)
+	}
+	if f.ResourceType != "" {
+		where = append(where, "resource_type = ?")
+		args = append(args, f.ResourceType)
+	}
+	if f.ResourceID != "" {
+		where = append(where, "resource_id = ?")
+		args = append(args, f.ResourceID)
+	}
+	if f.RequestID != "" {
+		where = append(where, "request_id = ?")
+		args = append(args, f.RequestID)
+	}
+	query := `SELECT id, sequence, actor_type, actor_id, action, resource_type, resource_id, outcome, details_json,
+		request_id, source, metadata_json, created_at FROM audit_logs`
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	query += " ORDER BY sequence DESC LIMIT ?"
+	args = append(args, f.Limit)
+
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list audit logs: %w", err)
 	}
@@ -88,16 +161,18 @@ func (r *AuditRepository) List(ctx context.Context, limit int) ([]AuditLogEntry,
 	var list []AuditLogEntry
 	for rows.Next() {
 		var e AuditLogEntry
-		var details, createdAt string
+		var details, metadata, createdAt string
 		if err := rows.Scan(
 			&e.ID, &e.Sequence, &e.ActorType, &e.ActorID, &e.Action,
-			&e.ResourceType, &e.ResourceID, &e.Outcome, &details, &createdAt,
+			&e.ResourceType, &e.ResourceID, &e.Outcome, &details,
+			&e.RequestID, &e.Source, &metadata, &createdAt,
 		); err != nil {
 			return nil, err
 		}
 		e.Details = json.RawMessage(details)
+		e.Metadata = json.RawMessage(metadata)
 		e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		list = append(list, e)
 	}
-	return list, nil
+	return list, rows.Err()
 }

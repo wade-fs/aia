@@ -113,6 +113,9 @@ func TestAgy_RealIntegration_AG02_AG04_StreamJson(t *testing.T) {
 		t.Errorf("expected to receive 'step_update' stream event from agy")
 	}
 	if res.Status != "SUCCESS" {
+		if strings.Contains(res.Error, "quota reached") || strings.Contains(res.Error, "RESOURCE_EXHAUSTED") || strings.Contains(res.Error, "429") {
+			t.Skipf("agy quota reached: %s", res.Error)
+		}
 		t.Errorf("expected result status SUCCESS, got %s", res.Status)
 	}
 	if res.ConversationID == "" {

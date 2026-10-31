@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/wade/aia/internal/app"
+	"github.com/wade/aia/internal/domain"
 	"github.com/wade/aia/internal/domain/execution"
 	"github.com/wade/aia/internal/domain/memory"
 	"github.com/wade/aia/internal/domain/task"
@@ -381,5 +382,191 @@ func TestScenarioF_CrashRecoveryIdempotency(t *testing.T) {
 	recoveredTask, _ := appInst.TaskSvc.Get(ctx, tk.ID)
 	if recoveredTask.Status != task.StatusCompleted {
 		t.Errorf("expected already-succeeded task to recover directly to COMPLETED, got %s", recoveredTask.Status)
+	}
+}
+
+// seedCrashedExecution creates a RUNNING task plus an execution record that
+// simulates a runtime crash at a specific point of the execution pipeline.
+func seedCrashedExecution(t *testing.T, appInst *app.App, req taskService.CreateTaskRequest, exStatus execution.ExecutionStatus, resultStatus string) (*task.Task, *execution.Execution) {
+	t.Helper()
+	ctx := context.Background()
+	tk, err := appInst.TaskSvc.Create(ctx, req)
+	if err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+	if err := appInst.TaskSvc.UpdateStatus(ctx, tk.ID, task.StatusRunning); err != nil {
+		t.Fatalf("failed to mark task RUNNING: %v", err)
+	}
+	ex := &execution.Execution{
+		ID:           uuid.New().String(),
+		TaskID:       tk.ID,
+		AgentID:      "coding-agent",
+		Provider:     "mock",
+		Workspace:    t.TempDir(),
+		Status:       exStatus,
+		ResultStatus: resultStatus,
+		CreatedAt:    time.Now().UTC(),
+	}
+	if err := repository.NewExecutionRepository(appInst.DB).Create(ctx, ex); err != nil {
+		t.Fatalf("failed to create execution: %v", err)
+	}
+	return tk, ex
+}
+
+// Scenario F3: Provider returned SUCCESS, runtime crashed before Validation -> recovery validates and completes
+func TestScenarioF_CrashAfterSuccessBeforeValidation_Passed(t *testing.T) {
+	appInst, _ := createTestApp(t)
+	defer appInst.Close()
+	ctx := context.Background()
+
+	tk, ex := seedCrashedExecution(t, appInst, taskService.CreateTaskRequest{Title: "Succeeded but not validated"},
+		execution.StatusRunning, "SUCCESS")
+
+	summary, err := appInst.RecoveryMgr.Recover(ctx)
+	if err != nil {
+		t.Fatalf("recovery failed: %v", err)
+	}
+	if summary.RecoveredTasks != 1 {
+		t.Errorf("expected 1 recovered task, got %d", summary.RecoveredTasks)
+	}
+	if summary.InterruptedExecutions != 0 {
+		t.Errorf("SUCCESS execution must not be counted as interrupted, got %d", summary.InterruptedExecutions)
+	}
+
+	got, _ := appInst.TaskSvc.Get(ctx, tk.ID)
+	if got.Status != task.StatusCompleted {
+		t.Errorf("expected task COMPLETED after recovery validation passed, got %s", got.Status)
+	}
+	if got.RetryCount != 0 {
+		t.Errorf("validated task must not be retried, retry_count=%d", got.RetryCount)
+	}
+	gotEx, _ := repository.NewExecutionRepository(appInst.DB).Get(ctx, ex.ID)
+	if gotEx.Status != execution.StatusCompleted {
+		t.Errorf("expected execution COMPLETED, got %s", gotEx.Status)
+	}
+}
+
+// Scenario F4: Provider returned SUCCESS, crash before Validation, and recovery validation rejects
+func TestScenarioF_CrashAfterSuccessBeforeValidation_Rejected(t *testing.T) {
+	appInst, _ := createTestApp(t)
+	defer appInst.Close()
+	ctx := context.Background()
+
+	tk, ex := seedCrashedExecution(t, appInst, taskService.CreateTaskRequest{
+		Title:      "Succeeded but output missing",
+		Acceptance: []string{"file: missing-output.txt"},
+	}, execution.StatusRunning, "SUCCESS")
+
+	if _, err := appInst.RecoveryMgr.Recover(ctx); err != nil {
+		t.Fatalf("recovery failed: %v", err)
+	}
+
+	got, _ := appInst.TaskSvc.Get(ctx, tk.ID)
+	if got.Status == task.StatusCompleted {
+		t.Fatalf("task must NOT be COMPLETED when recovery validation rejects")
+	}
+	if got.Status != task.StatusReady || got.RetryCount != 1 {
+		t.Errorf("expected task READY with retry_count=1, got %s retry_count=%d", got.Status, got.RetryCount)
+	}
+	gotEx, _ := repository.NewExecutionRepository(appInst.DB).Get(ctx, ex.ID)
+	if gotEx.Status != execution.StatusFailed {
+		t.Errorf("expected execution FAILED, got %s", gotEx.Status)
+	}
+	if gotEx.ErrorMessage == "" {
+		t.Errorf("expected validation failure reason on execution")
+	}
+}
+
+// Scenario F5: External side effect may have happened but result was not persisted before crash
+func TestScenarioF_CrashWithExternalSideEffects(t *testing.T) {
+	appInst, _ := createTestApp(t)
+	defer appInst.Close()
+	ctx := context.Background()
+
+	highTk, highEx := seedCrashedExecution(t, appInst, taskService.CreateTaskRequest{
+		Title: "Send email to customer",
+		Risk:  domain.RiskHigh,
+	}, execution.StatusRunning, "")
+	lowTk, _ := seedCrashedExecution(t, appInst, taskService.CreateTaskRequest{
+		Title: "Idempotent local refactor",
+		Risk:  domain.RiskLow,
+	}, execution.StatusRunning, "")
+
+	summary, err := appInst.RecoveryMgr.Recover(ctx)
+	if err != nil {
+		t.Fatalf("recovery failed: %v", err)
+	}
+	if summary.InterruptedExecutions != 2 {
+		t.Errorf("expected 2 interrupted executions, got %d", summary.InterruptedExecutions)
+	}
+
+	gotHigh, _ := appInst.TaskSvc.Get(ctx, highTk.ID)
+	if gotHigh.Status != task.StatusWaitingApproval {
+		t.Errorf("high-risk task must wait for approval instead of auto retry, got %s", gotHigh.Status)
+	}
+	if gotHigh.RetryCount != 0 {
+		t.Errorf("high-risk task must not be auto-retried, retry_count=%d", gotHigh.RetryCount)
+	}
+	gotHighEx, _ := repository.NewExecutionRepository(appInst.DB).Get(ctx, highEx.ID)
+	if gotHighEx.Status != execution.StatusInterrupted {
+		t.Errorf("expected execution INTERRUPTED, got %s", gotHighEx.Status)
+	}
+
+	gotLow, _ := appInst.TaskSvc.Get(ctx, lowTk.ID)
+	if gotLow.Status != task.StatusReady || gotLow.RetryCount != 1 {
+		t.Errorf("low-risk task should be retried: got %s retry_count=%d", gotLow.Status, gotLow.RetryCount)
+	}
+
+	// Running recovery again must be idempotent (no duplicate retry / state change)
+	if _, err := appInst.RecoveryMgr.Recover(ctx); err != nil {
+		t.Fatalf("second recovery failed: %v", err)
+	}
+	gotHigh2, _ := appInst.TaskSvc.Get(ctx, highTk.ID)
+	if gotHigh2.Status != task.StatusWaitingApproval {
+		t.Errorf("second recovery changed high-risk task state to %s", gotHigh2.Status)
+	}
+}
+
+// Scenario D2: Resume must run provider HealthCheck first
+func TestScenarioD_ResumeHealthCheck(t *testing.T) {
+	appInst, _ := createTestApp(t)
+	defer appInst.Close()
+	ctx := context.Background()
+
+	mockProv, ok := appInst.Provider.(*mock.MockProvider)
+	if !ok {
+		t.Fatalf("expected mock provider, got %T", appInst.Provider)
+	}
+
+	tk, _ := appInst.TaskSvc.Create(ctx, taskService.CreateTaskRequest{Title: "Blocked by provider outage"})
+	_ = appInst.TaskSvc.UpdateStatus(ctx, tk.ID, task.StatusBlocked)
+
+	// 1. Health check fails -> resume rejected, task stays BLOCKED
+	mockProv.HealthCheckFunc = func(ctx context.Context) error {
+		return fmt.Errorf("agy not authenticated")
+	}
+	if err := appInst.TaskSvc.Resume(ctx, tk.ID); err == nil {
+		t.Fatalf("expected resume to fail when health check fails")
+	}
+	got, _ := appInst.TaskSvc.Get(ctx, tk.ID)
+	if got.Status != task.StatusBlocked {
+		t.Errorf("expected task to remain BLOCKED, got %s", got.Status)
+	}
+
+	// 2. Health check passes -> resume succeeds
+	calls := 0
+	mockProv.HealthCheckFunc = func(ctx context.Context) error {
+		calls++
+		return nil
+	}
+	if err := appInst.TaskSvc.Resume(ctx, tk.ID); err != nil {
+		t.Fatalf("expected resume to succeed, got %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("expected health check to be called once, got %d", calls)
+	}
+	got, _ = appInst.TaskSvc.Get(ctx, tk.ID)
+	if got.Status != task.StatusReady {
+		t.Errorf("expected task READY after resume, got %s", got.Status)
 	}
 }

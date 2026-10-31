@@ -16,17 +16,36 @@ type TaskFilter struct {
 	ProjectID    domain.ID
 	ParentTaskID domain.ID
 	Status       task.TaskStatus
+	Limit        int
 }
 
+// TaskChangeHook is invoked after a task change is committed. It is used by
+// the runtime to publish notifications (event bus); it must not block.
+type TaskChangeHook func(ctx context.Context, taskID domain.ID, status task.TaskStatus, created bool)
+
 type TaskRepository struct {
-	db *sqlite.DB
+	db   *sqlite.DB
+	hook TaskChangeHook
 }
+
+// SetChangeHook registers a post-commit change hook.
+func (r *TaskRepository) SetChangeHook(h TaskChangeHook) { r.hook = h }
 
 func NewTaskRepository(db *sqlite.DB) *TaskRepository {
 	return &TaskRepository{db: db}
 }
 
 func (r *TaskRepository) Create(ctx context.Context, t *task.Task, dependencies []domain.ID) error {
+	if err := r.create(ctx, t, dependencies); err != nil {
+		return err
+	}
+	if r.hook != nil {
+		r.hook(ctx, t.ID, t.Status, true)
+	}
+	return nil
+}
+
+func (r *TaskRepository) create(ctx context.Context, t *task.Task, dependencies []domain.ID) error {
 	// Check dependency cycles
 	if len(dependencies) > 0 {
 		graph, err := r.GetFullDependencyGraph(ctx)
@@ -116,6 +135,20 @@ func (r *TaskRepository) Get(ctx context.Context, id domain.ID) (*task.Task, err
 		&status, &t.Priority, &risk, &acceptJSON, &t.RetryCount, &t.MaxRetries,
 		&createdAt, &updatedAt, &startedAt, &completedAt,
 	)
+	if err == sql.ErrNoRows && len(id) >= 6 {
+		prefixQuery := `
+			SELECT id, project_id, parent_task_id, agent_id, title, description,
+			       status, priority, risk, acceptance_json, retry_count, max_retries,
+			       created_at, updated_at, started_at, completed_at
+			FROM tasks WHERE id LIKE ? || '%' LIMIT 1
+		`
+		row = r.db.RawDB().QueryRowContext(ctx, prefixQuery, id)
+		err = row.Scan(
+			&t.ID, &t.ProjectID, &parentID, &agentID, &t.Title, &t.Description,
+			&status, &t.Priority, &risk, &acceptJSON, &t.RetryCount, &t.MaxRetries,
+			&createdAt, &updatedAt, &startedAt, &completedAt,
+		)
+	}
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("task not found: %s", id)
@@ -167,6 +200,9 @@ func (r *TaskRepository) List(ctx context.Context, filter TaskFilter) ([]task.Ta
 		args = append(args, string(filter.Status))
 	}
 	query += " ORDER BY priority DESC, created_at ASC"
+	if filter.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", filter.Limit)
+	}
 
 	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
 	if err != nil {
@@ -214,6 +250,16 @@ func (r *TaskRepository) List(ctx context.Context, filter TaskFilter) ([]task.Ta
 }
 
 func (r *TaskRepository) UpdateStatus(ctx context.Context, id domain.ID, to task.TaskStatus) error {
+	if err := r.updateStatus(ctx, id, to); err != nil {
+		return err
+	}
+	if r.hook != nil {
+		r.hook(ctx, id, to, false)
+	}
+	return nil
+}
+
+func (r *TaskRepository) updateStatus(ctx context.Context, id domain.ID, to task.TaskStatus) error {
 	return r.db.WithTx(ctx, func(tx *sql.Tx) error {
 		var currStatusStr string
 		err := tx.QueryRowContext(ctx, "SELECT status FROM tasks WHERE id = ?", id).Scan(&currStatusStr)

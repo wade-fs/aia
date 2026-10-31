@@ -989,26 +989,43 @@ Recovery 不得自動重送所有 RUNNING Task。
 
 # 15. Audit Architecture
 
-重要操作必須產生 Audit Event。
-
-Audit Event 至少包含：
+重要操作必須產生 Audit Event。Audit 欄位經資料庫版本遷移擴充，包含 Request 追蹤、來源分類與遮蔽機密之結構化 Metadata：
 
 ```go
 type AuditEvent struct {
-    ID          string
-    Sequence    uint64
-    ActorType   string
-    ActorID     string
-    Action      string
+    ID           string
+    Sequence     uint64
+    ActorType    string
+    ActorID      string
+    Action       string
     ResourceType string
-    ResourceID  string
-    Outcome     string
-    Details     json.RawMessage
-    CreatedAt   time.Time
+    ResourceID   string
+    Outcome      string
+    Details      json.RawMessage
+    RequestID    string
+    Source       string // CLI, WEB, RUNTIME, AGENT, RECOVERY
+    Metadata     json.RawMessage
+    CreatedAt    time.Time
 }
 ```
 
-Audit 不得保存明文 Token、密碼或 Credential。
+Audit 不得保存明文 Token、密碼、Cookie 或 Credential。
+
+## 15.1 Web Host 元件隔離與登入流程
+
+1. **元件與路由隔離**：
+   - AIA 採用單一 Web Host，Domain Agent 透過 `AgentWebModule` 註冊自訂 UI。
+   - Web Host 為各 Agent 建立獨立專屬的 `*http.ServeMux`，並掛載於 `/api/v1/agents/{agent_id}/`。
+   - Agent 不接觸全域 mux，無法攔截或覆寫全域系統保留路徑，統一由 Host 套用認證、授權與 Audit 中介層。
+2. **一次性 Token 與 Session**：
+   - 啟動時產生高熵一次性登入 Token，於終端機僅輸出一次。
+   - 經 `/api/v1/auth/login` 驗證後立即使 Token 永久失效（單次兌換）。
+   - 建立具備閒置逾時與絕對逾時的 Server-Side Session，透過 `HttpOnly`、`SameSite=Strict` Cookie 維護。
+
+## 15.2 投資決策責任邊界 (Investment Responsibility Boundary)
+
+- **agy**：負責市場研究、財報與公開資訊研判、決策方向與信心度評估。
+- **Go Runtime**：負責股票標的驗證、計算建議股數、計算手續費與證交稅、檢查可用現金與資金上限及風控限制、產生最終正式 Trade Proposal。超出限制時自動駁回或向下調整，嚴禁 LLM 未經 Go 驗證直接產生有效交易提案。
 
 ---
 

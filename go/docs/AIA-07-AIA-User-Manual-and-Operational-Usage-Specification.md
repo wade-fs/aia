@@ -211,19 +211,19 @@ aia web
 | 參數 | 說明 | 預設值 |
 |---|---|---|
 | `--host` | Web Server 綁定位址 | `127.0.0.1` |
-| `--port` / `-p` | Web Server Port | `8080` |
+| `--port` / `-p` | Web Server Port | `7777` |
 | `--config` / `-c` | 設定檔路徑 | 預設設定檔 |
 
 例如：
 
 ```bash
-aia web --host 127.0.0.1 --port 8080
+aia web --host 127.0.0.1 --port 7777
 ```
 
 預設瀏覽器位址：
 
 ```text
-http://127.0.0.1:8080
+http://127.0.0.1:7777
 ```
 
 ### 5.2.1 一次性登入 Token

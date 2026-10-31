@@ -204,8 +204,54 @@ var invEvaluateCmd = &cobra.Command{
 	},
 }
 
+var (
+	cashReason string
+)
+
+var invSetCapitalCmd = &cobra.Command{
+	Use:   "set-capital <amount>",
+	Short: "Update investment capital limit in NT$ (e.g. 1500000)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		amount, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil || amount < 0 {
+			return fmt.Errorf("invalid capital limit amount: %s", args[0])
+		}
+		if err := appInst.InvSvc.SetCapitalLimit(ctx, amount); err != nil {
+			return err
+		}
+		fmt.Printf("✓ Successfully updated Capital Limit to NT$ %s\n", formatMoney(amount))
+		return nil
+	},
+}
+
+var invSetCashCmd = &cobra.Command{
+	Use:   "set-cash <amount>",
+	Short: "Update available cash in NT$ (e.g. 800000)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		amount, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil || amount < 0 {
+			return fmt.Errorf("invalid cash amount: %s", args[0])
+		}
+		snap, err := appInst.InvSvc.SetAvailableCash(ctx, amount, cashReason)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("✓ Successfully updated Available Cash to NT$ %s (Total Portfolio Value: NT$ %s)\n",
+			formatMoney(snap.AvailableCash), formatMoney(snap.TotalPortfolioValue))
+		return nil
+	},
+}
+
 func init() {
+	invSetCashCmd.Flags().StringVarP(&cashReason, "reason", "r", "Manual cash adjustment via CLI", "Reason for cash change")
+
 	investmentCmd.AddCommand(invPortfolioCmd)
+	investmentCmd.AddCommand(invSetCapitalCmd)
+	investmentCmd.AddCommand(invSetCashCmd)
 	investmentCmd.AddCommand(invSyncCmd)
 	investmentCmd.AddCommand(invProposalsCmd)
 	investmentCmd.AddCommand(invApproveCmd)

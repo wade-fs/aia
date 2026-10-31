@@ -734,6 +734,8 @@ aia investment --help
 
 可用指令包含：
 - `aia investment portfolio`：檢視投資組合、可用現金、資金上限與持倉。
+- `aia investment set-capital <amount>`：更新投資資金上限（Capital Limit，例如 `1500000`）。
+- `aia investment set-cash <amount> [--reason <msg>]`：更新目前可用現金（Available Cash，例如 `800000`），並產生審計快照。
 - `aia investment sync [symbol]`：自 TWSE OpenAPI 與 MOPS 抓取最新行情與重大訊息。
 - `aia investment proposals`：列出 Go Runtime 產生之交易提案。
 - `aia investment approve <id>`：核准交易提案。

@@ -58,6 +58,20 @@ func (m *InvestmentWebModule) handleProfile(w http.ResponseWriter, r *http.Reque
 	reqID := r.Header.Get("X-Request-ID")
 	ctx := r.Context()
 
+	if r.Method == http.MethodPost || r.Method == http.MethodPut {
+		var req struct {
+			CapitalLimit int64 `json:"capital_limit"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid json payload", reqID)
+			return
+		}
+		if err := m.svc.SetCapitalLimit(ctx, req.CapitalLimit); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error(), reqID)
+			return
+		}
+	}
+
 	prof, err := m.svc.GetProfile(ctx)
 	if err != nil {
 		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
@@ -74,6 +88,21 @@ func (m *InvestmentWebModule) handleProfile(w http.ResponseWriter, r *http.Reque
 func (m *InvestmentWebModule) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 	ctx := r.Context()
+
+	if r.Method == http.MethodPost || r.Method == http.MethodPut {
+		var req struct {
+			AvailableCash int64  `json:"available_cash"`
+			Reason        string `json:"reason"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid json payload", reqID)
+			return
+		}
+		if _, err := m.svc.SetAvailableCash(ctx, req.AvailableCash, req.Reason); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error(), reqID)
+			return
+		}
+	}
 
 	snap, positions, err := m.svc.GetSnapshot(ctx)
 	if err != nil {

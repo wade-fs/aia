@@ -151,6 +151,84 @@ func (r *InvestmentRepository) GetProfile(ctx context.Context, id domain.ID) (*i
 	return scanProfile(row)
 }
 
+// UpdateCapitalLimit updates the capital ceiling of a portfolio profile.
+func (r *InvestmentRepository) UpdateCapitalLimit(ctx context.Context, profileID domain.ID, limit int64) error {
+	now := time.Now().UTC()
+	_, err := r.db.RawDB().ExecContext(ctx, `
+		UPDATE investment_portfolio_profiles
+		SET capital_limit = ?, updated_at = ?
+		WHERE id = ?
+	`, limit, now.Format(time.RFC3339), profileID)
+	return err
+}
+
+// UpdateAvailableCash creates a new immutable point-in-time snapshot with adjusted available cash,
+// copying existing positions and recomputing total portfolio value.
+func (r *InvestmentRepository) UpdateAvailableCash(ctx context.Context, profileID domain.ID, newCash int64, note string) (*investment.PortfolioSnapshot, error) {
+	snap, err := r.GetLatestSnapshot(ctx, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get latest snapshot: %w", err)
+	}
+	positions, err := r.ListPositions(ctx, snap.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list positions: %w", err)
+	}
+
+	var totalPositionsValue int64 = 0
+	for _, p := range positions {
+		totalPositionsValue += p.MarketValue
+	}
+
+	now := time.Now().UTC()
+	newSnap := &investment.PortfolioSnapshot{
+		ID:                  uuid.New().String(),
+		PortfolioProfileID:  profileID,
+		AsOf:                now,
+		Source:              "MANUAL_ADJUSTMENT",
+		Currency:            snap.Currency,
+		AvailableCash:       newCash,
+		TotalPortfolioValue: newCash + totalPositionsValue,
+		ValidationStatus:    "VALIDATED",
+		MetadataJSON:        fmt.Sprintf(`{"reason": %q, "previous_cash": %d}`, note, snap.AvailableCash),
+		CreatedAt:           now,
+	}
+
+	err = r.db.WithTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO investment_portfolio_snapshots (
+				id, portfolio_profile_id, as_of, source, currency,
+				available_cash, total_portfolio_value, validation_status, metadata_json, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, newSnap.ID, newSnap.PortfolioProfileID, newSnap.AsOf.Format(time.RFC3339),
+			newSnap.Source, newSnap.Currency, newSnap.AvailableCash, newSnap.TotalPortfolioValue,
+			newSnap.ValidationStatus, newSnap.MetadataJSON, newSnap.CreatedAt.Format(time.RFC3339))
+		if err != nil {
+			return err
+		}
+
+		// Copy over positions to the new snapshot
+		for _, pos := range positions {
+			newPosID := uuid.New().String()
+			_, err = tx.ExecContext(ctx, `
+				INSERT INTO investment_portfolio_positions (
+					id, portfolio_snapshot_id, instrument_id, quantity, average_cost,
+					last_known_price, market_value, currency, metadata_json
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`, newPosID, newSnap.ID, pos.InstrumentID, pos.Quantity, pos.AverageCost,
+				pos.LastKnownPrice, pos.MarketValue, pos.Currency, pos.MetadataJSON)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to save new snapshot: %w", err)
+	}
+
+	return newSnap, nil
+}
+
 func (r *InvestmentRepository) GetLatestSnapshot(ctx context.Context, profileID domain.ID) (*investment.PortfolioSnapshot, error) {
 	row := r.db.RawDB().QueryRowContext(ctx, `
 		SELECT id, portfolio_profile_id, as_of, source, currency, available_cash, total_portfolio_value, validation_status, metadata_json, created_at

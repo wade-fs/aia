@@ -243,9 +243,14 @@
 
       <!-- 4. Investment Agent Tab -->
       <section id="tab-investment" class="tab-pane">
-        <div class="section-title">
-          <h2>Investment Agent (投資決策與風險核心)</h2>
-          <span class="text-muted">AIA-05 規格：agy 負責研究與判斷，Go 負責數字、手續費、證交稅、資金限制與最終決策資料有效性</span>
+        <div class="section-header-row">
+          <div>
+            <h2>Investment Agent (投資決策與風險核心)</h2>
+            <span class="text-muted">AIA-05 規格：agy 負責研究與判斷，Go 負責數字、手續費、證交稅、資金限制與最終決策資料有效性</span>
+          </div>
+          <div>
+            <button class="btn btn-primary" onclick="app.openEditFundsModal()">⚙️ 調整現金與資金上限</button>
+          </div>
         </div>
 
         <!-- Portfolio Overview Bar -->
@@ -598,6 +603,38 @@
           <div class="modal-footer">
             <button type="button" class="btn btn-ghost" onclick="app.closeTaskModal()">取消</button>
             <button type="submit" class="btn btn-primary">建立任務 (狀態為 READY)</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Investment Funds Modal -->
+  <div id="edit-funds-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>調整可用現金與資金上限</h3>
+        <button class="close-btn" onclick="app.closeEditFundsModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-edit-funds" onsubmit="app.submitEditFunds(event)">
+          <div class="form-group">
+            <label for="edit-capital-limit">資金上限 Capital Limit (NT$) *</label>
+            <input type="number" id="edit-capital-limit" required min="0" placeholder="例如 1000000">
+            <small class="text-muted" style="display:block; margin-top:4px;">限制 Agent 在進行買進建議時所能動用的整體資金上限 (NT$)</small>
+          </div>
+          <div class="form-group mt-3">
+            <label for="edit-available-cash">可用現金 Available Cash (NT$) *</label>
+            <input type="number" id="edit-available-cash" required min="0" placeholder="例如 600000">
+            <small class="text-muted" style="display:block; margin-top:4px;">真實證券帳戶中的未受限流動現金 (NT$)</small>
+          </div>
+          <div class="form-group mt-3">
+            <label for="edit-funds-reason">變更理由</label>
+            <input type="text" id="edit-funds-reason" value="手動調整可用現金與資金上限">
+          </div>
+          <div class="modal-footer mt-4">
+            <button type="button" class="btn btn-ghost" onclick="app.closeEditFundsModal()">取消</button>
+            <button type="submit" class="btn btn-primary">儲存變更</button>
           </div>
         </form>
       </div>

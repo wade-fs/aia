@@ -121,4 +121,24 @@ func TestInvestmentService_EndToEnd(t *testing.T) {
 	if _, err := svc.ProcessAgyDecision(ctx, invalidSymbolInput, 100.0); err == nil {
 		t.Errorf("expected invalid symbol to be rejected")
 	}
+
+	// 6. Test SetCapitalLimit and SetAvailableCash
+	if err := svc.SetCapitalLimit(ctx, 2500000); err != nil {
+		t.Fatalf("failed to set capital limit: %v", err)
+	}
+	updatedProf, err := svc.GetProfile(ctx)
+	if err != nil || updatedProf.CapitalLimit != 2500000 {
+		t.Fatalf("expected capital limit 2500000, got %v", updatedProf.CapitalLimit)
+	}
+
+	updatedSnap, err := svc.SetAvailableCash(ctx, 850000, "Deposit test")
+	if err != nil {
+		t.Fatalf("failed to set available cash: %v", err)
+	}
+	if updatedSnap.AvailableCash != 850000 {
+		t.Errorf("expected available cash 850000, got %d", updatedSnap.AvailableCash)
+	}
+	if updatedSnap.TotalPortfolioValue != 850000+400000 {
+		t.Errorf("expected total portfolio value 1250000, got %d", updatedSnap.TotalPortfolioValue)
+	}
 }

@@ -497,6 +497,7 @@ const app = {
       const profData = await this.apiCall('/api/v1/agents/investment/profile');
       if (profData && profData.profile) {
         const p = profData.profile;
+        this.currentCapitalLimit = p.capital_limit;
         document.getElementById('inv-prof-name').textContent = p.name;
         document.getElementById('inv-prof-market').textContent = `Market: ${p.market} (${p.currency})`;
         document.getElementById('inv-capital-limit').textContent = '$' + p.capital_limit.toLocaleString();
@@ -506,6 +507,7 @@ const app = {
       const snapData = await this.apiCall('/api/v1/agents/investment/snapshot');
       if (snapData && snapData.snapshot) {
         const s = snapData.snapshot;
+        this.currentAvailableCash = s.available_cash;
         document.getElementById('inv-cash').textContent = '$' + s.available_cash.toLocaleString();
         document.getElementById('inv-total-value').textContent = '$' + s.total_portfolio_value.toLocaleString();
 
@@ -699,6 +701,44 @@ const app = {
     } catch (err) {
       resBox.className = 'alert alert-error mt-3';
       resBox.innerHTML = `<strong>✗ 投資建議被 Go 核心拒絕：</strong><br>${this.escape(err.message)}`;
+    }
+  },
+
+  openEditFundsModal() {
+    document.getElementById('edit-capital-limit').value = this.currentCapitalLimit != null ? this.currentCapitalLimit : 1000000;
+    document.getElementById('edit-available-cash').value = this.currentAvailableCash != null ? this.currentAvailableCash : 600000;
+    document.getElementById('edit-funds-modal').classList.remove('hidden');
+  },
+
+  closeEditFundsModal() {
+    document.getElementById('edit-funds-modal').classList.add('hidden');
+  },
+
+  async submitEditFunds(e) {
+    e.preventDefault();
+    const capLimit = parseInt(document.getElementById('edit-capital-limit').value, 10);
+    const availCash = parseInt(document.getElementById('edit-available-cash').value, 10);
+    const reason = document.getElementById('edit-funds-reason').value || '手動調整可用現金與資金上限';
+
+    if (isNaN(capLimit) || capLimit < 0 || isNaN(availCash) || availCash < 0) {
+      alert('請輸入有效的金額（數值需大於或等於 0）');
+      return;
+    }
+
+    try {
+      await this.apiCall('/api/v1/agents/investment/profile', {
+        method: 'POST',
+        body: { capital_limit: capLimit }
+      });
+      await this.apiCall('/api/v1/agents/investment/snapshot', {
+        method: 'POST',
+        body: { available_cash: availCash, reason: reason }
+      });
+      this.showToast('✓ 已成功更新可用現金與資金上限！', 'success');
+      this.closeEditFundsModal();
+      await this.loadInvestment();
+    } catch (err) {
+      alert('更新失敗: ' + (err.message || err));
     }
   },
 

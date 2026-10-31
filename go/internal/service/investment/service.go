@@ -51,6 +51,31 @@ func (s *Service) GetProfile(ctx context.Context) (*investment.PortfolioProfile,
 	return s.repo.EnsureDefaultProfile(ctx)
 }
 
+func (s *Service) SetCapitalLimit(ctx context.Context, limit int64) error {
+	if limit < 0 {
+		return fmt.Errorf("capital limit must be non-negative")
+	}
+	prof, err := s.GetProfile(ctx)
+	if err != nil {
+		return err
+	}
+	return s.repo.UpdateCapitalLimit(ctx, prof.ID, limit)
+}
+
+func (s *Service) SetAvailableCash(ctx context.Context, amount int64, reason string) (*investment.PortfolioSnapshot, error) {
+	if amount < 0 {
+		return nil, fmt.Errorf("available cash must be non-negative")
+	}
+	prof, err := s.GetProfile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if reason == "" {
+		reason = "Manual cash update"
+	}
+	return s.repo.UpdateAvailableCash(ctx, prof.ID, amount, reason)
+}
+
 func (s *Service) GetSnapshot(ctx context.Context) (*investment.PortfolioSnapshot, []investment.Position, error) {
 	prof, err := s.GetProfile(ctx)
 	if err != nil {

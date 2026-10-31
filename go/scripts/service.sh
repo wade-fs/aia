@@ -6,8 +6,13 @@ set -euo pipefail
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-GO_DIR="${REPO_ROOT}/go"
+if [[ -f "${SCRIPT_DIR}/../go.mod" ]]; then
+    GO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    REPO_ROOT="$(cd "${GO_DIR}/.." && pwd)"
+else
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    GO_DIR="${REPO_ROOT}/go"
+fi
 
 CONFIG_DIR="${HOME}/.config/aia"
 ENV_FILE="${CONFIG_DIR}/service.env"

@@ -17,19 +17,19 @@ clean:
 
 # Background Service Management (systemd user daemon)
 install_service:
-	@../scripts/service.sh install
+	@./scripts/service.sh install
 
 uninstall_service:
-	@../scripts/service.sh uninstall
+	@./scripts/service.sh uninstall
 
 status_service:
-	@../scripts/service.sh status
+	@./scripts/service.sh status
 
 restart_service:
-	@../scripts/service.sh restart
+	@./scripts/service.sh restart
 
 logs_service:
-	@../scripts/service.sh logs
+	@./scripts/service.sh logs
 
 token:
-	@../scripts/service.sh token
+	@./scripts/service.sh token

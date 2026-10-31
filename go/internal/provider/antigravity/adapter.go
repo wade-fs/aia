@@ -3,6 +3,7 @@ package antigravity
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -31,6 +32,12 @@ func (a *Adapter) HealthCheck(ctx context.Context) error {
 }
 
 func (a *Adapter) Start(ctx context.Context, req provider.StartRequest) (provider.ProviderSession, error) {
+	if req.WorkDir != "" {
+		if err := os.MkdirAll(req.WorkDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create working directory %s: %w", req.WorkDir, err)
+		}
+	}
+
 	args := []string{
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",

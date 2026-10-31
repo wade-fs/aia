@@ -20,6 +20,7 @@ const (
 	StatusFailed            TaskStatus = "FAILED"
 	StatusCancelled         TaskStatus = "CANCELLED"
 	StatusBlocked           TaskStatus = "BLOCKED"
+	StatusWaitingAuth       TaskStatus = "WAITING_FOR_AUTH"
 )
 
 var (
@@ -73,7 +74,11 @@ func ValidateTransition(from, to TaskStatus) error {
 			return nil
 		}
 	case StatusRunning:
-		if to == StatusCompleted || to == StatusFailed || to == StatusCancelled || to == StatusWaitingApproval || to == StatusBlocked || to == StatusReady {
+		if to == StatusCompleted || to == StatusFailed || to == StatusCancelled || to == StatusWaitingApproval || to == StatusBlocked || to == StatusReady || to == StatusWaitingAuth {
+			return nil
+		}
+	case StatusWaitingAuth:
+		if to == StatusReady || to == StatusCancelled {
 			return nil
 		}
 	case StatusBlocked:

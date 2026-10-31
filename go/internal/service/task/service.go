@@ -131,7 +131,7 @@ func (s *Service) Resume(ctx context.Context, id domain.ID) error {
 	if err != nil {
 		return err
 	}
-	if t.Status == task.StatusBlocked || t.Status == task.StatusFailed {
+	if t.Status == task.StatusBlocked || t.Status == task.StatusFailed || t.Status == task.StatusWaitingAuth {
 		return s.UpdateStatus(ctx, id, task.StatusReady)
 	}
 	return fmt.Errorf("task status %s cannot be resumed", t.Status)

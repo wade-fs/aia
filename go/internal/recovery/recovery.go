@@ -46,8 +46,14 @@ func (m *Manager) Recover(ctx context.Context) (*Summary, error) {
 
 	for _, t := range runningTasks {
 		execs, err := m.executionRepo.ListByTask(ctx, t.ID)
+		alreadySucceeded := false
 		if err == nil {
 			for _, ex := range execs {
+				// Check if result was already achieved before crash
+				if ex.Status == execution.StatusCompleted || ex.ResultStatus == "SUCCESS" {
+					alreadySucceeded = true
+					break
+				}
 				if ex.Status == execution.StatusRunning || ex.Status == execution.StatusStarting {
 					ex.Status = execution.StatusInterrupted
 					ex.ErrorMessage = "Process interrupted by unexpected runtime shutdown"
@@ -57,6 +63,13 @@ func (m *Manager) Recover(ctx context.Context) (*Summary, error) {
 					summary.InterruptedExecutions++
 				}
 			}
+		}
+
+		if alreadySucceeded {
+			_ = m.taskRepo.UpdateStatus(ctx, t.ID, task.StatusCompleted)
+			slog.Info("recovered completed task from already succeeded execution", "task_id", t.ID)
+			summary.RecoveredTasks++
+			continue
 		}
 
 		// Reconcile task state

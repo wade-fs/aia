@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -97,10 +98,17 @@ func (s *Service) Execute(ctx context.Context, t *task.Task, ag *agent.Agent, pr
 
 	session, err := s.prov.Start(ctx, req)
 	if err != nil {
-		execRecord.Status = execution.StatusFailed
-		execRecord.ErrorMessage = err.Error()
 		ended := time.Now().UTC()
 		execRecord.EndedAt = &ended
+		execRecord.ErrorMessage = err.Error()
+		if isAuthError(err) {
+			execRecord.Status = execution.StatusBlocked
+			_ = s.execRepo.Update(ctx, execRecord)
+			_ = s.taskRepo.UpdateStatus(ctx, t.ID, task.StatusWaitingAuth)
+			slog.Warn("failed to start session due to authentication failure; task set to WAITING_FOR_AUTH", "task_id", t.ID)
+			return execRecord, fmt.Errorf("authentication required: %w", err)
+		}
+		execRecord.Status = execution.StatusFailed
 		_ = s.execRepo.Update(ctx, execRecord)
 		_ = s.taskRepo.UpdateStatus(ctx, t.ID, task.StatusFailed)
 		return execRecord, fmt.Errorf("failed to start provider session: %w", err)
@@ -132,11 +140,28 @@ func (s *Service) Execute(ctx context.Context, t *task.Task, ag *agent.Agent, pr
 	execRecord.EndedAt = &ended
 
 	if err != nil {
+		if isAuthError(err) {
+			execRecord.Status = execution.StatusBlocked
+			execRecord.ErrorMessage = fmt.Sprintf("Authentication failed: %v", err)
+			_ = s.execRepo.Update(ctx, execRecord)
+			_ = s.taskRepo.UpdateStatus(ctx, t.ID, task.StatusWaitingAuth)
+			slog.Warn("execution stopped due to authentication failure; task set to WAITING_FOR_AUTH", "task_id", t.ID)
+			return execRecord, err
+		}
 		execRecord.Status = execution.StatusFailed
 		execRecord.ErrorMessage = err.Error()
 		_ = s.execRepo.Update(ctx, execRecord)
 		_ = s.taskRepo.UpdateStatus(ctx, t.ID, task.StatusFailed)
 		return execRecord, err
+	}
+
+	if result.Status == "AUTH_REQUIRED" {
+		execRecord.Status = execution.StatusBlocked
+		execRecord.ErrorMessage = "Provider session indicates authentication required"
+		_ = s.execRepo.Update(ctx, execRecord)
+		_ = s.taskRepo.UpdateStatus(ctx, t.ID, task.StatusWaitingAuth)
+		slog.Warn("execution stopped due to provider AUTH_REQUIRED; task set to WAITING_FOR_AUTH", "task_id", t.ID)
+		return execRecord, nil
 	}
 
 	execRecord.ConversationID = result.ConversationID
@@ -195,4 +220,16 @@ func (s *Service) ListByTask(ctx context.Context, taskID domain.ID) ([]execution
 
 func (s *Service) ListEvents(ctx context.Context, id domain.ID) ([]execution.ExecutionEvent, error) {
 	return s.execRepo.ListEvents(ctx, id, 0)
+}
+
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unauthorized") ||
+		strings.Contains(msg, "auth_required") ||
+		strings.Contains(msg, "authentication failed") ||
+		strings.Contains(msg, "please login") ||
+		strings.Contains(msg, "not logged in")
 }

@@ -237,6 +237,14 @@ func (s *Session) readStdout(r io.Reader) {
 					}
 				}
 			}
+			// Closing stdin indicates turn completion to agy so process exits
+			s.mu.Lock()
+			if s.stdin != nil {
+				_ = s.stdin.Close()
+				s.stdin = nil
+			}
+			s.mu.Unlock()
+			break
 		}
 	}
 

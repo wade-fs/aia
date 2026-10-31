@@ -10,9 +10,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/wade/aia/internal/app"
+	"github.com/wade/aia/internal/domain/execution"
 	"github.com/wade/aia/internal/domain/memory"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/orchestrator"
+	"github.com/wade/aia/internal/provider"
 	"github.com/wade/aia/internal/provider/mock"
 	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
@@ -263,5 +265,121 @@ func TestScenarioF_CrashRecoveryAndRetryLimit(t *testing.T) {
 	exhaustedT2, _ := appInst.TaskSvc.Get(ctx, t2.ID)
 	if exhaustedT2.Status != task.StatusFailed {
 		t.Errorf("expected t2 FAILED after exhausting retries, got %s", exhaustedT2.Status)
+	}
+}
+
+// Scenario D: Authentication Failure & Resume Workflow
+func TestScenarioD_AuthenticationFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	cfgContent := fmt.Sprintf(`
+runtime:
+  data_dir: "%s"
+  workspace_dir: "%s/workspaces"
+database:
+  driver: "sqlite"
+  path: "%s/test.db"
+`, tmpDir, tmpDir, tmpDir)
+	_ = os.WriteFile(cfgPath, []byte(cfgContent), 0644)
+
+	// Mock provider simulating Auth Failure on first attempt
+	isAuthed := false
+	mockProv := mock.NewMockProvider()
+	mockProv.StartFunc = func(ctx context.Context, req provider.StartRequest) (provider.ProviderSession, error) {
+		if !isAuthed {
+			return nil, fmt.Errorf("unauthorized: OAuth token expired or agy not authenticated")
+		}
+		return mock.NewMockSession(req), nil
+	}
+
+	appInst, err := app.NewApp(cfgPath, mockProv)
+	if err != nil {
+		t.Fatalf("failed to init app: %v", err)
+	}
+	defer appInst.Close()
+	ctx := context.Background()
+
+	// 1. Create task and execute
+	tk, err := appInst.TaskSvc.Create(ctx, taskService.CreateTaskRequest{
+		Title:   "Task requiring auth",
+		AgentID: "coding-agent",
+	})
+	if err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	err = appInst.Scheduler.RunTask(ctx, tk.ID)
+	if err == nil {
+		t.Fatalf("expected error due to auth failure, got nil")
+	}
+
+	// 2. Verify Task transitioned to WAITING_FOR_AUTH without infinite retries
+	tkUpdated, _ := appInst.TaskSvc.Get(ctx, tk.ID)
+	if tkUpdated.Status != task.StatusWaitingAuth {
+		t.Errorf("expected status WAITING_FOR_AUTH, got %s", tkUpdated.Status)
+	}
+
+	// 3. Simulate user re-authenticating via agy ('agy auth login')
+	isAuthed = true
+
+	// 4. Resume Task to READY
+	if err := appInst.TaskSvc.Resume(ctx, tk.ID); err != nil {
+		t.Fatalf("failed to resume task: %v", err)
+	}
+
+	tkResumed, _ := appInst.TaskSvc.Get(ctx, tk.ID)
+	if tkResumed.Status != task.StatusReady {
+		t.Errorf("expected task status READY after resume, got %s", tkResumed.Status)
+	}
+
+	// 5. Re-run task -> Completed successfully
+	if err := appInst.Scheduler.RunTask(ctx, tk.ID); err != nil {
+		t.Fatalf("expected task execution to succeed after auth restored, got %v", err)
+	}
+
+	tkCompleted, _ := appInst.TaskSvc.Get(ctx, tk.ID)
+	if tkCompleted.Status != task.StatusCompleted {
+		t.Errorf("expected task COMPLETED, got %s", tkCompleted.Status)
+	}
+}
+
+// Scenario F2: Crash recovery when result was already achieved before crash
+func TestScenarioF_CrashRecoveryIdempotency(t *testing.T) {
+	appInst, _ := createTestApp(t)
+	defer appInst.Close()
+	ctx := context.Background()
+
+	// Task that already succeeded in execution, but runtime crashed before task was updated
+	tk, _ := appInst.TaskSvc.Create(ctx, taskService.CreateTaskRequest{
+		Title: "Already succeeded task",
+	})
+	_ = appInst.TaskSvc.UpdateStatus(ctx, tk.ID, task.StatusRunning)
+
+	ex := &execution.Execution{
+		ID:           uuid.New().String(),
+		TaskID:       tk.ID,
+		AgentID:      "coding-agent",
+		Provider:     "mock",
+		Workspace:    "/tmp/ws",
+		Status:       execution.StatusCompleted,
+		ResultStatus: "SUCCESS",
+		CreatedAt:    time.Now().UTC(),
+	}
+	execRepo := repository.NewExecutionRepository(appInst.DB)
+	if err := execRepo.Create(ctx, ex); err != nil {
+		t.Fatalf("failed to create execution: %v", err)
+	}
+
+	summary, err := appInst.RecoveryMgr.Recover(ctx)
+	if err != nil {
+		t.Fatalf("recovery failed: %v", err)
+	}
+	if summary.RecoveredTasks != 1 {
+		t.Errorf("expected 1 recovered task, got %d", summary.RecoveredTasks)
+	}
+
+	recoveredTask, _ := appInst.TaskSvc.Get(ctx, tk.ID)
+	if recoveredTask.Status != task.StatusCompleted {
+		t.Errorf("expected already-succeeded task to recover directly to COMPLETED, got %s", recoveredTask.Status)
 	}
 }

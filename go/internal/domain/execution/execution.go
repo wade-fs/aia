@@ -18,6 +18,7 @@ const (
 	StatusCancelled   ExecutionStatus = "CANCELLED"
 	StatusTimedOut    ExecutionStatus = "TIMED_OUT"
 	StatusInterrupted ExecutionStatus = "INTERRUPTED"
+	StatusBlocked     ExecutionStatus = "BLOCKED"
 )
 
 type Execution struct {

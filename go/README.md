@@ -1,172 +1,140 @@
-# Go Agent Runtime PoC (AA-04)
+## **AIA — 專案交付結構**
 
-> 最小可執行 Agent Runtime，透過 Worker Adapter 介面管理外部 AI Coding Worker（Aider），驗證 Runtime 具備建立任務、環境隔離、執行監控、獨立驗收、崩潰恢復與審計追蹤之能力。
-
----
-
-## 專案架構
-
-本專案採用 **Modular Monolith** 架構，模組職責清晰，具備嚴格的單向相依原則（Storage 與 Audit 獨立於其他模組，無 Import Cycle）。
+最終交付目標
 
 ```
-go/
-├── cmd/
-│   └── agent/
-│       └── main.go              # CLI 入口 (Cobra)
-├── internal/
-│   ├── runtime/                 # Runtime 核心協調器
-│   │   └── runtime.go
-│   ├── task/                    # 任務管理模組
-│   │   ├── manager.go
-│   │   └── model.go
-│   ├── worker/                  # Worker Adapter 抽象層與管理
-│   │   ├── interface.go
-│   │   ├── manager.go
-│   │   └── aider/
-│   │       └── adapter.go       # Aider CLI 介面實作
-│   ├── workspace/               # 工作空間隔離與 Git 初始化
-│   │   └── manager.go
-│   ├── state/                   # 狀態機與狀態轉移驗證
-│   │   └── manager.go
-│   ├── recovery/                # 崩潰修復與狀態 Reconciliation
-│   │   └── manager.go
-│   ├── validator/               # 獨立結果驗收器 (Git Diff + Tests)
-│   │   └── validator.go
-│   ├── git/                     # Git 操作客戶端
-│   │   └── git.go
-│   ├── storage/                 # SQLite 持久化儲存 (CGO / go-sqlite3)
-│   │   └── sqlite.go
-│   └── audit/                   # 審計日誌 (Stdout + SQLite)
-│       └── logger.go
-├── configs/
-│   └── config.yaml              # 預設設定檔
-├── testdata/
-│   └── sample-project/          # 供 Worker 執行的範例 Go 專案
-│       ├── go.mod
-│       ├── main.go
-│       └── main_test.go
-├── docs/
-│   └── poc-test-plan.md         # T01–T12 測試計畫書
+AIA/
+├── README.md
 ├── go.mod
-└── README.md
+├── Makefile
+├── configs/
+├── docs/
+│   ├── 01_requirements.md
+│   ├── 02_system_architecture.md
+│   ├── 03_runtime_spec.md
+│   ├── 04_agent_spec.md
+│   ├── 05_task_execution_spec.md
+│   ├── 06_memory_spec.md
+│   ├── 07_security_spec.md
+│   ├── 08_storage_spec.md
+│   ├── 09_cli_spec.md
+│   ├── 10_testing_spec.md
+│   └── 11_implementation_plan.md
+├── cmd/
+│   └── aia/
+├── internal/
+│   ├── app/
+│   ├── agent/
+│   ├── task/
+│   ├── project/
+│   ├── execution/
+│   ├── provider/
+│   ├── profile/
+│   ├── policy/
+│   ├── workspace/
+│   ├── validation/
+│   ├── recovery/
+│   ├── memory/
+│   ├── storage/
+│   └── audit/
+├── migrations/
+├── tests/
+└── examples/
 ```
 
----
+這是初步目錄設計，實際模組及檔案會依正式需求收斂，不會為了目錄完整而建立空殼。
 
-## 狀態機設計
+## **2\. 文件必須達到什麼程度？**
 
-```text
-CREATED
-   |
-   v
-READY
-   |
-   v
-RUNNING
-   |
-   +------> SUCCEEDED
-   |
-   +------> FAILED
-   |
-   +------> CANCELLED
-   |
-   +------> UNKNOWN
-                 |
-                 v
-             RECONCILING
-                 |
-        +--------+--------+
-        |        |        |
-        v        v        v
-    SUCCEEDED  FAILED  NEEDS_REVIEW
+每個模組都必須有可以直接實作的規格，而不是只寫「負責管理任務」。
+
+例如 Task Manager 必須明確定義：
+
+| 規格項目 | 必須交代的內容 |
+| ----- | ----- |
+| Data Model | Task 欄位、型別、限制 |
+| State Machine | 狀態及合法轉移 |
+| API | 函式介面、參數、回傳值 |
+| Persistence | SQLite Schema |
+| Error Handling | 錯誤分類與處理方式 |
+| Concurrency | 同時操作的行為 |
+| Recovery | 中斷後如何恢復 |
+| Testing | 測試案例及預期結果 |
+| Acceptance Criteria | 如何判定完成 |
+
+例如：
+
+```
+type TaskStatus string
+
+const (
+    TaskCreated  TaskStatus = "CREATED"
+    TaskReady    TaskStatus = "READY"
+    TaskRunning  TaskStatus = "RUNNING"
+    TaskCompleted TaskStatus = "COMPLETED"
+    TaskFailed   TaskStatus = "FAILED"
+)
+
+type Task struct {
+    ID          string
+    ProjectID   string
+    AgentID     string
+    Title       string
+    Description string
+    Status      TaskStatus
+    CreatedAt   time.Time
+    UpdatedAt   time.Time
+}
 ```
 
-- **先保存意圖，再啟動 Worker**：WorkerManager 在啟動 Aider 之前，必先將 execution 狀態以 `STARTING` 寫入資料庫。
-- **UNKNOWN 不盲目重跑**：未確定之執行結果轉入 `RECONCILING` 進行環境檢查與結果獨立驗收，必要時轉入 `NEEDS_REVIEW` 等待人工介入。
+這只是示意。正式文件必須連同資料庫欄位、狀態轉移、交易邊界及測試案例一起定義。
 
----
+## **3\. 我們採用三層規格**
 
-## 編譯與安裝
+| 層級 | 文件目的 | 實作要求 |
+| ----- | ----- | ----- |
+| L1 — Requirements | 定義系統要做什麼 | 可驗收 |
+| L2 — Design | 定義系統如何運作 | 可依規格設計 |
+| L3 — Implementation | 定義程式介面、資料結構及測試 | 可直接編碼 |
 
-### 環境需求
-- Go 1.21 或更高版本
-- GCC (供 `mattn/go-sqlite3` CGO 編譯使用)
-- Git 2.0+
-- Aider (選配，若未安裝可在 HealthCheck 時偵測)
+這樣你拿到文件，就不必再自行猜測我們當初討論的設計意圖。
 
-### 編譯步驟
+## **4\. 我可以一次交付完整專案**
 
-```bash
-cd /home/wade/src/github/aia/go
+可以，而且不只是給你一堆程式碼片段。
 
-# 下載相依套件並整理
-go mod tidy
+我可以透過專案生成方式建立：
 
-# 執行所有單元測試
-go test -v ./...
+* 完整 Go 原始碼。  
+* `go.mod` 及相依套件。  
+* SQLite Migration。  
+* 預設設定檔。  
+* CLI 指令。  
+* Antigravity Adapter。  
+* 單元測試與整合測試。  
+* README 與操作手冊。  
+* Docker 或其他部署設定（如果實際需要）。
 
-# 編譯 CLI 工具
-go build -o bin/agent ./cmd/agent/
-```
+並且以可編譯、可測試的程式作為交付標準。
 
----
+不過，我不會在尚未驗證 agy 1.4.12 的行為之前，宣稱所有整合功能都能直接投入使用。可以先交付完整的 Runtime 基礎及可執行的 Adapter，再把未驗證功能明確標示出來。
 
-## CLI 命令使用手冊
+## **5\. 我建議調整目前工作方式**
 
-### 1. 檢視說明
-```bash
-./bin/agent --help
-./bin/agent task --help
-```
+原本的 AA-01、AA-02 不必丟掉，但它們應該只是正式規格的基礎資料。
 
-### 2. 檢查 Worker 健康狀態
-```bash
-./bin/agent worker health
-```
+接下來：
 
-### 3. 建立任務 (Task Create)
-```bash
-./bin/agent task create \
-  --title "新增 Add 函式" \
-  --description "在 sample-project 中新增 Add(a, b int) int 函式並新增單元測試" \
-  --worker aider
-```
+1. 需求凍結： 把我們已討論的 AIA 目標、Agent 組織、OAuth 邊界、agy 責任分工、Go 路線整理成正式需求。  
+2. 完整技術規格： 把每個模組定義到資料結構、介面、流程、錯誤及驗收標準。  
+3. 完整專案實作： 依規格產生 Go 專案。  
+4. 整合驗證： 在你的 Linux 環境實際執行，修正與 agy 1.4.12 的相容性。  
+5. 版本交付： 每個階段留下可以執行、可以回歸測試的版本。
 
-### 4. 列出所有任務 (Task List)
-```bash
-./bin/agent task list
-```
-輸出格式：
-```
-ID                                     TITLE                    STATUS      WORKER   CREATED AT
---                                     -----                    ------      ------   ----------
-c4963cbf-3548-4ced-bb5f-76dc95779c9b   新增 Add 函式            CREATED     aider    2026-10-31 09:44:49
-```
+## **我只需要確認一個方向**
 
-### 5. 檢視任務細節與事件歷程 (Task Show)
-```bash
-./bin/agent task show <TASK_ID>
-```
+你希望我最後交付的第一個完整版本，是：
 
-### 6. 執行任務 (Task Run)
-透過 Workspace Manager 建立隔離目錄、記錄 Git Base Commit、啟動 Worker、收集 stdout/stderr，最後由 Result Validator 執行 `git diff` 與 `go test ./...` 驗收：
-```bash
-./bin/agent task run <TASK_ID>
-```
+1. Agent、Task、Project、Execution、agy Adapter、Memory 基礎、Policy、SQLite、CLI、Recovery。先建立完整可運作的底座。  
+2. 並且加入 Personal Agent 自主判斷、任務拆解、Agent 分派、跨任務記憶及自我評估。
 
-### 7. 取消任務 (Task Cancel)
-```bash
-./bin/agent task cancel <TASK_ID>
-```
-
-### 8. 執行中斷恢復 (Recovery)
-當 Runtime 意外中斷重啟時，自動掃描未完成工作並調解狀態：
-```bash
-./bin/agent recovery
-```
-
----
-
-## 測試計畫
-
-完整 T01–T12 測試情境與驗證請參閱 [docs/poc-test-plan.md](docs/poc-test-plan.md)。

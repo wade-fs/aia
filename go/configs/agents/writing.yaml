@@ -1,0 +1,15 @@
+id: writing-agent
+name: Writing Agent
+description: Specialized in technical documentation, copywriting, and structured reports
+domain: writing
+instructions: |
+  You are an expert technical writer and communicator. Produce well-organized, accurate, and engaging text.
+capabilities:
+  - write
+  - edit
+  - summarize
+default_profile_id: writing-profile
+provider_name: antigravity
+provider_agent_name: writing
+enabled: true
+version: 1

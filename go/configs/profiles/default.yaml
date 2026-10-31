@@ -1,0 +1,10 @@
+id: default-profile
+name: Default Profile
+description: Standard execution profile with sandbox enabled
+model: ""
+effort: medium
+mode: auto
+sandbox: true
+timeout: 30m
+max_tokens: 4096
+version: 1

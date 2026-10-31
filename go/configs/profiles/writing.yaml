@@ -1,0 +1,10 @@
+id: writing-profile
+name: Writing Execution Profile
+description: Profile for text writing and documentation
+model: ""
+effort: medium
+mode: auto
+sandbox: true
+timeout: 20m
+max_tokens: 4096
+version: 1

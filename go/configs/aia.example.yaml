@@ -1,0 +1,45 @@
+system:
+  name: AIA
+  version: "1.0"
+  timezone: "Asia/Taipei"
+
+runtime:
+  data_dir: "~/.local/share/aia"
+  workspace_dir: "~/.local/share/aia/workspaces"
+  max_concurrent_executions: 2
+  max_concurrent_per_agent: 1
+  shutdown_timeout: "30s"
+
+database:
+  driver: sqlite
+  path: "~/.local/share/aia/aia.db"
+
+provider:
+  default: antigravity
+
+  antigravity:
+    executable: agy
+    required_version: "1.4.12"
+    version_policy: minimum
+    output_format: stream-json
+    input_format: stream-json
+    default_timeout: "30m"
+    sandbox_required: true
+    skip_permissions: false
+
+memory:
+  max_context_items: 20
+  max_context_bytes: 24000
+  auto_create_candidates: true
+  auto_approve_low_risk: false
+
+orchestrator:
+  max_plan_retries: 1
+  max_task_retries: 2
+  max_subtasks_per_plan: 20
+  max_dependency_depth: 8
+
+logging:
+  level: info
+  format: json
+  retain_days: 30

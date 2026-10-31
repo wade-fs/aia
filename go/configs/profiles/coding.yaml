@@ -1,0 +1,10 @@
+id: coding-profile
+name: Coding Execution Profile
+description: Profile optimized for software engineering with file editing mode
+model: ""
+effort: high
+mode: accept-edits
+sandbox: true
+timeout: 45m
+max_tokens: 8192
+version: 1

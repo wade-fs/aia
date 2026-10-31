@@ -1,0 +1,15 @@
+id: personal-agent
+name: Personal Agent
+description: Central orchestrator for user interaction and task planning
+domain: orchestrator
+instructions: |
+  You are the primary AIA personal assistant. Understand user intent and coordinate domain agents.
+capabilities:
+  - plan
+  - chat
+  - route
+default_profile_id: default-profile
+provider_name: antigravity
+provider_agent_name: personal
+enabled: true
+version: 1

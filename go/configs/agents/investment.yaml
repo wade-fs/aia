@@ -1,0 +1,14 @@
+id: investment-agent
+name: Investment Agent
+description: Specialized in financial research, balance sheet analysis, and macro trends
+domain: investment
+instructions: |
+  You are an objective financial research analyst. Rely on data, cite dates and sources, and clearly label uncertainties.
+capabilities:
+  - analyze
+  - research
+default_profile_id: research-profile
+provider_name: antigravity
+provider_agent_name: investment
+enabled: true
+version: 1

@@ -1,0 +1,191 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+type Config struct {
+	System       SystemConfig       `yaml:"system"`
+	Runtime      RuntimeConfig      `yaml:"runtime"`
+	Database     DatabaseConfig     `yaml:"database"`
+	Provider     ProviderConfig     `yaml:"provider"`
+	Memory       MemoryConfig       `yaml:"memory"`
+	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
+	Logging      LoggingConfig      `yaml:"logging"`
+}
+
+type SystemConfig struct {
+	Name     string `yaml:"name"`
+	Version  string `yaml:"version"`
+	Timezone string `yaml:"timezone"`
+}
+
+type RuntimeConfig struct {
+	DataDir                 string        `yaml:"data_dir"`
+	WorkspaceDir            string        `yaml:"workspace_dir"`
+	MaxConcurrentExecutions int           `yaml:"max_concurrent_executions"`
+	MaxConcurrentPerAgent   int           `yaml:"max_concurrent_per_agent"`
+	ShutdownTimeout         time.Duration `yaml:"shutdown_timeout"`
+}
+
+type DatabaseConfig struct {
+	Driver string `yaml:"driver"`
+	Path   string `yaml:"path"`
+}
+
+type ProviderConfig struct {
+	Default     string            `yaml:"default"`
+	Antigravity AntigravityConfig `yaml:"antigravity"`
+}
+
+type AntigravityConfig struct {
+	Executable      string        `yaml:"executable"`
+	RequiredVersion string        `yaml:"required_version"`
+	VersionPolicy   string        `yaml:"version_policy"`
+	OutputFormat    string        `yaml:"output_format"`
+	InputFormat     string        `yaml:"input_format"`
+	DefaultTimeout  time.Duration `yaml:"default_timeout"`
+	SandboxRequired bool          `yaml:"sandbox_required"`
+	SkipPermissions bool          `yaml:"skip_permissions"`
+}
+
+type MemoryConfig struct {
+	MaxContextItems    int  `yaml:"max_context_items"`
+	MaxContextBytes    int  `yaml:"max_context_bytes"`
+	AutoCreateCandidate bool `yaml:"auto_create_candidates"`
+	AutoApproveLowRisk bool `yaml:"auto_approve_low_risk"`
+}
+
+type OrchestratorConfig struct {
+	MaxPlanRetries     int `yaml:"max_plan_retries"`
+	MaxTaskRetries     int `yaml:"max_task_retries"`
+	MaxSubtasksPerPlan int `yaml:"max_subtasks_per_plan"`
+	MaxDependencyDepth int `yaml:"max_dependency_depth"`
+}
+
+type LoggingConfig struct {
+	Level      string `yaml:"level"`
+	Format     string `yaml:"format"`
+	RetainDays int    `yaml:"retain_days"`
+}
+
+func DefaultConfig() *Config {
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		home = "/tmp"
+	}
+	dataDir := filepath.Join(home, ".local", "share", "aia")
+	return &Config{
+		System: SystemConfig{
+			Name:     "AIA",
+			Version:  "1.0",
+			Timezone: "Asia/Taipei",
+		},
+		Runtime: RuntimeConfig{
+			DataDir:                 dataDir,
+			WorkspaceDir:            filepath.Join(dataDir, "workspaces"),
+			MaxConcurrentExecutions: 2,
+			MaxConcurrentPerAgent:   1,
+			ShutdownTimeout:         30 * time.Second,
+		},
+		Database: DatabaseConfig{
+			Driver: "sqlite",
+			Path:   filepath.Join(dataDir, "aia.db"),
+		},
+		Provider: ProviderConfig{
+			Default: "antigravity",
+			Antigravity: AntigravityConfig{
+				Executable:      "agy",
+				RequiredVersion: "1.4.12",
+				VersionPolicy:   "minimum",
+				OutputFormat:    "stream-json",
+				InputFormat:     "stream-json",
+				DefaultTimeout:  30 * time.Minute,
+				SandboxRequired: true,
+				SkipPermissions: false,
+			},
+		},
+		Memory: MemoryConfig{
+			MaxContextItems:    20,
+			MaxContextBytes:    24000,
+			AutoCreateCandidate: true,
+			AutoApproveLowRisk: false,
+		},
+		Orchestrator: OrchestratorConfig{
+			MaxPlanRetries:     1,
+			MaxTaskRetries:     2,
+			MaxSubtasksPerPlan: 20,
+			MaxDependencyDepth: 8,
+		},
+		Logging: LoggingConfig{
+			Level:      "info",
+			Format:     "json",
+			RetainDays: 30,
+		},
+	}
+}
+
+func ExpandPath(path string) string {
+	if strings.HasPrefix(path, "~/") || path == "~" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			if path == "~" {
+				return home
+			}
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
+}
+
+func LoadConfig(path string) (*Config, error) {
+	cfg := DefaultConfig()
+	if path == "" {
+		return cfg, nil
+	}
+
+	cleanPath := ExpandPath(path)
+	data, err := os.ReadFile(cleanPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
+		return nil, fmt.Errorf("failed to read config file %s: %w", cleanPath, err)
+	}
+
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse yaml config: %w", err)
+	}
+
+	cfg.Runtime.DataDir = ExpandPath(cfg.Runtime.DataDir)
+	cfg.Runtime.WorkspaceDir = ExpandPath(cfg.Runtime.WorkspaceDir)
+	cfg.Database.Path = ExpandPath(cfg.Database.Path)
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	return cfg, nil
+}
+
+func (c *Config) Validate() error {
+	if c.Runtime.DataDir == "" {
+		return fmt.Errorf("runtime.data_dir must not be empty")
+	}
+	if c.Database.Path == "" {
+		return fmt.Errorf("database.path must not be empty")
+	}
+	if c.Runtime.MaxConcurrentExecutions <= 0 {
+		return fmt.Errorf("runtime.max_concurrent_executions must be > 0")
+	}
+	if c.Provider.Antigravity.Executable == "" {
+		return fmt.Errorf("provider.antigravity.executable must not be empty")
+	}
+	return nil
+}

@@ -1,0 +1,10 @@
+id: research-profile
+name: Research Execution Profile
+description: Profile for gathering facts and analysis
+model: ""
+effort: high
+mode: plan
+sandbox: true
+timeout: 30m
+max_tokens: 8192
+version: 1

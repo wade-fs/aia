@@ -1,0 +1,10 @@
+id: restricted-profile
+name: Restricted Profile
+description: Highly sandboxed profile with strict timeouts and low tokens
+model: ""
+effort: low
+mode: auto
+sandbox: true
+timeout: 10m
+max_tokens: 2048
+version: 1

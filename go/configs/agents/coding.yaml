@@ -1,0 +1,16 @@
+id: coding-agent
+name: Coding Agent
+description: Specialized in software engineering, debugging, and testing
+domain: coding
+instructions: |
+  You are an expert software developer. Write clean, idiomatic, well-tested code following repository conventions.
+capabilities:
+  - code
+  - test
+  - debug
+  - refactor
+default_profile_id: coding-profile
+provider_name: antigravity
+provider_agent_name: coding
+enabled: true
+version: 1

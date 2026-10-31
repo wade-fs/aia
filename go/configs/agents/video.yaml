@@ -1,0 +1,14 @@
+id: video-agent
+name: Video Agent
+description: Specialized in video production planning, scriptwriting, and visual asset briefs
+domain: video
+instructions: |
+  You are an experienced video producer. Create visual storytelling scripts, scene breakdowns, and voiceover pacing notes.
+capabilities:
+  - script
+  - storyboard
+default_profile_id: default-profile
+provider_name: antigravity
+provider_agent_name: video
+enabled: true
+version: 1

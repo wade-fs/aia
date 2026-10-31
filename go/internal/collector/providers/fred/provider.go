@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,16 +17,23 @@ import (
 type Provider struct {
 	client  *collectorHttp.Client
 	baseURL string
+	apiKey  string
 }
 
 func NewProvider(client *collectorHttp.Client, baseURL string) *Provider {
 	if baseURL == "" {
 		baseURL = "https://api.stlouisfed.org/fred"
 	}
+	key := os.Getenv("FRED_API_KEY")
 	return &Provider{
 		client:  client,
 		baseURL: baseURL,
+		apiKey:  key,
 	}
+}
+
+func (p *Provider) SetAPIKey(key string) {
+	p.apiKey = key
 }
 
 func (p *Provider) ID() string {
@@ -66,10 +75,27 @@ func (p *Provider) Collect(ctx context.Context, scope collector.CollectScope) (*
 	}
 
 	for _, m := range macroRates {
+		rate := m.Rate
+		if p.apiKey != "" {
+			url := fmt.Sprintf("%s/series/observations?series_id=%s&api_key=%s&file_type=json&sort_order=desc&limit=1", p.baseURL, m.SeriesID, p.apiKey)
+			if body, code, err := p.client.Get(ctx, url); err == nil && code == 200 {
+				var resp struct {
+					Observations []struct {
+						Value string `json:"value"`
+					} `json:"observations"`
+				}
+				if json.Unmarshal(body, &resp) == nil && len(resp.Observations) > 0 {
+					if parsed, err := strconv.ParseFloat(resp.Observations[0].Value, 64); err == nil && parsed > 0 {
+						rate = parsed
+					}
+				}
+			}
+		}
+
 		valJSON, _ := json.Marshal(map[string]any{
 			"series_id": m.SeriesID,
 			"name":      m.Name,
-			"rate":      m.Rate,
+			"rate":      rate,
 			"unit":      "PERCENT",
 		})
 		batch.MarketData = append(batch.MarketData, investment.MarketData{
@@ -82,7 +108,7 @@ func (p *Provider) Collect(ctx context.Context, scope collector.CollectScope) (*
 			EffectiveAt: now,
 		})
 
-		docTitle := fmt.Sprintf("FRED 總體經濟發布：%s 最新基準為 %.2f%%", m.Name, m.Rate)
+		docTitle := fmt.Sprintf("FRED 總體經濟發布：%s 最新基準為 %.2f%%", m.Name, rate)
 		docSummary := fmt.Sprintf("聖路易斯聯邦準備銀行 (FRED) 官方系列 %s 數據更新，反映當前總體資金成本與無風險利率環境。", m.SeriesID)
 		batch.Documents = append(batch.Documents, investment.RawDocument{
 			ID:               uuid.New().String(),

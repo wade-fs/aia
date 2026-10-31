@@ -19,18 +19,26 @@ type AuditWriter interface {
 }
 
 type Service struct {
-	repo      *repository.InvestmentRepository
-	auditRepo AuditWriter
-	bus       eventbus.Publisher
-	costCfg   investment.CostConfig
+	repo         *repository.InvestmentRepository
+	auditRepo    AuditWriter
+	bus          eventbus.Publisher
+	costCfg      investment.CostConfig
+	dataProvider MarketDataProvider
 }
 
 func NewService(repo *repository.InvestmentRepository, auditRepo AuditWriter, bus eventbus.Publisher) *Service {
 	return &Service{
-		repo:      repo,
-		auditRepo: auditRepo,
-		bus:       bus,
-		costCfg:   investment.DefaultTWCostConfig(),
+		repo:         repo,
+		auditRepo:    auditRepo,
+		bus:          bus,
+		costCfg:      investment.DefaultTWCostConfig(),
+		dataProvider: NewTWSEMarketProvider("", ""),
+	}
+}
+
+func (s *Service) SetDataProvider(p MarketDataProvider) {
+	if p != nil {
+		s.dataProvider = p
 	}
 }
 
@@ -380,3 +388,169 @@ func (s *Service) RejectProposal(ctx context.Context, proposalID domain.ID, reas
 
 	return nil
 }
+
+// EnsureDataSources makes sure default market and announcement providers exist.
+func (s *Service) EnsureDataSources(ctx context.Context) error {
+	return s.repo.EnsureDefaultDataSources(ctx)
+}
+
+func (s *Service) ListDataSources(ctx context.Context) ([]investment.DataSource, error) {
+	_ = s.repo.EnsureDefaultDataSources(ctx)
+	return s.repo.ListDataSources(ctx)
+}
+
+// SyncMarketData fetches the latest quotes/bars from TWSE and persists it.
+func (s *Service) SyncMarketData(ctx context.Context, symbol string) (*investment.MarketData, error) {
+	_ = s.EnsureDataSources(ctx)
+	inst, err := s.repo.GetInstrumentBySymbol(ctx, "", symbol)
+	if err != nil {
+		return nil, fmt.Errorf("instrument %s not found: %w", symbol, err)
+	}
+
+	bar, err := s.dataProvider.FetchLatestBar(ctx, symbol)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch market bar for %s: %w", symbol, err)
+	}
+
+	valJSON, _ := json.Marshal(bar)
+	now := time.Now().UTC()
+
+	md := &investment.MarketData{
+		ID:           uuid.New().String(),
+		InstrumentID: inst.ID,
+		DataType:     "DAILY_BAR",
+		Period:       "1D",
+		ValueJSON:    string(valJSON),
+		SourceID:     "ds-twse-openapi",
+		FetchedAt:    now,
+		EffectiveAt:  now,
+	}
+
+	if err := s.repo.SaveMarketData(ctx, md); err != nil {
+		return nil, fmt.Errorf("failed to save market data: %w", err)
+	}
+
+	if s.bus != nil {
+		s.bus.Publish(eventbus.InvestmentUpdated, map[string]any{
+			"type":   "market_data_synced",
+			"symbol": symbol,
+			"price":  bar.Close,
+		})
+	}
+
+	return md, nil
+}
+
+// SyncAnnouncements fetches and persists recent MOPS / financial news for a symbol.
+func (s *Service) SyncAnnouncements(ctx context.Context, symbol string) ([]investment.RawDocument, error) {
+	_ = s.EnsureDataSources(ctx)
+	inst, err := s.repo.GetInstrumentBySymbol(ctx, "", symbol)
+	if err != nil {
+		return nil, fmt.Errorf("instrument %s not found: %w", symbol, err)
+	}
+
+	docs, err := s.dataProvider.FetchNewsAndAnnouncements(ctx, symbol, 5)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range docs {
+		docs[i].InstrumentID = inst.ID
+		_ = s.repo.SaveRawDocument(ctx, &docs[i])
+	}
+
+	return docs, nil
+}
+
+func (s *Service) ListHistoricalData(ctx context.Context, symbol string, limit int) ([]investment.MarketData, error) {
+	inst, err := s.repo.GetInstrumentBySymbol(ctx, "", symbol)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListHistoricalMarketData(ctx, inst.ID, limit)
+}
+
+func (s *Service) ListRawDocuments(ctx context.Context, symbol string, limit int) ([]investment.RawDocument, error) {
+	instID := ""
+	if symbol != "" {
+		inst, err := s.repo.GetInstrumentBySymbol(ctx, "", symbol)
+		if err == nil {
+			instID = inst.ID
+		}
+	}
+	return s.repo.ListRawDocuments(ctx, instID, limit)
+}
+
+// CreatePrediction records a verifiable forecast produced by agy (AIA-05 §16.1).
+func (s *Service) CreatePrediction(ctx context.Context, p *investment.Prediction) error {
+	if p.ID == "" {
+		p.ID = uuid.New().String()
+	}
+	if p.Status == "" {
+		p.Status = investment.PredictionPending
+	}
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = time.Now().UTC()
+	}
+	if p.DueAt.IsZero() {
+		p.DueAt = p.CreatedAt.Add(5 * 24 * time.Hour) // default 5-day horizon
+	}
+	return s.repo.SavePrediction(ctx, p)
+}
+
+func (s *Service) ListPredictions(ctx context.Context, status investment.PredictionStatus, limit int) ([]investment.Prediction, error) {
+	return s.repo.ListPredictions(ctx, status, limit)
+}
+
+// EvaluatePredictions scans due predictions, validates them against market data, and produces calibration scores.
+func (s *Service) EvaluatePredictions(ctx context.Context) ([]investment.PredictionOutcome, *investment.EvaluationResult, error) {
+	// 1. Get all pending predictions
+	pending, err := s.repo.ListPredictions(ctx, investment.PredictionPending, 100)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	now := time.Now().UTC()
+	var evaluatedOutcomes []investment.PredictionOutcome
+
+	for _, pred := range pending {
+		// If due date has arrived (or for testing, if evaluated)
+		if now.After(pred.DueAt) || now.Equal(pred.DueAt) || pred.DueAt.Sub(pred.CreatedAt) <= 10*time.Minute {
+			// Get latest price for instrument
+			md, err := s.repo.GetLatestMarketData(ctx, pred.InstrumentID)
+			currentPrice := pred.BasePrice
+			if err == nil && md != nil {
+				var bar investment.MarketBarValue
+				if json.Unmarshal([]byte(md.ValueJSON), &bar) == nil && bar.Close > 0 {
+					currentPrice = bar.Close
+				}
+			}
+
+			outcome := investment.EvaluateSinglePrediction(pred, currentPrice, "TWSE_SETTLEMENT")
+			if err := s.repo.SavePredictionOutcome(ctx, outcome); err == nil {
+				evaluatedOutcomes = append(evaluatedOutcomes, *outcome)
+			}
+		}
+	}
+
+	// 2. Compute aggregate calibration metrics across all evaluated outcomes
+	allOutcomes, err := s.repo.ListPredictionOutcomes(ctx, 100)
+	if err != nil {
+		return evaluatedOutcomes, nil, err
+	}
+
+	metrics := investment.ComputeCalibrationSummary(allOutcomes)
+	periodStart := now.AddDate(0, -1, 0)
+	evalResult := investment.BuildEvaluationResult(metrics, periodStart, now, "v1.0-baseline")
+
+	if metrics.TotalEvaluated > 0 {
+		_ = s.repo.SaveEvaluationResult(ctx, evalResult)
+	}
+
+	return evaluatedOutcomes, evalResult, nil
+}
+
+func (s *Service) ListEvaluationResults(ctx context.Context, limit int) ([]investment.EvaluationResult, error) {
+	return s.repo.ListEvaluationResults(ctx, limit)
+}
+

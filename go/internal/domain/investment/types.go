@@ -174,3 +174,54 @@ type AgyDecisionInput struct {
 	ExpectedHorizon   string   `json:"expected_horizon"`
 	StrategyVersion   string   `json:"strategy_version"`
 }
+
+type PredictionStatus string
+
+const (
+	PredictionPending   PredictionStatus = "PENDING"
+	PredictionEvaluated PredictionStatus = "EVALUATED"
+	PredictionExpired   PredictionStatus = "EXPIRED"
+)
+
+// Prediction represents a quantifiable, testable future forecast by agy.
+type Prediction struct {
+	ID                domain.ID        `json:"id"`
+	DecisionID        domain.ID        `json:"decision_id"`
+	InstrumentID      domain.ID        `json:"instrument_id"`
+	PredictionType    string           `json:"prediction_type"` // e.g. "DIRECTION", "RETURN_RANGE", "TARGET_PRICE"
+	Target            string           `json:"target"`          // e.g. "PRICE_CHANGE_PCT"
+	ExpectedDirection string           `json:"expected_direction"` // UP, DOWN, FLAT
+	Probability       float64          `json:"probability"`        // Confidence 0.0 ~ 1.0
+	TargetValue       float64          `json:"target_value"`
+	BasePrice         float64          `json:"base_price"`
+	EvaluationHorizon string           `json:"evaluation_horizon"` // e.g. "5D", "20D"
+	DueAt             time.Time        `json:"due_at"`
+	StrategyVersion   string           `json:"strategy_version"`
+	Status            PredictionStatus `json:"status"`
+	CreatedAt         time.Time        `json:"created_at"`
+}
+
+// PredictionOutcome represents the empirical validation of a Prediction.
+type PredictionOutcome struct {
+	ID                 domain.ID `json:"id"`
+	PredictionID       domain.ID `json:"prediction_id"`
+	ActualValue        float64   `json:"actual_value"`
+	ActualDirection    string    `json:"actual_direction"` // UP, DOWN, FLAT
+	OutcomeStatus      string    `json:"outcome_status"`   // HIT, MISS, NEUTRAL
+	BrierScore         float64   `json:"brier_score"`      // (probability - outcome)^2
+	EvaluationSourceID string    `json:"evaluation_source_id"`
+	EvaluatedAt        time.Time `json:"evaluated_at"`
+	DetailsJSON        string    `json:"details_json"`
+}
+
+// EvaluationResult aggregates calibration and accuracy metrics over a window.
+type EvaluationResult struct {
+	ID              domain.ID `json:"id"`
+	EvaluationType  string    `json:"evaluation_type"` // CALIBRATION, ACCURACY, BACKTEST
+	PeriodStart     time.Time `json:"period_start"`
+	PeriodEnd       time.Time `json:"period_end"`
+	SampleCount     int       `json:"sample_count"`
+	MetricsJSON     string    `json:"metrics_json"` // hit_rate, avg_brier_score, return_pct
+	StrategyVersion string    `json:"strategy_version"`
+	CreatedAt       time.Time `json:"created_at"`
+}

@@ -57,6 +57,8 @@ func init() {
 	RootCmd.AddCommand(projectCmd)
 	RootCmd.AddCommand(memoryCmd)
 	RootCmd.AddCommand(executionCmd)
+	RootCmd.AddCommand(investmentCmd)
+	RootCmd.AddCommand(scheduleCmd)
 }
 
 var versionCmd = &cobra.Command{

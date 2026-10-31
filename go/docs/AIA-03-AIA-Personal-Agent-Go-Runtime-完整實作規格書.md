@@ -64,11 +64,12 @@ AIA 目前處於 **v1.0 (Core & Web Baseline)** 實作交付階段，嚴格區�
 | **P1** | Web 基礎設施 | **IMPLEMENTED** | Web Host、一次性 Token 登入兌換、Server-Side Session、HTTP API、SSE 事件串流、安全機制（CSRF、Origin、Host Header） |
 | **P2** | Global Console | **IMPLEMENTED** | Dashboard、Task 建立/執行/取消/恢復、Agent 狀態檢視與啟用/停用、Memory 檢視與 Candidate、待處理事項（Pending Review）、Audit Trail |
 | **P3** | Investment 核心 | **IMPLEMENTED** | 投資組合 Profile/Snapshot、資金限制檢查、Go 建議股數計算、交易手續費與稅費計算（`CostConfig`）、Trade Proposal 產生與超限駁回 |
-| **P6** | Agent UI 模組 | **IMPLEMENTED** | 原生前端（HTML/CSS/JS 無外部打包）、Agent 專屬 mux 隔離路由、Portfolio 檢視、Decision / Proposal 檢視 |
-| **P4** | 實際資料抓取 | **PLANNED** | 下一階段實作：TWSE / TPEx 公開行情、重大訊息、公告觀測站與財經新聞爬取 |
-| **P5** | 預測與評估 | **PLANNED** | 下一階段實作：預測校準評估、歷史事後驗證、策略收益歸因與自我改善實驗 |
-| **SCHED** | 定時排程 Cron | **PLANNED** | 下一階段實作：Cron 自動週期觸發與 Misfire Policy（目前支援 Task 相依依賴與佇列執行） |
-| **CLI-INV** | 頂層投資 CLI | **PLANNED** | 下一階段實作：`aia investment` 命令列介面（目前由 Go 核心服務與 Web API/UI 提供） |
+| **P6** | Agent UI 模組 | **IMPLEMENTED** | 原生前端（HTML/CSS/JS 無外部打包）、Agent 專屬 mux 隔離路由、Portfolio 檢視、Market Data 檢視、Calibration Scorecard |
+| **P4** | 實際資料抓取 | **IMPLEMENTED** | TWSE OpenAPI 日 K 數據抓取、公開資訊觀測站 (MOPS) 重大訊息與新聞擷取、限流保護與快取機制 |
+| **P5** | 預測與評估 | **IMPLEMENTED** | 歷史預測追蹤、真實行情到期結算、Brier Score 信心度校準計算、方向性準確率 (Directional Accuracy) 評分卡 |
+| **SCHED** | 定時排程 Cron | **IMPLEMENTED** | 標準五欄式 Cron 與別名解析、Misfire Policy（SKIP, RUN_ONCE, CATCH_UP）、排程自動派發 Task |
+| **CLI-INV** | 頂層投資 CLI | **IMPLEMENTED** | `aia investment` 命令列套件（`portfolio`, `sync`, `proposals`, `approve`, `reject`, `predictions`, `evaluate`） |
+| **CLI-SCHED**| 頂層排程 CLI | **IMPLEMENTED** | `aia schedule` 命令列套件（`list`, `create`, `trigger`, `tick`） |
 
 # 3. Repository Structure
 

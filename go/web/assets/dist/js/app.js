@@ -85,6 +85,13 @@ const app = {
       await this.handleEvaluateInvestment();
     });
 
+    // Investment Sync & Calibration Buttons
+    const btnSync = document.getElementById('btn-sync-market-data');
+    if (btnSync) btnSync.addEventListener('click', () => this.handleSyncMarketData());
+
+    const btnEval = document.getElementById('btn-eval-predictions');
+    if (btnEval) btnEval.addEventListener('click', () => this.handleEvaluatePredictions());
+
     // Audit Query
     document.getElementById('btn-refresh-audit').addEventListener('click', () => this.loadAudit());
   },
@@ -558,8 +565,96 @@ const app = {
       } else {
         histTbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">無交易提案歷史</td></tr>';
       }
+
+      // Load MOPS documents
+      const docs = await this.apiCall('/api/v1/agents/investment/documents?limit=5');
+      const docsTbody = document.querySelector('#inv-docs-table tbody');
+      if (docs && docs.length > 0) {
+        docsTbody.innerHTML = docs.map(d => `
+          <tr>
+            <td><span class="badge badge-info">${d.content_type}</span></td>
+            <td><strong>${d.title}</strong></td>
+            <td><small class="text-muted">${d.summary || '-'}</small></td>
+            <td><small>${new Date(d.published_at).toLocaleDateString()}</small></td>
+          </tr>
+        `).join('');
+      }
+
+      // Load Predictions & Calibration
+      const preds = await this.apiCall('/api/v1/agents/investment/predictions?limit=10');
+      const predTbody = document.querySelector('#inv-predictions-table tbody');
+      if (preds && preds.length > 0) {
+        predTbody.innerHTML = preds.map(pr => `
+          <tr>
+            <td><code>${pr.id.substring(0, 8)}</code></td>
+            <td>${pr.target}</td>
+            <td><span class="badge badge-${pr.expected_direction}">${pr.expected_direction}</span></td>
+            <td><strong>${(pr.probability * 100).toFixed(0)}%</strong></td>
+            <td>$${pr.base_price.toFixed(1)}</td>
+            <td><small>${new Date(pr.due_at).toLocaleDateString()}</small></td>
+            <td><span class="badge badge-${pr.status}">${pr.status}</span></td>
+          </tr>
+        `).join('');
+      }
+
+      const evals = await this.apiCall('/api/v1/agents/investment/evaluations?limit=1');
+      if (evals && evals.length > 0) {
+        const last = evals[0];
+        let m = {};
+        try { m = JSON.parse(last.metrics_json); } catch(e) {}
+        document.getElementById('calib-samples').textContent = last.sample_count;
+        if (m.directional_accuracy !== undefined) {
+          document.getElementById('calib-accuracy').textContent = (m.directional_accuracy * 100).toFixed(1) + '%';
+        }
+        if (m.average_brier_score !== undefined) {
+          document.getElementById('calib-brier').textContent = m.average_brier_score.toFixed(4);
+        }
+      }
     } catch (e) {
       console.error(e);
+    }
+  },
+
+  async handleSyncMarketData() {
+    const symbol = document.getElementById('inv-sync-symbol').value || '2330';
+    const sumBox = document.getElementById('inv-market-data-summary');
+    sumBox.className = 'alert alert-info mb-3';
+    sumBox.textContent = `正在自台灣證券交易所 (TWSE) 與觀測站同步 ${symbol} 最新行情...`;
+    sumBox.classList.remove('hidden');
+
+    try {
+      const res = await this.apiCall('/api/v1/agents/investment/sync', {
+        method: 'POST',
+        body: { symbol }
+      });
+      if (res && res.market_data) {
+        let b = {};
+        try { b = JSON.parse(res.market_data.value_json); } catch(e) {}
+        sumBox.className = 'alert alert-success mb-3';
+        sumBox.innerHTML = `
+          <strong>✓ 成功同步 ${symbol} 最新盤後數據</strong><br>
+          • 收盤價：<strong>$${b.close || '-'} TWD</strong> (漲跌：${b.change || 0} / ${b.change_percent ? b.change_percent.toFixed(2) : 0}%)<br>
+          • 成交量：${(b.volume || 0).toLocaleString()} 股 | 開高低：${b.open || '-'} / ${b.high || '-'} / ${b.low || '-'}<br>
+          • 已同步匯入 ${res.documents_cnt || 0} 則重大訊息與財經公告
+        `;
+      }
+      this.loadInvestment();
+    } catch (err) {
+      sumBox.className = 'alert alert-danger mb-3';
+      sumBox.textContent = '同步失敗: ' + (err.message || err);
+    }
+  },
+
+  async handleEvaluatePredictions() {
+    try {
+      const res = await this.apiCall('/api/v1/agents/investment/predictions/evaluate', {
+        method: 'POST',
+        body: {}
+      });
+      alert(`已成功結算 ${res.evaluated_outcomes ? res.evaluated_outcomes.length : 0} 筆到期預測，並重新計算校準評分卡！`);
+      this.loadInvestment();
+    } catch (err) {
+      alert('評估結算失敗: ' + (err.message || err));
     }
   },
 

@@ -366,6 +366,88 @@
           </div>
         </div>
 
+        <!-- Market Data & MOPS Announcements (P4) -->
+        <div class="card mt-4">
+          <div class="card-header d-flex justify-between align-center">
+            <div>
+              <h3>📈 台灣市場即時資料與重大訊息 (Market Data & MOPS)</h3>
+              <span class="text-muted">自動自 TWSE OpenAPI 與 MOPS 抓取真實行情與公司公告</span>
+            </div>
+            <div class="d-flex align-center gap-2">
+              <select id="inv-sync-symbol" class="form-select-sm">
+                <option value="2330">2330 台積電</option>
+                <option value="2317">2317 鴻海</option>
+                <option value="2454">2454 聯發科</option>
+              </select>
+              <button id="btn-sync-market-data" class="btn btn-secondary btn-sm">🔄 同步最新行情與重大訊息</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="inv-market-data-summary" class="alert mb-3 hidden"></div>
+            <h4>最新重大訊息與財經公告 (MOPS Announcements)</h4>
+            <div class="table-responsive">
+              <table class="table" id="inv-docs-table">
+                <thead>
+                  <tr>
+                    <th>類型</th>
+                    <th>標題</th>
+                    <th>摘要</th>
+                    <th>發布時間</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="4" class="text-center text-muted">點擊「同步最新行情與重大訊息」載入最新資料</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Predictions & Calibration Scorecard (P5) -->
+        <div class="card mt-4">
+          <div class="card-header d-flex justify-between align-center">
+            <div>
+              <h3>🎯 預測追蹤與信心度校準 (Predictions & Calibration Scorecard)</h3>
+              <span class="text-muted">追蹤 agy 走勢預測，事後以真實市場數據計算 Brier Score 與方向性準確率</span>
+            </div>
+            <button id="btn-eval-predictions" class="btn btn-primary btn-sm">⚡ 結算到期預測與計算校準</button>
+          </div>
+          <div class="card-body">
+            <div class="stats-grid mb-3">
+              <div class="stat-card">
+                <div class="stat-label">已評估樣本數 (Samples)</div>
+                <div class="stat-value" id="calib-samples">0</div>
+                <div class="stat-hint">已到期完成結算</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">方向性準確率 (Accuracy)</div>
+                <div class="stat-value text-accent" id="calib-accuracy">-%</div>
+                <div class="stat-hint">Directional Hits / Total</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">平均 Brier Score</div>
+                <div class="stat-value text-primary" id="calib-brier">-</div>
+                <div class="stat-hint">越接近 0 代表機率校準越精確</div>
+              </div>
+            </div>
+            <h4>待驗證預測紀錄 (Predictions)</h4>
+            <div class="table-responsive">
+              <table class="table" id="inv-predictions-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>預測目標</th>
+                    <th>預期方向</th>
+                    <th>信心機率</th>
+                    <th>基準價</th>
+                    <th>到期時間</th>
+                    <th>狀態</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="7" class="text-center text-muted">無預測紀錄</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <!-- Proposals List -->
         <div class="card mt-4">
           <div class="card-header">

@@ -43,10 +43,10 @@ Investment Agent 是 AIA Personal Agent 的第一個實際應用領域。
 | 階段與模組 | 範圍與能力 | 當前狀態 | 說明 |
 |---|---|---|---|
 | **P3 Investment 核心** | 投資組合 Profile/Snapshot 管理、資金與部位上限驗證、Go 建議股數計算、交易手續費與稅費計算（`CostConfig`）、Trade Proposal 產生與駁回審計 | **IMPLEMENTED** | 已由 Go 核心服務與 Web API/UI 完整交付，通過單元與整合測試 |
-| **P6 Investment Web UI** | 投資組合快照檢視、持倉標的盈虧狀態、交易決策與提案列表、駁回原因檢視 | **IMPLEMENTED** | 已整合於原生 Embedded Web Console，透過 Agent 專屬隔離路由提供 |
-| **P4 實際資料抓取** | 台灣證券交易所 (TWSE)、櫃買中心 (TPEx)、公開資訊觀測站 (MOPS)、各大財經新聞與公告爬取整合 | **PLANNED** | 下一階段實作 |
-| **P5 預測與評估** | 歷史判斷追蹤、事後收益與風險回測、預測校準評估、策略自我改善反思實驗 | **PLANNED** | 下一階段實作 |
-| **CLI-INV 頂層命令** | 頂層終端機命令 `aia investment` | **PLANNED** | 下一階段實作（目前透過 Go Service 與 Web 介面操作） |
+| **P6 Investment Web UI** | 投資組合快照檢視、持倉標的盈虧狀態、交易決策與提案列表、駁回原因檢視、行情與重大訊息、校準評分卡 | **IMPLEMENTED** | 已整合於原生 Embedded Web Console，透過 Agent 專屬隔離路由提供 |
+| **P4 實際資料抓取** | 台灣證券交易所 (TWSE)、公開資訊觀測站 (MOPS)、各大財經新聞與公告爬取整合、限流保護與快取 | **IMPLEMENTED** | 已完成 TWSE OpenAPI 日 K 擷取與 MOPS 公告抓取管道 |
+| **P5 預測與評估** | 歷史判斷追蹤、事後收益與風險回測、Brier Score 預測校準評估、策略自我改善實驗 | **IMPLEMENTED** | 已完成 Brier Score 計算、預測到期結算與綜合校準指標生成 |
+| **CLI-INV 頂層命令** | 頂層終端機命令 `aia investment` | **IMPLEMENTED** | 已完成 `portfolio`, `sync`, `proposals`, `approve`, `reject`, `predictions`, `evaluate` 子命令 |
 
 ---
 

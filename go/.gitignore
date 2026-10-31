@@ -5,3 +5,5 @@ workspaces/
 *.db-journal
 *.db-wal
 *.db-shm
+*.tgz
+*.tar.gz

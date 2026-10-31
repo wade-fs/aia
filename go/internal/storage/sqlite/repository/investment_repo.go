@@ -367,8 +367,10 @@ func (r *InvestmentRepository) GetTradeProposal(ctx context.Context, id domain.I
 		SELECT id, portfolio_profile_id, decision_id, portfolio_snapshot_id, allocation_proposal_id, instrument_id,
 			action, quantity, estimated_price, estimated_gross_amount, estimated_total_cost, proposal_json,
 			status, status_reason, created_at, expires_at, updated_at
-		FROM investment_trade_proposals WHERE id = ?
-	`, id)
+		FROM investment_trade_proposals
+		WHERE id = ? OR (length(?) >= 6 AND id LIKE ? || '%')
+		LIMIT 1
+	`, id, id, id)
 
 	var p investment.TradeProposal
 	var act, st, ca, ea, ua string
@@ -435,7 +437,11 @@ func (r *InvestmentRepository) ListTradeProposals(ctx context.Context, profileID
 
 func (r *InvestmentRepository) UpdateTradeProposalStatus(ctx context.Context, id domain.ID, status investment.ProposalStatus, reason string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := r.db.RawDB().ExecContext(ctx, "UPDATE investment_trade_proposals SET status = ?, status_reason = ?, updated_at = ? WHERE id = ?", string(status), reason, now, id)
+	res, err := r.db.RawDB().ExecContext(ctx, `
+		UPDATE investment_trade_proposals
+		SET status = ?, status_reason = ?, updated_at = ?
+		WHERE id = ? OR (length(?) >= 6 AND id LIKE ? || '%')
+	`, string(status), reason, now, id, id, id)
 	if err != nil {
 		return err
 	}
@@ -444,4 +450,380 @@ func (r *InvestmentRepository) UpdateTradeProposalStatus(ctx context.Context, id
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// EnsureDefaultDataSources provisions built-in Taiwan financial and news sources (AIA-05 §6).
+func (r *InvestmentRepository) EnsureDefaultDataSources(ctx context.Context) error {
+	sources := []investment.DataSource{
+		{
+			ID:                 "ds-twse-openapi",
+			SourceName:         "TWSE_OPENAPI",
+			SourceType:         "OFFICIAL_EXCHANGE",
+			BaseURL:            "https://openapi.twse.com.tw/v1",
+			DocumentationURL:   "https://openapi.twse.com.tw/",
+			AuthenticationType: "NONE",
+			ConfigurationJSON:  `{"rate_limit_rpm": 60}`,
+			Status:             "ACTIVE",
+			HealthStatus:       "HEALTHY",
+		},
+		{
+			ID:                 "ds-mops-announcements",
+			SourceName:         "MOPS_ANNOUNCEMENTS",
+			SourceType:         "GOVERNMENT_MOPS",
+			BaseURL:            "https://mops.twse.com.tw",
+			DocumentationURL:   "https://mops.twse.com.tw/mops/web/index",
+			AuthenticationType: "NONE",
+			ConfigurationJSON:  `{"rate_limit_rpm": 30}`,
+			Status:             "ACTIVE",
+			HealthStatus:       "HEALTHY",
+		},
+		{
+			ID:                 "ds-tpex-openapi",
+			SourceName:         "TPEX_OPENAPI",
+			SourceType:         "OFFICIAL_EXCHANGE",
+			BaseURL:            "https://www.tpex.org.tw/openapi/v1",
+			DocumentationURL:   "https://www.tpex.org.tw/openapi/",
+			AuthenticationType: "NONE",
+			ConfigurationJSON:  `{"rate_limit_rpm": 60}`,
+			Status:             "ACTIVE",
+			HealthStatus:       "HEALTHY",
+		},
+		{
+			ID:                 "ds-market-news",
+			SourceName:         "FINANCIAL_NEWS_FEED",
+			SourceType:         "NEWS_RSS",
+			BaseURL:            "https://news.cnyes.com",
+			DocumentationURL:   "https://news.cnyes.com",
+			AuthenticationType: "NONE",
+			ConfigurationJSON:  `{"categories": ["tw_stock", "headline"]}`,
+			Status:             "ACTIVE",
+			HealthStatus:       "HEALTHY",
+		},
+	}
+
+	now := time.Now().UTC()
+	for _, s := range sources {
+		_, err := r.db.RawDB().ExecContext(ctx, `
+			INSERT OR IGNORE INTO investment_data_sources (
+				id, source_name, source_type, base_url, documentation_url,
+				authentication_type, configuration_json, status, health_status,
+				created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, s.ID, s.SourceName, s.SourceType, s.BaseURL, s.DocumentationURL,
+			s.AuthenticationType, s.ConfigurationJSON, s.Status, s.HealthStatus,
+			now.Format(time.RFC3339), now.Format(time.RFC3339))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *InvestmentRepository) ListDataSources(ctx context.Context) ([]investment.DataSource, error) {
+	rows, err := r.db.RawDB().QueryContext(ctx, `
+		SELECT id, source_name, source_type, base_url, documentation_url, authentication_type,
+			configuration_json, status, health_status, last_success_at, last_failure_at, created_at, updated_at
+		FROM investment_data_sources ORDER BY source_name ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []investment.DataSource
+	for rows.Next() {
+		var d investment.DataSource
+		var ls, lf sql.NullString
+		var ca, ua string
+		if err := rows.Scan(
+			&d.ID, &d.SourceName, &d.SourceType, &d.BaseURL, &d.DocumentationURL, &d.AuthenticationType,
+			&d.ConfigurationJSON, &d.Status, &d.HealthStatus, &ls, &lf, &ca, &ua,
+		); err != nil {
+			return nil, err
+		}
+		if ls.Valid {
+			t, _ := time.Parse(time.RFC3339, ls.String)
+			d.LastSuccessAt = &t
+		}
+		if lf.Valid {
+			t, _ := time.Parse(time.RFC3339, lf.String)
+			d.LastFailureAt = &t
+		}
+		d.CreatedAt, _ = time.Parse(time.RFC3339, ca)
+		d.UpdatedAt, _ = time.Parse(time.RFC3339, ua)
+		list = append(list, d)
+	}
+	return list, rows.Err()
+}
+
+func (r *InvestmentRepository) SaveMarketData(ctx context.Context, md *investment.MarketData) error {
+	_, err := r.db.RawDB().ExecContext(ctx, `
+		INSERT INTO investment_market_data (
+			id, instrument_id, data_type, period, value_json, source_id, fetched_at, effective_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, md.ID, md.InstrumentID, md.DataType, md.Period, md.ValueJSON, md.SourceID,
+		md.FetchedAt.Format(time.RFC3339), md.EffectiveAt.Format(time.RFC3339))
+	return err
+}
+
+func (r *InvestmentRepository) GetLatestMarketData(ctx context.Context, instrumentID domain.ID) (*investment.MarketData, error) {
+	row := r.db.RawDB().QueryRowContext(ctx, `
+		SELECT id, instrument_id, data_type, period, value_json, source_id, fetched_at, effective_at
+		FROM investment_market_data
+		WHERE instrument_id = ?
+		ORDER BY effective_at DESC LIMIT 1
+	`, instrumentID)
+	var md investment.MarketData
+	var fa, ea string
+	if err := row.Scan(&md.ID, &md.InstrumentID, &md.DataType, &md.Period, &md.ValueJSON, &md.SourceID, &fa, &ea); err != nil {
+		return nil, err
+	}
+	md.FetchedAt, _ = time.Parse(time.RFC3339, fa)
+	md.EffectiveAt, _ = time.Parse(time.RFC3339, ea)
+	return &md, nil
+}
+
+func (r *InvestmentRepository) ListHistoricalMarketData(ctx context.Context, instrumentID domain.ID, limit int) ([]investment.MarketData, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	rows, err := r.db.RawDB().QueryContext(ctx, `
+		SELECT id, instrument_id, data_type, period, value_json, source_id, fetched_at, effective_at
+		FROM investment_market_data
+		WHERE instrument_id = ?
+		ORDER BY effective_at DESC LIMIT ?
+	`, instrumentID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []investment.MarketData
+	for rows.Next() {
+		var md investment.MarketData
+		var fa, ea string
+		if err := rows.Scan(&md.ID, &md.InstrumentID, &md.DataType, &md.Period, &md.ValueJSON, &md.SourceID, &fa, &ea); err != nil {
+			return nil, err
+		}
+		md.FetchedAt, _ = time.Parse(time.RFC3339, fa)
+		md.EffectiveAt, _ = time.Parse(time.RFC3339, ea)
+		list = append(list, md)
+	}
+	return list, rows.Err()
+}
+
+func (r *InvestmentRepository) SaveRawDocument(ctx context.Context, doc *investment.RawDocument) error {
+	_, err := r.db.RawDB().ExecContext(ctx, `
+		INSERT INTO investment_raw_documents (
+			id, source_id, instrument_id, source_record_id, source_url, title, summary,
+			content_reference, content_hash, content_type, published_at, fetched_at, metadata_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, doc.ID, doc.SourceID, doc.InstrumentID, doc.SourceRecordID, doc.SourceURL, doc.Title, doc.Summary,
+		doc.ContentReference, doc.ContentHash, doc.ContentType, doc.PublishedAt.Format(time.RFC3339),
+		doc.FetchedAt.Format(time.RFC3339), doc.MetadataJSON)
+	return err
+}
+
+func (r *InvestmentRepository) ListRawDocuments(ctx context.Context, instrumentID domain.ID, limit int) ([]investment.RawDocument, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	var rows *sql.Rows
+	var err error
+	if instrumentID != "" {
+		rows, err = r.db.RawDB().QueryContext(ctx, `
+			SELECT id, source_id, instrument_id, source_record_id, source_url, title, summary,
+				content_reference, content_hash, content_type, published_at, fetched_at, metadata_json
+			FROM investment_raw_documents WHERE instrument_id = ?
+			ORDER BY published_at DESC LIMIT ?
+		`, instrumentID, limit)
+	} else {
+		rows, err = r.db.RawDB().QueryContext(ctx, `
+			SELECT id, source_id, instrument_id, source_record_id, source_url, title, summary,
+				content_reference, content_hash, content_type, published_at, fetched_at, metadata_json
+			FROM investment_raw_documents
+			ORDER BY published_at DESC LIMIT ?
+		`, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []investment.RawDocument
+	for rows.Next() {
+		var doc investment.RawDocument
+		var pa, fa string
+		if err := rows.Scan(
+			&doc.ID, &doc.SourceID, &doc.InstrumentID, &doc.SourceRecordID, &doc.SourceURL, &doc.Title, &doc.Summary,
+			&doc.ContentReference, &doc.ContentHash, &doc.ContentType, &pa, &fa, &doc.MetadataJSON,
+		); err != nil {
+			return nil, err
+		}
+		doc.PublishedAt, _ = time.Parse(time.RFC3339, pa)
+		doc.FetchedAt, _ = time.Parse(time.RFC3339, fa)
+		list = append(list, doc)
+	}
+	return list, rows.Err()
+}
+
+func (r *InvestmentRepository) SavePrediction(ctx context.Context, p *investment.Prediction) error {
+	_, err := r.db.RawDB().ExecContext(ctx, `
+		INSERT INTO investment_predictions (
+			id, decision_id, instrument_id, prediction_type, target, expected_direction,
+			probability, target_value, base_price, evaluation_horizon, due_at, strategy_version, status, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, p.ID, p.DecisionID, p.InstrumentID, p.PredictionType, p.Target, p.ExpectedDirection,
+		p.Probability, p.TargetValue, p.BasePrice, p.EvaluationHorizon, p.DueAt.Format(time.RFC3339),
+		p.StrategyVersion, string(p.Status), p.CreatedAt.Format(time.RFC3339))
+	return err
+}
+
+func (r *InvestmentRepository) GetPrediction(ctx context.Context, id domain.ID) (*investment.Prediction, error) {
+	row := r.db.RawDB().QueryRowContext(ctx, `
+		SELECT id, decision_id, instrument_id, prediction_type, target, expected_direction,
+			probability, target_value, base_price, evaluation_horizon, due_at, strategy_version, status, created_at
+		FROM investment_predictions WHERE id = ?
+	`, id)
+	var p investment.Prediction
+	var da, ca, st string
+	if err := row.Scan(
+		&p.ID, &p.DecisionID, &p.InstrumentID, &p.PredictionType, &p.Target, &p.ExpectedDirection,
+		&p.Probability, &p.TargetValue, &p.BasePrice, &p.EvaluationHorizon, &da, &p.StrategyVersion, &st, &ca,
+	); err != nil {
+		return nil, err
+	}
+	p.DueAt, _ = time.Parse(time.RFC3339, da)
+	p.CreatedAt, _ = time.Parse(time.RFC3339, ca)
+	p.Status = investment.PredictionStatus(st)
+	return &p, nil
+}
+
+func (r *InvestmentRepository) ListPredictions(ctx context.Context, status investment.PredictionStatus, limit int) ([]investment.Prediction, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `
+		SELECT id, decision_id, instrument_id, prediction_type, target, expected_direction,
+			probability, target_value, base_price, evaluation_horizon, due_at, strategy_version, status, created_at
+		FROM investment_predictions
+	`
+	args := []any{}
+	if status != "" {
+		query += " WHERE status = ?"
+		args = append(args, string(status))
+	}
+	query += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []investment.Prediction
+	for rows.Next() {
+		var p investment.Prediction
+		var da, ca, st string
+		if err := rows.Scan(
+			&p.ID, &p.DecisionID, &p.InstrumentID, &p.PredictionType, &p.Target, &p.ExpectedDirection,
+			&p.Probability, &p.TargetValue, &p.BasePrice, &p.EvaluationHorizon, &da, &p.StrategyVersion, &st, &ca,
+		); err != nil {
+			return nil, err
+		}
+		p.DueAt, _ = time.Parse(time.RFC3339, da)
+		p.CreatedAt, _ = time.Parse(time.RFC3339, ca)
+		p.Status = investment.PredictionStatus(st)
+		list = append(list, p)
+	}
+	return list, rows.Err()
+}
+
+func (r *InvestmentRepository) SavePredictionOutcome(ctx context.Context, oc *investment.PredictionOutcome) error {
+	return r.db.WithTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO investment_prediction_outcomes (
+				id, prediction_id, actual_value, actual_direction, outcome_status,
+				brier_score, evaluation_source_id, evaluated_at, details_json
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, oc.ID, oc.PredictionID, oc.ActualValue, oc.ActualDirection, oc.OutcomeStatus,
+			oc.BrierScore, oc.EvaluationSourceID, oc.EvaluatedAt.Format(time.RFC3339), oc.DetailsJSON)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE investment_predictions SET status = ? WHERE id = ?", string(investment.PredictionEvaluated), oc.PredictionID)
+		return err
+	})
+}
+
+func (r *InvestmentRepository) ListPredictionOutcomes(ctx context.Context, limit int) ([]investment.PredictionOutcome, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := r.db.RawDB().QueryContext(ctx, `
+		SELECT id, prediction_id, actual_value, actual_direction, outcome_status,
+			brier_score, evaluation_source_id, evaluated_at, details_json
+		FROM investment_prediction_outcomes
+		ORDER BY evaluated_at DESC LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []investment.PredictionOutcome
+	for rows.Next() {
+		var oc investment.PredictionOutcome
+		var ea string
+		if err := rows.Scan(
+			&oc.ID, &oc.PredictionID, &oc.ActualValue, &oc.ActualDirection, &oc.OutcomeStatus,
+			&oc.BrierScore, &oc.EvaluationSourceID, &ea, &oc.DetailsJSON,
+		); err != nil {
+			return nil, err
+		}
+		oc.EvaluatedAt, _ = time.Parse(time.RFC3339, ea)
+		list = append(list, oc)
+	}
+	return list, rows.Err()
+}
+
+func (r *InvestmentRepository) SaveEvaluationResult(ctx context.Context, ev *investment.EvaluationResult) error {
+	_, err := r.db.RawDB().ExecContext(ctx, `
+		INSERT INTO investment_evaluation_results (
+			id, evaluation_type, period_start, period_end, sample_count, metrics_json, strategy_version, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, ev.ID, ev.EvaluationType, ev.PeriodStart.Format(time.RFC3339), ev.PeriodEnd.Format(time.RFC3339),
+		ev.SampleCount, ev.MetricsJSON, ev.StrategyVersion, ev.CreatedAt.Format(time.RFC3339))
+	return err
+}
+
+func (r *InvestmentRepository) ListEvaluationResults(ctx context.Context, limit int) ([]investment.EvaluationResult, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := r.db.RawDB().QueryContext(ctx, `
+		SELECT id, evaluation_type, period_start, period_end, sample_count, metrics_json, strategy_version, created_at
+		FROM investment_evaluation_results ORDER BY created_at DESC LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []investment.EvaluationResult
+	for rows.Next() {
+		var ev investment.EvaluationResult
+		var ps, pe, ca string
+		if err := rows.Scan(
+			&ev.ID, &ev.EvaluationType, &ps, &pe, &ev.SampleCount, &ev.MetricsJSON, &ev.StrategyVersion, &ca,
+		); err != nil {
+			return nil, err
+		}
+		ev.PeriodStart, _ = time.Parse(time.RFC3339, ps)
+		ev.PeriodEnd, _ = time.Parse(time.RFC3339, pe)
+		ev.CreatedAt, _ = time.Parse(time.RFC3339, ca)
+		list = append(list, ev)
+	}
+	return list, rows.Err()
 }

@@ -22,6 +22,7 @@ import (
 	invService "github.com/wade/aia/internal/service/investment"
 	memoryService "github.com/wade/aia/internal/service/memory"
 	projectService "github.com/wade/aia/internal/service/project"
+	scheduleService "github.com/wade/aia/internal/service/schedule"
 	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
@@ -46,7 +47,11 @@ type App struct {
 	AuditRepo     *repository.AuditRepository
 	EventBus      *eventbus.Bus
 	InvRepo       *repository.InvestmentRepository
+	InvDataRepo   *repository.InvestmentDataRepository
 	InvSvc        *invService.Service
+	CollectorSvc  *invService.DataCollectorService
+	ScheduleRepo  *repository.ScheduleRepository
+	ScheduleSvc   *scheduleService.Service
 	RecoveryMgr   *recovery.Manager
 	Scheduler     *orchestrator.Scheduler
 	PersonalAgent *orchestrator.PersonalAgent
@@ -74,6 +79,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	artRepo := repository.NewArtifactRepository(db)
 	auditRepo := repository.NewAuditRepository(db)
 	invRepo := repository.NewInvestmentRepository(db)
+	invDataRepo := repository.NewInvestmentDataRepository(db)
+	schedRepo := repository.NewScheduleRepository(db)
 
 	taskRepo.SetChangeHook(func(ctx context.Context, taskID domain.ID, status task.TaskStatus, created bool) {
 		if bus != nil {
@@ -115,6 +122,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	execSvc := execService.NewService(execRepo, taskRepo, artRepo, auditRepo, prov, wsMgr, validator)
 	memSvc := memoryService.NewService(memRepo)
 	invSvc := invService.NewService(invRepo, auditRepo, bus)
+	collectorSvc := invService.NewDataCollectorService(invDataRepo, invRepo)
+	schedSvc := scheduleService.NewService(schedRepo, taskSvc, bus)
 
 	// 6. Recovery
 	recMgr := recovery.NewManager(taskRepo, execRepo, auditRepo)
@@ -141,7 +150,11 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		AuditRepo:     auditRepo,
 		EventBus:      bus,
 		InvRepo:       invRepo,
+		InvDataRepo:   invDataRepo,
 		InvSvc:        invSvc,
+		CollectorSvc:  collectorSvc,
+		ScheduleRepo:  schedRepo,
+		ScheduleSvc:   schedSvc,
 		RecoveryMgr:   recMgr,
 		Scheduler:     scheduler,
 		PersonalAgent: pa,

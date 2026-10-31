@@ -717,17 +717,22 @@ aia completion --help
 
 # 13. Investment Agent
 
-**狀態：PLANNED / PARTIALLY IMPLEMENTED**
+**狀態：IMPLEMENTED**
 
-目前已確認 Runtime 註冊內建 `investment-agent`。
+目前 Runtime 已註冊內建 `investment-agent`，且已提供完整頂層 CLI 工具：
 
-但目前 CLI 頂層命令尚未提供：
-
-```text
-aia investment
+```bash
+aia investment --help
 ```
 
-因此不能宣稱已有完整的投資管理 CLI。
+可用指令包含：
+- `aia investment portfolio`：檢視投資組合、可用現金、資金上限與持倉。
+- `aia investment sync [symbol]`：自 TWSE OpenAPI 與 MOPS 抓取最新行情與重大訊息。
+- `aia investment proposals`：列出 Go Runtime 產生之交易提案。
+- `aia investment approve <id>`：核准交易提案。
+- `aia investment reject <id>`：駁回交易提案。
+- `aia investment predictions`：列出預測紀錄與狀態。
+- `aia investment evaluate`：執行到期預測結算並計算 Brier Score 校準評分卡。
 
 ## 13.1 預定功能
 
@@ -791,45 +796,31 @@ AI 不得直接決定或繞過 Go 的資金限制。
 
 # 14. Scheduler 與自動化
 
-**狀態：PARTIALLY IMPLEMENTED / PLANNED**
+**狀態：IMPLEMENTED**
 
-目前已確認：
-
-- Scheduler 存在於 Task 執行路徑。
-- `aia task run` 使用 Scheduler 執行 READY Task。
-
-尚未確認已提供：
-
-- Schedule CRUD。
-- 定時觸發。
-- Schedule Enable / Disable。
-- Misfire Policy 管理。
-- 排程執行歷史查詢。
-- 使用者可管理的排程設定介面。
-
-因此目前不得在操作手冊中提供不存在的命令，例如：
+目前已提供定時排程引擎與頂層命令：
 
 ```bash
-aia schedule create
-aia schedule list
+aia schedule --help
 ```
 
-這些命令只能列入未來規劃。
+可用指令包含：
+- `aia schedule list`：列出所有自動排程、Cron 表達式與下次執行時間。
+- `aia schedule create --name <name> --cron <cron> [--agent <agent>]`：新增定時排程（支援五欄式 Cron 與 `@daily`、`@hourly` 等別名）。
+- `aia schedule trigger <id>`：立即手動派發該排程工作為 READY Task。
+- `aia schedule tick`：背景執行或手動檢查到期排程並觸發執行。
 
-## 14.1 未來排程設計原則
+Misfire Policy 支援 `SKIP`、`RUN_ONCE` 與 `CATCH_UP`，確保電腦重啟或離線時不造成大量任務積壓。
 
-Schedule 與 Task 必須分離：
+## 14.1 排程設計原則與責任分離
 
-- Schedule：定義何時產生工作。
-- Task：代表一次具體工作。
-- Execution：代表一次實際執行。
+Schedule 與 Task 嚴格分離：
 
-電腦關機期間無法執行工作。
+- Schedule：定義何時產生工作（觸發規則與樣板）。
+- Task：代表一次具體工作（擁有狀態機與審查）。
+- Execution：代表一次實際執行嘗試（追蹤日誌與事件）。
 
-未來應支援 Misfire Policy，例如：
-
-- SKIP
-- RUN_LATEST
+電腦關機期間無法執行工作。透過 Misfire Policy（`SKIP`、`RUN_ONCE`、`CATCH_UP`），系統在重新啟動後依政策決定如何補救錯過的時間點，避免工作爆炸積壓。
 - RUN_IF_WITHIN_WINDOW
 - REQUIRE_APPROVAL
 
@@ -967,11 +958,11 @@ agy OAuth Token 由 agy 自行管理；AIA 不讀取、不複製、不解析其 
 | **P1** | Embedded Web 基礎設施 | IMPLEMENTED | Web Host、一次性 Token 啟動產生與單次兌換、Server-Side Session、REST/SSE API、CSRF/Origin 安全中介軟體 |
 | **P2** | Global Web Console | IMPLEMENTED | Dashboard 系統摘要、Task 列表與生命週期操作、Agent 狀態檢視、Memory 檢視與 Candidate 審批、待處理事項（Pending Review）、Audit Trail 稽核軌跡 |
 | **P3** | Investment 核心能力 | IMPLEMENTED | 投資組合 Profile/Snapshot 管理、資金與持倉比例限制檢查、Go 建議股數計算、交易手續費與稅費計算（`CostConfig` 可配置）、Trade Proposal 產生與駁回審計 |
-| **P6** | Agent UI 模組 | IMPLEMENTED | 原生前端（HTML/CSS/JS）、Agent 專屬 mux 隔離路由、Portfolio 持倉檢視、Decision / Trade Proposal 檢視 |
-| **P4** | 實際資料抓取 | PLANNED | 下一階段實作：TWSE / TPEx 行情爬取、重大訊息、公開資訊觀測站 (MOPS) 與財經新聞整合 |
-| **P5** | 預測與評估 | PLANNED | 下一階段實作：歷史預測事後追蹤、報酬與風險校準回測、策略自我改善反思實驗 |
-| SCHED | Schedule 管理 CLI 與 Cron | PLANNED | 下一階段實作：`aia schedule` CLI、Cron 自動定時週期觸發與 Misfire Policy（目前支援 Task 相依依賴與佇列執行） |
-| CLI-INV | Investment 管理 CLI | PLANNED | 下一階段實作：`aia investment` CLI（目前核心功能由 Go Service 及 Web UI 提供） |
+| **P6** | Agent UI 模組 | IMPLEMENTED | 原生前端（HTML/CSS/JS）、Agent 專屬 mux 隔離路由、Portfolio 持倉檢視、行情與重大訊息、校準評分卡 |
+| **P4** | 實際資料抓取 | IMPLEMENTED | TWSE OpenAPI 日 K 數據抓取、公開資訊觀測站 (MOPS) 重大訊息與財經新聞整合、限流保護與快取 |
+| **P5** | 預測與評估 | IMPLEMENTED | 歷史預測事後追蹤、市場數據到期結算、Brier Score 信心度校準計算、方向性準確率 (Directional Accuracy) |
+| SCHED | Schedule 管理 CLI 與 Cron | IMPLEMENTED | `aia schedule` CLI、標準五欄式 Cron 與別名解析、Misfire Policy（SKIP, RUN_ONCE, CATCH_UP）、排程自動派發 Task |
+| CLI-INV | Investment 管理 CLI | IMPLEMENTED | `aia investment` CLI（`portfolio`, `sync`, `proposals`, `approve`, `reject`, `predictions`, `evaluate`） |
 | CORE | 多使用者隔離 | NOT IN V1 | 單機單使用者 Personal Agent 架構 |
 | CORE | 遠端 Web 暴露管理 | NOT IN V1 | 預設僅監聽 127.0.0.1 本機安全防護 |
 | CORE | 動態 Go Plugin | NOT IN V1 | 採用標準 Go 編譯整合 |

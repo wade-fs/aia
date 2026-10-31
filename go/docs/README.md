@@ -99,8 +99,10 @@ The current CLI provides these top-level commands:
 | `completion` | Generate shell completion scripts |
 | `doctor` | Check dependencies and environment |
 | `execution` | Inspect executions and events |
+| `investment` | Manage investment portfolio, sync data, view predictions and proposals |
 | `memory` | Manage long-term memories and candidates |
 | `project` | Manage workspace projects |
+| `schedule` | Manage automated recurring task schedules (Cron & Misfire policies) |
 | `server` | Manage the AIA server process |
 | `status` | Show system summary and running tasks |
 | `task` | Manage and execute tasks |
@@ -443,8 +445,9 @@ AIA is currently at **v1.0 (Core & Web Baseline)**. The system implementation ba
 | **P1 Web Infrastructure** | Web Host, Session, API, SSE, Security | **IMPLEMENTED** | Localhost-only (127.0.0.1), one-time bootstrap token, HttpOnly session cookie, CSRF/Origin protection |
 | **P2 Global Web Console** | Dashboard, Tasks, Agents, Memory, Pending Review, Audit | **IMPLEMENTED** | Native HTML/CSS/JS frontend embedded via `go:embed`, unified approval overview for Tasks and Memory Candidates |
 | **P3 Investment Core** | Portfolio Profile/Snapshot, Sizing, Limits, Cost Calculation, Proposals | **IMPLEMENTED** | Go calculation boundary, dynamic `CostConfig`, proposal rejection logging |
-| **P6 Agent Web UI** | Dedicated Agent UI & Namespaced Mux | **IMPLEMENTED** | Agent routing isolation (`/api/v1/agents/{id}/`), Investment portfolio and proposal UI |
-| **P4 Data Ingestion** | TWSE, TPEx, MOPS, Financial News Scraping | **PLANNED** | Scheduled for next implementation phase |
-| **P5 Prediction & Eval** | Forecast Calibration, Backtesting, Self-Improvement | **PLANNED** | Scheduled for next implementation phase |
-| **SCHED Automation** | Cron Scheduling & Misfire Policies | **PLANNED** | Scheduled for next implementation phase (Task dependency scheduling currently active) |
-| **CLI-INV Top-Level CLI** | `aia investment` CLI suite | **PLANNED** | Scheduled for next implementation phase (Currently fully operable via Go service and Web UI) |
+| **P6 Agent Web UI** | Dedicated Agent UI & Namespaced Mux | **IMPLEMENTED** | Agent routing isolation (`/api/v1/agents/{id}/`), Investment portfolio, market data, and calibration scorecard UI |
+| **P4 Data Ingestion** | TWSE, TPEx, MOPS, Financial News Scraping | **IMPLEMENTED** | TWSE OpenAPI daily bar ingestion, MOPS official announcement parser, rate limiting & cache |
+| **P5 Prediction & Eval** | Forecast Calibration, Backtesting, Self-Improvement | **IMPLEMENTED** | Brier score calculation, empirical settlement against market outcomes, directional accuracy tracking |
+| **SCHED Automation** | Cron Scheduling & Misfire Policies | **IMPLEMENTED** | Standard 5-field Cron parser & aliases, misfire policies (SKIP, RUN_ONCE, CATCH_UP), automated Task dispatching |
+| **CLI-INV Top-Level CLI** | `aia investment` CLI suite | **IMPLEMENTED** | `portfolio`, `sync`, `proposals`, `approve`, `reject`, `predictions`, `evaluate` subcommands |
+| **CLI-SCHED Top-Level CLI** | `aia schedule` CLI suite | **IMPLEMENTED** | `list`, `create`, `trigger`, `tick` subcommands |

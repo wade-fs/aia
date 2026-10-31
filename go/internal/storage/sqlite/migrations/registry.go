@@ -16,6 +16,9 @@ func All() []Migration {
 		{Version: 1, Name: "initial_schema", SQL: InitialSchema},
 		{Version: 2, Name: "audit_request_source_metadata", SQL: AuditRequestSourceMetadata},
 		{Version: 3, Name: "investment_core", SQL: InvestmentCore},
+		{Version: 4, Name: "investment_data_pipeline", SQL: InvestmentDataPipeline},
+		{Version: 5, Name: "investment_predictions_and_evaluations", SQL: InvestmentPredictionsAndEvaluations},
+		{Version: 6, Name: "schedules_and_automation", SQL: SchedulesAndAutomation},
 	}
 }
 
@@ -179,4 +182,141 @@ CREATE TABLE IF NOT EXISTS investment_trade_proposals (
 CREATE INDEX IF NOT EXISTS idx_inv_snapshots_profile ON investment_portfolio_snapshots(portfolio_profile_id, as_of);
 CREATE INDEX IF NOT EXISTS idx_inv_decisions_profile ON investment_decisions(portfolio_profile_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_inv_proposals_profile ON investment_trade_proposals(portfolio_profile_id, status);
+`
+
+// InvestmentDataPipeline adds data sources, market bar data, and raw research documents (AIA-05 §18.1, §18.2).
+const InvestmentDataPipeline = `
+CREATE TABLE IF NOT EXISTS investment_data_sources (
+    id TEXT PRIMARY KEY,
+    source_name TEXT NOT NULL UNIQUE,
+    source_type TEXT NOT NULL,
+    base_url TEXT NOT NULL DEFAULT '',
+    documentation_url TEXT NOT NULL DEFAULT '',
+    authentication_type TEXT NOT NULL DEFAULT 'NONE',
+    configuration_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    health_status TEXT NOT NULL DEFAULT 'HEALTHY',
+    last_success_at TEXT,
+    last_failure_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS investment_market_data (
+    id TEXT PRIMARY KEY,
+    instrument_id TEXT NOT NULL REFERENCES investment_instruments(id),
+    data_type TEXT NOT NULL,
+    period TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    source_id TEXT NOT NULL REFERENCES investment_data_sources(id),
+    fetched_at TEXT NOT NULL,
+    effective_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS investment_raw_documents (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL REFERENCES investment_data_sources(id),
+    instrument_id TEXT NOT NULL DEFAULT '',
+    source_record_id TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    content_reference TEXT NOT NULL DEFAULT '',
+    content_hash TEXT NOT NULL DEFAULT '',
+    content_type TEXT NOT NULL DEFAULT 'NEWS',
+    published_at TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_inv_market_data_inst ON investment_market_data(instrument_id, effective_at);
+CREATE INDEX IF NOT EXISTS idx_inv_docs_inst ON investment_raw_documents(instrument_id, published_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inv_docs_hash ON investment_raw_documents(source_id, content_hash);
+
+CREATE TABLE IF NOT EXISTS investment_data_snapshots (
+    id TEXT PRIMARY KEY,
+    snapshot_type TEXT NOT NULL,
+    data_cutoff_at TEXT NOT NULL,
+    instrument_scope_json TEXT NOT NULL DEFAULT '[]',
+    source_versions_json TEXT NOT NULL DEFAULT '{}',
+    validation_summary_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS investment_snapshot_items (
+    id TEXT PRIMARY KEY,
+    snapshot_id TEXT NOT NULL REFERENCES investment_data_snapshots(id),
+    item_type TEXT NOT NULL,
+    reference_id TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_inv_snapshots_cutoff ON investment_data_snapshots(data_cutoff_at);
+CREATE INDEX IF NOT EXISTS idx_inv_snapshot_items_ref ON investment_snapshot_items(snapshot_id, item_type);
+`
+
+// InvestmentPredictionsAndEvaluations adds predictions, outcome verification, and calibration metrics (AIA-05 §18.5).
+const InvestmentPredictionsAndEvaluations = `
+CREATE TABLE IF NOT EXISTS investment_predictions (
+    id TEXT PRIMARY KEY,
+    decision_id TEXT NOT NULL REFERENCES investment_decisions(id),
+    instrument_id TEXT NOT NULL REFERENCES investment_instruments(id),
+    prediction_type TEXT NOT NULL,
+    target TEXT NOT NULL,
+    expected_direction TEXT NOT NULL,
+    probability REAL NOT NULL,
+    target_value REAL NOT NULL DEFAULT 0,
+    base_price REAL NOT NULL DEFAULT 0,
+    evaluation_horizon TEXT NOT NULL,
+    due_at TEXT NOT NULL,
+    strategy_version TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS investment_prediction_outcomes (
+    id TEXT PRIMARY KEY,
+    prediction_id TEXT NOT NULL REFERENCES investment_predictions(id),
+    actual_value REAL NOT NULL,
+    actual_direction TEXT NOT NULL,
+    outcome_status TEXT NOT NULL,
+    brier_score REAL NOT NULL,
+    evaluation_source_id TEXT NOT NULL DEFAULT '',
+    evaluated_at TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS investment_evaluation_results (
+    id TEXT PRIMARY KEY,
+    evaluation_type TEXT NOT NULL,
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    sample_count INTEGER NOT NULL,
+    metrics_json TEXT NOT NULL,
+    strategy_version TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_inv_pred_due ON investment_predictions(status, due_at);
+CREATE INDEX IF NOT EXISTS idx_inv_pred_inst ON investment_predictions(instrument_id, created_at);
+`
+
+// SchedulesAndAutomation supports cron-scheduled recurring tasks and misfire handling (AIA-03 §10, AIA-07 §14).
+const SchedulesAndAutomation = `
+CREATE TABLE IF NOT EXISTS schedules (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    cron_expr TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    task_template_json TEXT NOT NULL,
+    misfire_policy TEXT NOT NULL DEFAULT 'SKIP',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    last_run_at TEXT,
+    next_run_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedules_next ON schedules(is_active, next_run_at);
 `

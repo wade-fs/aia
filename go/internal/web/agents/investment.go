@@ -45,6 +45,12 @@ func (m *InvestmentWebModule) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/proposals", m.handleProposals)
 	mux.HandleFunc("/evaluate", m.handleEvaluateDecision)
 	mux.HandleFunc("/proposals/", m.handleProposalActions)
+	mux.HandleFunc("/sync", m.handleSync)
+	mux.HandleFunc("/documents", m.handleDocuments)
+	mux.HandleFunc("/market-data", m.handleMarketData)
+	mux.HandleFunc("/predictions", m.handlePredictions)
+	mux.HandleFunc("/predictions/evaluate", m.handleEvaluatePredictions)
+	mux.HandleFunc("/evaluations", m.handleEvaluationResults)
 	return nil
 }
 
@@ -200,4 +206,119 @@ func (m *InvestmentWebModule) handleProposalActions(w http.ResponseWriter, r *ht
 	default:
 		host.WriteError(w, http.StatusNotFound, "UNKNOWN_ACTION", "Action must be approve or reject", reqID)
 	}
+}
+
+func (m *InvestmentWebModule) handleSync(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required", reqID)
+		return
+	}
+
+	var req struct {
+		Symbol string `json:"symbol"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.Symbol == "" {
+		req.Symbol = "2330" // default TSMC
+	}
+
+	ctx := r.Context()
+	md, err := m.svc.SyncMarketData(ctx, req.Symbol)
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "SYNC_FAILED", err.Error(), reqID)
+		return
+	}
+	docs, _ := m.svc.SyncAnnouncements(ctx, req.Symbol)
+
+	host.WriteJSON(w, http.StatusOK, map[string]any{
+		"synced":        true,
+		"market_data":   md,
+		"documents_cnt": len(docs),
+	}, reqID)
+}
+
+func (m *InvestmentWebModule) handleDocuments(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	symbol := r.URL.Query().Get("symbol")
+	limit := 20
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+		limit = l
+	}
+
+	docs, err := m.svc.ListRawDocuments(r.Context(), symbol, limit)
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, docs, reqID)
+}
+
+func (m *InvestmentWebModule) handleMarketData(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	symbol := r.URL.Query().Get("symbol")
+	if symbol == "" {
+		symbol = "2330"
+	}
+	limit := 30
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+		limit = l
+	}
+
+	bars, err := m.svc.ListHistoricalData(r.Context(), symbol, limit)
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, bars, reqID)
+}
+
+func (m *InvestmentWebModule) handlePredictions(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	status := investment.PredictionStatus(r.URL.Query().Get("status"))
+	limit := 30
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+		limit = l
+	}
+
+	preds, err := m.svc.ListPredictions(r.Context(), status, limit)
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, preds, reqID)
+}
+
+func (m *InvestmentWebModule) handleEvaluatePredictions(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required", reqID)
+		return
+	}
+
+	outcomes, evalRes, err := m.svc.EvaluatePredictions(r.Context())
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "EVAL_FAILED", err.Error(), reqID)
+		return
+	}
+
+	host.WriteJSON(w, http.StatusOK, map[string]any{
+		"evaluated_outcomes": outcomes,
+		"calibration_result": evalRes,
+	}, reqID)
+}
+
+func (m *InvestmentWebModule) handleEvaluationResults(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	limit := 20
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+		limit = l
+	}
+
+	results, err := m.svc.ListEvaluationResults(r.Context(), limit)
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, results, reqID)
 }

@@ -1,0 +1,16 @@
+runtime:
+  data_dir: "./data"
+  workspaces_dir: "./workspaces"
+  source_repo: "./testdata/sample-project"
+
+worker:
+  aider:
+    binary_path: "aider"
+    default_model: "gpt-4o"
+    timeout: "30m"
+
+validator:
+  test_command: "go test ./..."
+
+git:
+  auto_commit: false

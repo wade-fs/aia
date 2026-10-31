@@ -18,6 +18,7 @@ import (
 	"github.com/wade/aia/internal/storage/sqlite"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 	"github.com/wade/aia/internal/web/host"
+	"github.com/wade/aia/internal/worker"
 )
 
 type ConsoleServices struct {
@@ -29,6 +30,7 @@ type ConsoleServices struct {
 	DB        *sqlite.DB
 	Provider  provider.Provider
 	Host      *host.Host
+	WorkerMgr *worker.Manager
 }
 
 func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
@@ -162,10 +164,16 @@ func (s *ConsoleServices) handleSystemStatus(w http.ResponseWriter, r *http.Requ
 
 	schemaVer, _ := s.DB.SchemaVersion(ctx)
 
+	var workerStatus any
+	if s.WorkerMgr != nil {
+		workerStatus = s.WorkerMgr.Status()
+	}
+
 	host.WriteJSON(w, http.StatusOK, map[string]any{
 		"runtime":        "AIA Personal Agent v1.0",
 		"database":       dbStatus,
 		"schema_version": schemaVer,
+		"workers":        workerStatus,
 		"provider": map[string]string{
 			"name":   provName,
 			"status": provStatus,

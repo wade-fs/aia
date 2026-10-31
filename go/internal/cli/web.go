@@ -83,24 +83,12 @@ func runWebServer(cmd *cobra.Command) error {
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel()
 
-	// Background ticker for scheduled tasks and due items
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-bgCtx.Done():
-				return
-			case <-ticker.C:
-				if appInst.ScheduleSvc != nil {
-					_, _ = appInst.ScheduleSvc.ProcessDueSchedules(bgCtx)
-				}
-				if appInst.Scheduler != nil {
-					_, _ = appInst.Scheduler.ProcessReadyTasks(bgCtx)
-				}
-			}
+	// Start Runtime Background Worker Manager (Schedule Worker + Task Worker)
+	if appInst.WorkerMgr != nil {
+		if err := appInst.WorkerMgr.Start(bgCtx); err != nil {
+			fmt.Printf("⚠️ Warning: Failed to start worker manager: %v\n", err)
 		}
-	}()
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -118,6 +106,9 @@ func runWebServer(cmd *cobra.Command) error {
 	case <-sigCh:
 		fmt.Println("\nShutting down web server gracefully...")
 		bgCancel()
+		if appInst.WorkerMgr != nil {
+			appInst.WorkerMgr.Stop()
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return srv.Shutdown(ctx)

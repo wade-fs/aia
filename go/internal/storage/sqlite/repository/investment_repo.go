@@ -387,6 +387,33 @@ func (r *InvestmentRepository) ListDecisions(ctx context.Context, profileID doma
 	return list, rows.Err()
 }
 
+func (r *InvestmentRepository) GetLatestDecisionForInstrument(ctx context.Context, profileID domain.ID, instrumentID domain.ID) (*investment.Decision, error) {
+	row := r.db.RawDB().QueryRowContext(ctx, `
+		SELECT id, portfolio_profile_id, instrument_id, portfolio_snapshot_id, task_id, research_report_id,
+			decision_type, confidence, reasoning_json, risks_json, invalidation_conditions_json,
+			expected_horizon, strategy_version, action_result_json, raw_input_json, source, created_at
+		FROM investment_decisions
+		WHERE portfolio_profile_id = ? AND instrument_id = ?
+		ORDER BY created_at DESC LIMIT 1
+	`, profileID, instrumentID)
+
+	var dec investment.Decision
+	var dt, ca string
+	if err := row.Scan(
+		&dec.ID, &dec.PortfolioProfileID, &dec.InstrumentID, &dec.PortfolioSnapshotID, &dec.TaskID, &dec.ResearchReportID,
+		&dt, &dec.Confidence, &dec.ReasoningJSON, &dec.RisksJSON, &dec.InvalidationConditionsJSON,
+		&dec.ExpectedHorizon, &dec.StrategyVersion, &dec.ActionResultJSON, &dec.RawInputJSON, &dec.Source, &ca,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	dec.DecisionType = investment.DecisionType(dt)
+	dec.CreatedAt, _ = time.Parse(time.RFC3339, ca)
+	return &dec, nil
+}
+
 func (r *InvestmentRepository) SaveDecisionRejection(ctx context.Context, rej *investment.DecisionRejection) error {
 	query := `
 		INSERT INTO investment_decision_rejections (id, portfolio_profile_id, task_id, raw_output, errors_json, source, created_at)
@@ -511,6 +538,36 @@ func (r *InvestmentRepository) ListTradeProposals(ctx context.Context, profileID
 		list = append(list, p)
 	}
 	return list, rows.Err()
+}
+
+func (r *InvestmentRepository) GetLatestTradeProposalForInstrument(ctx context.Context, profileID domain.ID, instrumentID domain.ID) (*investment.TradeProposal, error) {
+	row := r.db.RawDB().QueryRowContext(ctx, `
+		SELECT id, portfolio_profile_id, decision_id, portfolio_snapshot_id, allocation_proposal_id, instrument_id,
+			action, quantity, estimated_price, estimated_gross_amount, estimated_total_cost, proposal_json,
+			status, status_reason, created_at, expires_at, updated_at
+		FROM investment_trade_proposals
+		WHERE portfolio_profile_id = ? AND instrument_id = ?
+		ORDER BY created_at DESC LIMIT 1
+	`, profileID, instrumentID)
+
+	var p investment.TradeProposal
+	var act, st, ca, ea, ua string
+	if err := row.Scan(
+		&p.ID, &p.PortfolioProfileID, &p.DecisionID, &p.PortfolioSnapshotID, &p.AllocationProposalID, &p.InstrumentID,
+		&act, &p.Quantity, &p.EstimatedPrice, &p.EstimatedGrossAmount, &p.EstimatedTotalCost, &p.ProposalJSON,
+		&st, &p.StatusReason, &ca, &ea, &ua,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	p.Action = investment.DecisionType(act)
+	p.Status = investment.ProposalStatus(st)
+	p.CreatedAt, _ = time.Parse(time.RFC3339, ca)
+	p.ExpiresAt, _ = time.Parse(time.RFC3339, ea)
+	p.UpdatedAt, _ = time.Parse(time.RFC3339, ua)
+	return &p, nil
 }
 
 func (r *InvestmentRepository) UpdateTradeProposalStatus(ctx context.Context, id domain.ID, status investment.ProposalStatus, reason string) error {

@@ -30,6 +30,7 @@ import (
 	"github.com/wade/aia/internal/web/agents"
 	"github.com/wade/aia/internal/web/console"
 	"github.com/wade/aia/internal/web/host"
+	"github.com/wade/aia/internal/worker"
 	"github.com/wade/aia/internal/workspace"
 	"github.com/wade/aia/web/assets"
 )
@@ -55,6 +56,7 @@ type App struct {
 	RecoveryMgr   *recovery.Manager
 	Scheduler     *orchestrator.Scheduler
 	PersonalAgent *orchestrator.PersonalAgent
+	WorkerMgr     *worker.Manager
 }
 
 func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
@@ -137,6 +139,18 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	pa := orchestrator.NewPersonalAgent(prov, retriever, taskSvc, scheduler, evaluator)
 
+	workerMgr := worker.NewManager(
+		worker.DefaultWorkerConfig(),
+		schedSvc,
+		taskSvc,
+		invSvc,
+		collectorSvc,
+		scheduler,
+		prov,
+		bus,
+		auditRepo,
+	)
+
 	a := &App{
 		Config:        cfg,
 		DB:            db,
@@ -158,11 +172,13 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		RecoveryMgr:   recMgr,
 		Scheduler:     scheduler,
 		PersonalAgent: pa,
+		WorkerMgr:     workerMgr,
 	}
 
-	// Seed default domain agents & default project
+	// Seed default domain agents, default project & recurring schedules
 	a.seedDefaultAgents(context.Background())
 	a.seedDefaultProjects(context.Background())
+	_ = workerMgr.SeedDefaultSchedules(context.Background())
 
 	// Run recovery check
 	if summary, err := recMgr.Recover(context.Background()); err == nil {
@@ -175,6 +191,9 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 }
 
 func (a *App) Close() error {
+	if a.WorkerMgr != nil {
+		a.WorkerMgr.Stop()
+	}
 	if a.EventBus != nil {
 		a.EventBus.Close()
 	}
@@ -208,6 +227,7 @@ func (a *App) CreateWebHost() (*host.Host, string, error) {
 		DB:        a.DB,
 		Provider:  a.Provider,
 		Host:      h,
+		WorkerMgr: a.WorkerMgr,
 	})
 
 	// 2. Register Agent Modules with isolated dedicated muxes
@@ -273,6 +293,26 @@ func (a *App) seedDefaultAgents(ctx context.Context) {
 			Domain:       "video",
 			Instructions: "You are a creative video producer. Craft engaging scripts and visual concepts.",
 			Capabilities: []string{"script", "storyboard"},
+			Enabled:      true,
+			Version:      1,
+		},
+		{
+			ID:           "system-collector",
+			Name:         "System Data Collector",
+			Description:  "Automated data ingestion worker for TWSE, MOPS, FRED, and SEC sources",
+			Domain:       "system",
+			Instructions: "Automated data ingestion worker (non-LLM).",
+			Capabilities: []string{"collect", "sync"},
+			Enabled:      true,
+			Version:      1,
+		},
+		{
+			ID:           "system-evaluator",
+			Name:         "System Prediction Evaluator",
+			Description:  "Automated prediction verification and Brier Score calibration worker",
+			Domain:       "system",
+			Instructions: "Automated prediction verification and scoring worker (non-LLM).",
+			Capabilities: []string{"evaluate", "calibrate"},
 			Enabled:      true,
 			Version:      1,
 		},

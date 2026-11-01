@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/wade/aia/internal/autonomy"
 	"github.com/wade/aia/internal/config"
 	"github.com/wade/aia/internal/continuity"
 	"github.com/wade/aia/internal/domain"
@@ -21,6 +22,7 @@ import (
 	agentService "github.com/wade/aia/internal/service/agent"
 	approvalService "github.com/wade/aia/internal/service/approval"
 	execService "github.com/wade/aia/internal/service/execution"
+	goalService "github.com/wade/aia/internal/service/goal"
 	govService "github.com/wade/aia/internal/service/governance"
 	invService "github.com/wade/aia/internal/service/investment"
 	knowledgeService "github.com/wade/aia/internal/service/knowledge"
@@ -63,6 +65,7 @@ type App struct {
 	WorkerMgr        *worker.Manager
 	ContinuityRepo   *repository.ContinuityRepository
 	GoalRepo         *repository.GoalRepository
+	GoalSvc          *goalService.Service
 	DecisionRepo     *repository.DecisionRepository
 	EventHistoryRepo *repository.EventHistoryRepository
 	KnowledgeRepo    *repository.KnowledgeRepository
@@ -73,6 +76,8 @@ type App struct {
 	GovernanceRepo   *repository.GovernanceRepository
 	GovernanceSvc    *govService.Service
 	PolicyEvaluator  *policy.Evaluator
+	AutonomyRepo     *repository.AutonomyRepository
+	AutonomyEngine   *autonomy.Engine
 }
 
 func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
@@ -106,6 +111,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	knowledgeRepo := repository.NewKnowledgeRepository(db)
 	approvalRepo := repository.NewApprovalRepository(db)
 	govRepo := repository.NewGovernanceRepository(db)
+	autonomyRepo := repository.NewAutonomyRepository(db)
 
 	taskRepo.SetChangeHook(func(ctx context.Context, taskID domain.ID, status task.TaskStatus, created bool) {
 		if bus != nil {
@@ -152,6 +158,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	reconstructor := continuity.NewReconstructor(continuityRepo, goalRepo, decisionRepo, eventHistoryRepo, projRepo)
 	knowledgeSvc := knowledgeService.NewService(knowledgeRepo, decisionRepo, continuityRepo)
 	approvalSvc := approvalService.NewService(approvalRepo, taskSvc, auditRepo, bus)
+	goalSvc := goalService.NewService(goalRepo, autonomyRepo, eventHistoryRepo, taskSvc)
 
 	// 6. Recovery
 	recMgr := recovery.NewManager(taskRepo, execRepo, auditRepo)
@@ -164,8 +171,30 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	evaluator := policy.NewEvaluatorWithOptions(auditRepo, nil, 0)
 	govSvc := govService.NewService(govRepo, auditRepo, evaluator, bus)
 
+	// 8. Autonomy Core Engine (Observation + Recall + Initiative + Deliberation + 11-Step Coordinator)
+	autonomyEng := autonomy.NewEngineWithDeps(autonomy.Dependencies{
+		AutonomyRepo:     autonomyRepo,
+		DecisionRepo:     decisionRepo,
+		ContinuityRepo:   continuityRepo,
+		GoalRepo:         goalRepo,
+		EventHistoryRepo: eventHistoryRepo,
+		KnowledgeRepo:    knowledgeRepo,
+		MemoryRepo:       memRepo,
+		ProjectRepo:      projRepo,
+		TaskRepo:         taskRepo,
+		GovernanceRepo:   govRepo,
+		AuditRepo:        auditRepo,
+		TaskSvc:          taskSvc,
+		ApprovalSvc:      approvalSvc,
+		InvSvc:           invSvc,
+		Evaluator:        evaluator,
+		Bus:              bus,
+	})
+	autonomyEng.RegisterObserver("investment", autonomy.NewInvestmentObserver(invSvc))
+
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	pa := orchestrator.NewPersonalAgent(prov, retriever, taskSvc, scheduler, evaluator)
+	pa.SetAutonomyEngine(autonomyEng)
 
 	workerMgr := worker.NewManager(
 		worker.DefaultWorkerConfig(),
@@ -205,6 +234,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		WorkerMgr:        workerMgr,
 		ContinuityRepo:   continuityRepo,
 		GoalRepo:         goalRepo,
+		GoalSvc:          goalSvc,
 		DecisionRepo:     decisionRepo,
 		EventHistoryRepo: eventHistoryRepo,
 		KnowledgeRepo:    knowledgeRepo,
@@ -215,6 +245,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		GovernanceRepo:   govRepo,
 		GovernanceSvc:    govSvc,
 		PolicyEvaluator:  evaluator,
+		AutonomyRepo:     autonomyRepo,
+		AutonomyEngine:   autonomyEng,
 	}
 
 	// Seed default domain agents, default project & recurring schedules
@@ -261,17 +293,21 @@ func (a *App) CreateWebHost() (*host.Host, string, error) {
 
 	// 1. Register Global Console Routes
 	console.RegisterConsoleRoutes(h.APIMux(), &console.ConsoleServices{
-		TaskSvc:       a.TaskSvc,
-		AgentSvc:      a.AgentSvc,
-		MemorySvc:     a.MemorySvc,
-		AuditRepo:     a.AuditRepo,
-		InvSvc:        a.InvSvc,
-		DB:            a.DB,
-		Provider:      a.Provider,
-		Host:          h,
-		WorkerMgr:     a.WorkerMgr,
-		ApprovalSvc:   a.ApprovalSvc,
-		GovernanceSvc: a.GovernanceSvc,
+		TaskSvc:        a.TaskSvc,
+		AgentSvc:       a.AgentSvc,
+		MemorySvc:      a.MemorySvc,
+		AuditRepo:      a.AuditRepo,
+		InvSvc:         a.InvSvc,
+		DB:             a.DB,
+		Provider:       a.Provider,
+		Host:           h,
+		WorkerMgr:      a.WorkerMgr,
+		ApprovalSvc:    a.ApprovalSvc,
+		GovernanceSvc:  a.GovernanceSvc,
+		GoalSvc:        a.GoalSvc,
+		AutonomyEngine: a.AutonomyEngine,
+		AutonomyRepo:   a.AutonomyRepo,
+		ContinuityRepo: a.ContinuityRepo,
 	})
 
 	// 2. Register Agent Modules with isolated dedicated muxes

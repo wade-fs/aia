@@ -66,21 +66,22 @@ go/
 | **`internal/domain/governance`** | **Production Ready (Phase 2)** | Governance Models & Controls | Approvals model, risk tiers, runtime controls, strict actor human authorization. |
 | **`internal/service/approval`** | **Production Ready (Phase 2)** | Operational Approval Gates | Scope-bound approvals (Task/Decision), anti-self-approval enforcement, timeout policies. |
 | **`internal/service/governance`** | **Production Ready (Phase 2)** | Runtime Governance & Emergency Stop | Controlled Emergency Stop, dispatch freeze, human-only resume verification. |
-| **`internal/storage/sqlite`** | **Production Ready** | Multi-schema persistence | Migrations 001~009 fully implemented with triggers, audit columns, and runtime controls. |
-| **`internal/cli`** | **Production Ready (Phase 2)** | CLI Administration & Tracing | Added `aia decision`, `aia approval (list|get|approve|reject)`, and `aia stop / resume`. |
+| **`internal/storage/sqlite`** | **Production Ready (Phase 3)** | Multi-schema persistence | Migrations 001~010 fully implemented with triggers, audit columns, runtime controls, initiatives, deliberation, and goal-task links. |
+| **`internal/cli`** | **Production Ready (Phase 3)** | CLI Administration & Tracing | Added `aia decision`, `aia approval`, `aia stop / resume`, `aia cycle (run|list|get|initiatives)`, and `aia goal`. |
 | **`internal/worker`** | **Production Ready (Phase 2)** | Runtime Concurrency Manager | Controlled Emergency Stop (<1s dispatch freeze, context cancellation, CANCELLED task persistence). |
-| **`internal/web/console`** | **Production Ready (Phase 2)** | Console REST API & Governance | Added Emergency Stop, Resume Dispatch, and Unified Pending Approvals (`/api/v1/approvals`). |
-| **`internal/service/investment`** | **Production Ready** | Autonomous Investment Pilot | Dynamic virtual capital ledger (NT$100,000) and monthly self-review cycle. |
+| **`internal/web/console`** | **Production Ready (Phase 3)** | Console REST API & Governance | Added Emergency Stop, Resume Dispatch, Approvals, Autonomy Cycles (`/api/v1/cycles`), and Goals (`/api/v1/goals`). |
+| **`internal/service/investment`** | **Production Ready (Phase 3)** | Autonomous Investment Pilot | Read-only local Materiality Gate, paper-trading virtual ledger settlement (`ExecuteVirtualProposal`), and multi-cycle closed-loop pilot. |
+| **`internal/service/goal`** | **Production Ready (Phase 3)** | Goal Lifecycle & Decomposition | Ancestor-chain cycle prevention, metric gap evaluation (`EvaluateGoalGap`), and Goal-to-Task decomposition (`goal_task_links`). |
 | **`internal/recovery`** | **Production Ready (Phase 1)**| Complete Context Reconstruction | Task recovery integrated with project & goal context continuity. |
 | **`internal/policy`** | **Production Ready (Phase 2)**| Operational Governance Policy | Whitelist boundaries, financial transaction lock, separation of Policy/Approval/Permission. |
-| **`internal/orchestrator`** | **Functional Prototype**| PersonalAgent Coordination | Next (Phase 3): Refactor PersonalAgent to delegate to the shared `internal/autonomy/` package. |
-| **`internal/autonomy`** | **Missing (Phase 3)** | 11-step Autonomy Loop | Implement `internal/autonomy/` (Observe ➔ Reassess) with `NO_ACTION` decision. |
+| **`internal/orchestrator`** | **Production Ready (Phase 3)**| PersonalAgent Coordination | Strangler Fig delegation hook (`RunAutonomousCycle`) wired to shared `internal/autonomy/`. |
+| **`internal/autonomy`** | **Production Ready (Phase 3)** | 11-step Autonomy Loop | Modular `observation`, `recall` (L1~L5), `initiative`, `deliberation` (`EV = P_s*V - C - R`), and `cycle` coordinator supporting `ACT`, `DEFER`, `MONITOR`, `ASK_HUMAN`, `NO_ACTION`. |
 
 ---
 
 ## 3. Database Schema Status
 
-### Active Tables (Migrations 001 ~ 009)
+### Active Tables (Migrations 001 ~ 010)
 - `agents`: Registered agents, capabilities, configurations.
 - `tasks`: Work units, status machine (`READY`, `RUNNING`, `COMPLETED`, `WAITING_APPROVAL`).
 - `task_dependencies`: Inter-task DAG dependencies.
@@ -103,8 +104,10 @@ go/
 - `decisions`, `decision_evidence_links`: Deliberative choices supporting `NO_ACTION`, governance results, and evidence links (Migration 008).
 - `approvals`: Scope-bound human approval gates (Migration 009).
 - `runtime_controls`: Single-row global dispatch control with anti-deletion trigger (Migration 009).
+- `candidate_initiatives`: Multi-source autonomous discovery records with confidence, priority, cost/risk, and spawned task linkage (Migration 010).
+- `deliberation_records`: Structured Expected Utility (`EV`) option trade-off matrices linked to cycles and decisions (Migration 010).
+- `goal_task_links`: Traceable Goal-to-Task decomposition bindings (Migration 010).
 
-### Planned Schemas (Phases 3 ～ 5)
-- `candidate_initiatives` ── *Phase 3 (Migration 010)*
+### Planned Schemas (Phases 4 ～ 5)
 - `outcome_evaluations`, `root_cause_analyses`, `correction_actions` ── *Phase 4 (Migration 011)*
 - `experiments`, `delegation_requests` ── *Phase 5 (Migration 012)*

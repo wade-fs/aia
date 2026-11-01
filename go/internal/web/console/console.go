@@ -7,7 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wade/aia/internal/autonomy"
 	"github.com/wade/aia/internal/domain"
+	"github.com/wade/aia/internal/domain/continuity"
+	domainGoal "github.com/wade/aia/internal/domain/goal"
 	"github.com/wade/aia/internal/domain/governance"
 	"github.com/wade/aia/internal/domain/investment"
 	domainMemory "github.com/wade/aia/internal/domain/memory"
@@ -15,6 +18,7 @@ import (
 	"github.com/wade/aia/internal/provider"
 	agentService "github.com/wade/aia/internal/service/agent"
 	approvalService "github.com/wade/aia/internal/service/approval"
+	goalService "github.com/wade/aia/internal/service/goal"
 	govService "github.com/wade/aia/internal/service/governance"
 	invService "github.com/wade/aia/internal/service/investment"
 	memoryService "github.com/wade/aia/internal/service/memory"
@@ -26,17 +30,21 @@ import (
 )
 
 type ConsoleServices struct {
-	TaskSvc       *taskService.Service
-	AgentSvc      *agentService.Service
-	MemorySvc     *memoryService.Service
-	AuditRepo     *repository.AuditRepository
-	InvSvc        *invService.Service
-	DB            *sqlite.DB
-	Provider      provider.Provider
-	Host          *host.Host
-	WorkerMgr     *worker.Manager
-	ApprovalSvc   *approvalService.Service
-	GovernanceSvc *govService.Service
+	TaskSvc        *taskService.Service
+	AgentSvc       *agentService.Service
+	MemorySvc      *memoryService.Service
+	AuditRepo      *repository.AuditRepository
+	InvSvc         *invService.Service
+	DB             *sqlite.DB
+	Provider       provider.Provider
+	Host           *host.Host
+	WorkerMgr      *worker.Manager
+	ApprovalSvc    *approvalService.Service
+	GovernanceSvc  *govService.Service
+	GoalSvc        *goalService.Service
+	AutonomyEngine *autonomy.Engine
+	AutonomyRepo   *repository.AutonomyRepository
+	ContinuityRepo *repository.ContinuityRepository
 }
 
 func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
@@ -76,6 +84,12 @@ func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
 
 	// 7. Audit
 	mux.HandleFunc("/api/v1/audit", s.handleAudit)
+
+	// 8. Autonomy Cycles & Long-term Goals (Phase 3)
+	mux.HandleFunc("/api/v1/cycles", s.handleCycles)
+	mux.HandleFunc("/api/v1/cycles/", s.handleCycleSubroutes)
+	mux.HandleFunc("/api/v1/goals", s.handleGoals)
+	mux.HandleFunc("/api/v1/goals/", s.handleGoalSubroutes)
 }
 
 func getReqID(r *http.Request) string {
@@ -812,4 +826,195 @@ func (s *ConsoleServices) handleApprovalSubroutes(w http.ResponseWriter, r *http
 	default:
 		host.WriteError(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be approve or reject", reqID)
 	}
+}
+
+// -------------------------------------------------------------
+// Autonomy Cycles & Long-Term Goals API (Phase 3)
+// -------------------------------------------------------------
+
+func (s *ConsoleServices) handleCycles(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+
+	switch r.Method {
+	case http.MethodGet:
+		if s.ContinuityRepo == nil {
+			host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Continuity repository not available", reqID)
+			return
+		}
+		limit := 25
+		if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+			limit = l
+		}
+		cycles, err := s.ContinuityRepo.ListCycles(ctx, limit)
+		if err != nil {
+			host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, cycles, reqID)
+
+	case http.MethodPost:
+		if s.AutonomyEngine == nil {
+			host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Autonomy engine not available", reqID)
+			return
+		}
+		var req struct {
+			ProjectID string `json:"project_id"`
+			Summary   string `json:"summary"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.ProjectID == "" {
+			req.ProjectID = "default"
+		}
+		if req.Summary == "" {
+			req.Summary = "Manual autonomy cycle via Web Console"
+		}
+		outcome, err := s.AutonomyEngine.RunCycle(ctx, autonomy.RunCycleInput{
+			ProjectID:   req.ProjectID,
+			TriggerType: continuity.TriggerManual,
+			TriggerRef:  "web-console",
+			Summary:     req.Summary,
+		})
+		if err != nil {
+			host.WriteError(w, http.StatusBadRequest, "CYCLE_FAILED", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, outcome, reqID)
+
+	default:
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+	}
+}
+
+func (s *ConsoleServices) handleCycleSubroutes(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if r.Method != http.MethodGet {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+	if s.ContinuityRepo == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Continuity repository not available", reqID)
+		return
+	}
+
+	cycleID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/cycles/"), "/")
+	if cycleID == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_ID", "Cycle ID required", reqID)
+		return
+	}
+	cyc, err := s.ContinuityRepo.GetCycle(ctx, cycleID)
+	if err != nil {
+		host.WriteError(w, http.StatusNotFound, "NOT_FOUND", err.Error(), reqID)
+		return
+	}
+
+	resp := map[string]any{"cycle": cyc}
+	if s.AutonomyRepo != nil {
+		if inits, iErr := s.AutonomyRepo.ListInitiativesByCycle(ctx, cycleID); iErr == nil {
+			resp["initiatives"] = inits
+		}
+		if delib, dErr := s.AutonomyRepo.GetDeliberationByCycle(ctx, cycleID); dErr == nil && delib != nil {
+			resp["deliberation"] = delib
+		}
+	}
+	host.WriteJSON(w, http.StatusOK, resp, reqID)
+}
+
+func (s *ConsoleServices) handleGoals(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if s.GoalSvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Goal service not available", reqID)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		status := domainGoal.GoalStatus(strings.ToUpper(r.URL.Query().Get("status")))
+		projectID := r.URL.Query().Get("project_id")
+		var goals []*domainGoal.Goal
+		var err error
+		if projectID != "" {
+			goals, err = s.GoalSvc.ListByProject(ctx, projectID)
+		} else {
+			goals, err = s.GoalSvc.ListAll(ctx, status, 50)
+		}
+		if err != nil {
+			host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, goals, reqID)
+
+	case http.MethodPost:
+		var req struct {
+			ProjectID         string `json:"project_id"`
+			ParentGoalID      string `json:"parent_goal_id"`
+			Name              string `json:"name"`
+			Description       string `json:"description"`
+			Level             string `json:"level"`
+			TargetMetricJSON  string `json:"target_metric_json"`
+			CurrentMetricJSON string `json:"current_metric_json"`
+			Priority          int    `json:"priority"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Name) == "" {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_INPUT", "Goal name is required", reqID)
+			return
+		}
+		var parentPtr *string
+		if req.ParentGoalID != "" {
+			parentPtr = &req.ParentGoalID
+		}
+		created, err := s.GoalSvc.Create(ctx, goalService.CreateGoalInput{
+			ParentGoalID:      parentPtr,
+			ProjectID:         req.ProjectID,
+			Name:              req.Name,
+			Description:       req.Description,
+			Level:             domainGoal.GoalLevel(strings.ToUpper(req.Level)),
+			TargetMetricJSON:  req.TargetMetricJSON,
+			CurrentMetricJSON: req.CurrentMetricJSON,
+			Priority:          req.Priority,
+		})
+		if err != nil {
+			host.WriteError(w, http.StatusBadRequest, "CREATE_FAILED", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusCreated, created, reqID)
+
+	default:
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+	}
+}
+
+func (s *ConsoleServices) handleGoalSubroutes(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if s.GoalSvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Goal service not available", reqID)
+		return
+	}
+
+	goalID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/goals/"), "/")
+	if goalID == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_ID", "Goal ID required", reqID)
+		return
+	}
+	if r.Method != http.MethodGet {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	g, err := s.GoalSvc.Get(ctx, goalID)
+	if err != nil {
+		host.WriteError(w, http.StatusNotFound, "NOT_FOUND", err.Error(), reqID)
+		return
+	}
+	links, _ := s.GoalSvc.ListDecomposedTasks(ctx, goalID)
+	revs, _ := s.GoalSvc.ListRevisions(ctx, goalID)
+	host.WriteJSON(w, http.StatusOK, map[string]any{
+		"goal":             g,
+		"gap_assessment":   goalService.EvaluateGoalGap(g),
+		"decomposed_tasks": links,
+		"revisions":        revs,
+	}, reqID)
 }

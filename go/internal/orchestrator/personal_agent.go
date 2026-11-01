@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/wade/aia/internal/autonomy"
 	"github.com/wade/aia/internal/domain"
 	"github.com/wade/aia/internal/domain/agent"
+	domainAutonomy "github.com/wade/aia/internal/domain/autonomy"
+	"github.com/wade/aia/internal/domain/continuity"
 	"github.com/wade/aia/internal/domain/profile"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/memory/retrieval"
@@ -29,11 +32,12 @@ type AgentResponse struct {
 }
 
 type PersonalAgent struct {
-	prov       provider.Provider
-	retriever  *retrieval.Retriever
-	taskSvc    *taskService.Service
-	scheduler  *Scheduler
-	evaluator  *policy.Evaluator
+	prov        provider.Provider
+	retriever   *retrieval.Retriever
+	taskSvc     *taskService.Service
+	scheduler   *Scheduler
+	evaluator   *policy.Evaluator
+	autonomyEng *autonomy.Engine
 }
 
 func NewPersonalAgent(
@@ -50,6 +54,24 @@ func NewPersonalAgent(
 		scheduler: scheduler,
 		evaluator: evaluator,
 	}
+}
+
+// SetAutonomyEngine wires the Autonomy Core Engine via Strangler Fig delegation (Plan §5.2).
+func (pa *PersonalAgent) SetAutonomyEngine(eng *autonomy.Engine) {
+	pa.autonomyEng = eng
+}
+
+// RunAutonomousCycle delegates unprompted / periodic deliberation to the 11-step Autonomy Core.
+func (pa *PersonalAgent) RunAutonomousCycle(ctx context.Context, projectID domain.ID, summary string) (*domainAutonomy.CycleOutcome, error) {
+	if pa.autonomyEng == nil {
+		return nil, fmt.Errorf("autonomy engine not attached to PersonalAgent")
+	}
+	return pa.autonomyEng.RunCycle(ctx, autonomy.RunCycleInput{
+		ProjectID:   string(projectID),
+		TriggerType: continuity.TriggerEventTrigger,
+		TriggerRef:  "personal-agent",
+		Summary:     summary,
+	})
 }
 
 func (pa *PersonalAgent) HandleInput(ctx context.Context, input UserInput) (*AgentResponse, error) {

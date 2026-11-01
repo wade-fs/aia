@@ -22,6 +22,7 @@ func All() []Migration {
 		{Version: 7, Name: "event_history_and_provenance", SQL: EventHistoryAndProvenance},
 		{Version: 8, Name: "goals_decisions_and_continuity", SQL: GoalsDecisionsAndContinuity},
 		{Version: 9, Name: "governance_and_approvals", SQL: GovernanceAndApprovals},
+		{Version: 10, Name: "initiatives_and_deliberation", SQL: InitiativesAndDeliberation},
 	}
 }
 

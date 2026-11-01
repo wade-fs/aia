@@ -212,3 +212,56 @@ func (r *KnowledgeRepository) LinkClaimEvidence(ctx context.Context, link *knowl
 	_, err := r.db.RawDB().ExecContext(ctx, query, link.ClaimID, link.EvidenceID, link.SupportType, link.ConfidenceWeight)
 	return err
 }
+
+// ListClaims retrieves claims optionally filtered by assertion_status (e.g. CONFLICTED, ACCEPTED).
+func (r *KnowledgeRepository) ListClaims(ctx context.Context, status knowledge.AssertionStatus, limit int) ([]*knowledge.Claim, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `
+		SELECT id, statement, assertion_status, is_knowledge, current_version, created_at, updated_at
+		FROM claims
+	`
+	var args []any
+	if status != "" {
+		query += ` WHERE assertion_status = ?`
+		args = append(args, string(status))
+	}
+	query += ` ORDER BY updated_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []*knowledge.Claim
+	for rows.Next() {
+		c := &knowledge.Claim{}
+		var statusStr, createdStr, updatedStr string
+		var isKnow int
+		if err := rows.Scan(&c.ID, &c.Statement, &statusStr, &isKnow, &c.CurrentVersion, &createdStr, &updatedStr); err != nil {
+			return nil, err
+		}
+		c.AssertionStatus = knowledge.AssertionStatus(statusStr)
+		c.IsKnowledge = isKnow == 1
+		c.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
+		c.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// UpdateClaimStatus updates a claim's assertion_status and is_knowledge flag (e.g. after human reconciliation).
+func (r *KnowledgeRepository) UpdateClaimStatus(ctx context.Context, claimID string, status knowledge.AssertionStatus, isKnowledge bool) error {
+	isKnowInt := 0
+	if isKnowledge {
+		isKnowInt = 1
+	}
+	_, err := r.db.RawDB().ExecContext(ctx,
+		`UPDATE claims SET assertion_status = ?, is_knowledge = ?, updated_at = ? WHERE id = ?`,
+		string(status), isKnowInt, time.Now().UTC().Format(time.RFC3339), claimID,
+	)
+	return err
+}

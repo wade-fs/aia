@@ -17,6 +17,58 @@ func NewContinuityRepository(db *sqlite.DB) *ContinuityRepository {
 	return &ContinuityRepository{db: db}
 }
 
+// NextCycleNumber returns the strictly incrementing next global cycle_number.
+func (r *ContinuityRepository) NextCycleNumber(ctx context.Context) (int64, error) {
+	var maxNum sql.NullInt64
+	err := r.db.RawDB().QueryRowContext(ctx, `SELECT MAX(cycle_number) FROM autonomy_cycles`).Scan(&maxNum)
+	if err != nil {
+		return 1, err
+	}
+	return maxNum.Int64 + 1, nil
+}
+
+// ListCycles returns recent autonomy cycles in reverse chronological order.
+func (r *ContinuityRepository) ListCycles(ctx context.Context, limit int) ([]*continuity.AutonomyCycle, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+	query := `
+	SELECT id, cycle_number, trigger_type, trigger_ref_id, status, context_snapshot_id, summary, started_at, completed_at, created_at
+	FROM autonomy_cycles
+	ORDER BY started_at DESC, cycle_number DESC
+	LIMIT ?`
+
+	rows, err := r.db.RawDB().QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var cycles []*continuity.AutonomyCycle
+	for rows.Next() {
+		c := &continuity.AutonomyCycle{}
+		var startedStr, createdStr string
+		var completedStr, triggerRef, snapshotID, summary sql.NullString
+		if err := rows.Scan(
+			&c.ID, &c.CycleNumber, &c.TriggerType, &triggerRef, &c.Status, &snapshotID, &summary,
+			&startedStr, &completedStr, &createdStr,
+		); err != nil {
+			return nil, err
+		}
+		c.StartedAt, _ = time.Parse(time.RFC3339, startedStr)
+		c.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
+		if completedStr.Valid {
+			t, _ := time.Parse(time.RFC3339, completedStr.String)
+			c.CompletedAt = &t
+		}
+		c.TriggerRefID = triggerRef.String
+		c.ContextSnapshotID = snapshotID.String
+		c.Summary = summary.String
+		cycles = append(cycles, c)
+	}
+	return cycles, rows.Err()
+}
+
 // CreateCycle inserts a new autonomy cycle.
 func (r *ContinuityRepository) CreateCycle(ctx context.Context, c *continuity.AutonomyCycle) error {
 	if c.CreatedAt.IsZero() {
@@ -55,6 +107,12 @@ func (r *ContinuityRepository) UpdateCycleStatus(ctx context.Context, id string,
 	WHERE id = ?`
 
 	_, err := r.db.RawDB().ExecContext(ctx, query, status, summary, completedStr, id)
+	return err
+}
+
+// UpdateCycleSnapshot attaches a context snapshot ID to an autonomy cycle.
+func (r *ContinuityRepository) UpdateCycleSnapshot(ctx context.Context, id string, snapshotID string) error {
+	_, err := r.db.RawDB().ExecContext(ctx, `UPDATE autonomy_cycles SET context_snapshot_id = ? WHERE id = ?`, snapshotID, id)
 	return err
 }
 
@@ -141,7 +199,7 @@ func (r *ContinuityRepository) GetLatestSnapshotByProject(ctx context.Context, p
 	SELECT id, scope, project_id, snapshot_type, workspace_state_json, active_tasks_json, recent_decisions_json, pending_issues_json, created_at
 	FROM context_snapshots 
 	WHERE project_id = ? 
-	ORDER BY created_at DESC LIMIT 1`
+	ORDER BY created_at DESC, rowid DESC LIMIT 1`
 
 	s := &continuity.ContextSnapshot{}
 	var createdStr string

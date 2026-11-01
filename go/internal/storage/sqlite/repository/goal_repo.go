@@ -33,9 +33,11 @@ func (r *GoalRepository) Create(ctx context.Context, g *goal.Goal) error {
 		g.Status = goal.StatusDraft
 	}
 
-	// 循環參照防護：若有指定 parent_goal_id，確保不可指向自身
-	if g.ParentGoalID != nil && *g.ParentGoalID == g.ID {
-		return fmt.Errorf("circular reference error: goal cannot be its own parent")
+	// 循環參照防護：走訪完整父節點鏈，嚴禁形成直接或間接循環參照 (AIA-ARCH-DATA-01 §3.1)
+	if g.ParentGoalID != nil && *g.ParentGoalID != "" {
+		if err := r.validateNoParentCycle(ctx, g.ID, *g.ParentGoalID); err != nil {
+			return err
+		}
 	}
 
 	query := `
@@ -192,4 +194,203 @@ func (r *GoalRepository) ListByProject(ctx context.Context, projectID string) ([
 	}
 
 	return goals, rows.Err()
+}
+
+// validateNoParentCycle walks the ancestor chain to prevent direct or indirect cycles (AIA-ARCH-DATA-01 §3.1).
+func (r *GoalRepository) validateNoParentCycle(ctx context.Context, goalID string, candidateParentID string) error {
+	if goalID != "" && goalID == candidateParentID {
+		return fmt.Errorf("circular reference error: goal %s cannot be its own parent", goalID)
+	}
+
+	visited := map[string]bool{}
+	if goalID != "" {
+		visited[goalID] = true
+	}
+
+	curr := candidateParentID
+	for depth := 0; curr != "" && depth < 128; depth++ {
+		if visited[curr] {
+			return fmt.Errorf("circular reference error: ancestor chain forms a cycle involving %s", curr)
+		}
+		visited[curr] = true
+
+		var nextParent sql.NullString
+		err := r.db.RawDB().QueryRowContext(ctx, "SELECT parent_goal_id FROM goals WHERE id = ?", curr).Scan(&nextParent)
+		if err == sql.ErrNoRows {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to inspect parent goal chain: %w", err)
+		}
+		if !nextParent.Valid || nextParent.String == "" {
+			break
+		}
+		curr = nextParent.String
+	}
+	return nil
+}
+
+// UpdateParent updates parent_goal_id after verifying no ancestor cycle is introduced.
+func (r *GoalRepository) UpdateParent(ctx context.Context, goalID string, newParentID *string, reason string) error {
+	if newParentID != nil && *newParentID != "" {
+		if err := r.validateNoParentCycle(ctx, goalID, *newParentID); err != nil {
+			return err
+		}
+	}
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+	_, err := r.db.RawDB().ExecContext(ctx, `UPDATE goals SET parent_goal_id = ?, updated_at = ? WHERE id = ?`, newParentID, nowStr, goalID)
+	return err
+}
+
+// UpdateMetrics atomically updates current_metric_json and appends a revision record.
+func (r *GoalRepository) UpdateMetrics(ctx context.Context, id string, currentMetricJSON string, reason string, decisionID string) error {
+	return r.db.WithTx(ctx, func(tx *sql.Tx) error {
+		var statusStr string
+		var oldMetric sql.NullString
+		err := tx.QueryRowContext(ctx, "SELECT status, current_metric_json FROM goals WHERE id = ?", id).Scan(&statusStr, &oldMetric)
+		if err != nil {
+			return fmt.Errorf("failed to load goal before metric update: %w", err)
+		}
+
+		var maxRev sql.NullInt64
+		if err := tx.QueryRowContext(ctx, "SELECT MAX(revision_number) FROM goal_revisions WHERE goal_id = ?", id).Scan(&maxRev); err != nil {
+			return err
+		}
+		nextRev := int(maxRev.Int64) + 1
+		nowStr := time.Now().UTC().Format(time.RFC3339)
+
+		if _, err := tx.ExecContext(ctx, "UPDATE goals SET current_metric_json = ?, updated_at = ? WHERE id = ?", currentMetricJSON, nowStr, id); err != nil {
+			return err
+		}
+
+		revID := fmt.Sprintf("%s-rev-%d", id, nextRev)
+		prevState := fmt.Sprintf(`{"status":%q,"current_metric":%q}`, statusStr, oldMetric.String)
+		newState := fmt.Sprintf(`{"status":%q,"current_metric":%q}`, statusStr, currentMetricJSON)
+
+		var decID *string
+		if decisionID != "" {
+			decID = &decisionID
+		}
+		if reason == "" {
+			reason = "Autonomous metric progress update"
+		}
+
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO goal_revisions (id, goal_id, revision_number, previous_state_json, new_state_json, reason, decision_id, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, revID, id, nextRev, prevState, newState, reason, decID, nowStr)
+		return err
+	})
+}
+
+// ListAll returns goals optionally filtered by status.
+func (r *GoalRepository) ListAll(ctx context.Context, status goal.GoalStatus, limit int) ([]*goal.Goal, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `
+	SELECT id, parent_goal_id, name, description, level, status, target_metric_json, current_metric_json, priority, created_at, updated_at
+	FROM goals`
+	var args []any
+	if status != "" {
+		query += ` WHERE status = ?`
+		args = append(args, string(status))
+	}
+	query += ` ORDER BY priority DESC, created_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var goals []*goal.Goal
+	for rows.Next() {
+		g := &goal.Goal{}
+		var parentID, targetMetric, currentMetric sql.NullString
+		var createdStr, updatedStr string
+		if err := rows.Scan(
+			&g.ID, &parentID, &g.Name, &g.Description, &g.Level, &g.Status,
+			&targetMetric, &currentMetric, &g.Priority, &createdStr, &updatedStr,
+		); err != nil {
+			return nil, err
+		}
+		if parentID.Valid {
+			g.ParentGoalID = &parentID.String
+		}
+		g.TargetMetricJSON = targetMetric.String
+		g.CurrentMetricJSON = currentMetric.String
+		g.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
+		g.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
+		goals = append(goals, g)
+	}
+	return goals, rows.Err()
+}
+
+// ListChildren returns direct sub-goals of a parent goal.
+func (r *GoalRepository) ListChildren(ctx context.Context, parentGoalID string) ([]*goal.Goal, error) {
+	query := `
+	SELECT id, parent_goal_id, name, description, level, status, target_metric_json, current_metric_json, priority, created_at, updated_at
+	FROM goals WHERE parent_goal_id = ? ORDER BY priority DESC, created_at ASC`
+
+	rows, err := r.db.RawDB().QueryContext(ctx, query, parentGoalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var goals []*goal.Goal
+	for rows.Next() {
+		g := &goal.Goal{}
+		var parentID, targetMetric, currentMetric sql.NullString
+		var createdStr, updatedStr string
+		if err := rows.Scan(
+			&g.ID, &parentID, &g.Name, &g.Description, &g.Level, &g.Status,
+			&targetMetric, &currentMetric, &g.Priority, &createdStr, &updatedStr,
+		); err != nil {
+			return nil, err
+		}
+		if parentID.Valid {
+			g.ParentGoalID = &parentID.String
+		}
+		g.TargetMetricJSON = targetMetric.String
+		g.CurrentMetricJSON = currentMetric.String
+		g.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
+		g.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
+		goals = append(goals, g)
+	}
+	return goals, rows.Err()
+}
+
+// ListRevisions returns immutable revision records for a goal.
+func (r *GoalRepository) ListRevisions(ctx context.Context, goalID string) ([]*goal.GoalRevision, error) {
+	query := `
+	SELECT id, goal_id, revision_number, previous_state_json, new_state_json, reason, decision_id, created_at
+	FROM goal_revisions WHERE goal_id = ? ORDER BY revision_number ASC`
+
+	rows, err := r.db.RawDB().QueryContext(ctx, query, goalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var revs []*goal.GoalRevision
+	for rows.Next() {
+		rev := &goal.GoalRevision{}
+		var decID sql.NullString
+		var createdStr string
+		if err := rows.Scan(
+			&rev.ID, &rev.GoalID, &rev.RevisionNumber, &rev.PreviousStateJSON,
+			&rev.NewStateJSON, &rev.Reason, &decID, &createdStr,
+		); err != nil {
+			return nil, err
+		}
+		if decID.Valid {
+			rev.DecisionID = decID.String
+		}
+		rev.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
+		revs = append(revs, rev)
+	}
+	return revs, rows.Err()
 }

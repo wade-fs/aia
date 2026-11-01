@@ -19,6 +19,7 @@ type ProposalStatus string
 const (
 	ProposalPending  ProposalStatus = "PENDING"
 	ProposalApproved ProposalStatus = "APPROVED"
+	ProposalExecuted ProposalStatus = "EXECUTED"
 	ProposalRejected ProposalStatus = "REJECTED"
 	ProposalExpired  ProposalStatus = "EXPIRED"
 )

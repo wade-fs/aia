@@ -194,6 +194,7 @@ func (s *Service) ProcessAgyDecision(ctx context.Context, input investment.AgyDe
 	reasoningJSON, _ := json.Marshal(input.Reasoning)
 	risksJSON, _ := json.Marshal(input.Risks)
 	invalJSON, _ := json.Marshal(input.InvalidationRules)
+	actionResJSON, _ := json.Marshal(map[string]any{"reference_price": price})
 
 	dec := &investment.Decision{
 		ID:                         uuid.New().String(),
@@ -207,6 +208,7 @@ func (s *Service) ProcessAgyDecision(ctx context.Context, input investment.AgyDe
 		InvalidationConditionsJSON: string(invalJSON),
 		ExpectedHorizon:            input.ExpectedHorizon,
 		StrategyVersion:            input.StrategyVersion,
+		ActionResultJSON:           string(actionResJSON),
 		RawInputJSON:               string(rawInputJSON),
 		Source:                     "ANTIGRAVITY_LLM",
 		CreatedAt:                  now,
@@ -587,5 +589,170 @@ func (s *Service) EvaluatePredictions(ctx context.Context) ([]investment.Predict
 
 func (s *Service) ListEvaluationResults(ctx context.Context, limit int) ([]investment.EvaluationResult, error) {
 	return s.repo.ListEvaluationResults(ctx, limit)
+}
+
+// GetActiveSnapshotOptional inspects the active portfolio snapshot and positions ONLY if
+// an investment profile already exists, never mutating or seeding the DB as a side effect.
+func (s *Service) GetActiveSnapshotOptional(ctx context.Context) (*investment.PortfolioProfile, *investment.PortfolioSnapshot, []investment.Position, error) {
+	prof, err := s.repo.GetActiveProfileOptional(ctx)
+	if err != nil || prof == nil {
+		return nil, nil, nil, err
+	}
+	snap, err := s.repo.GetLatestSnapshot(ctx, prof.ID)
+	if err != nil {
+		return prof, nil, nil, err
+	}
+	positions, err := s.repo.ListPositions(ctx, snap.ID)
+	if err != nil {
+		return prof, snap, nil, err
+	}
+	return prof, snap, positions, nil
+}
+
+// GetInstrumentByID resolves an instrument record by its ID.
+func (s *Service) GetInstrumentByID(ctx context.Context, id domain.ID) (*investment.Instrument, error) {
+	return s.repo.GetInstrumentByID(ctx, id)
+}
+
+// EvaluateLocalMateriality performs deterministic, zero-network materiality evaluation
+// strictly against persisted SQLite market bars, disclosures, and prior decisions.
+func (s *Service) EvaluateLocalMateriality(ctx context.Context, symbol string, thresholdPct float64) (*MaterialityResult, error) {
+	if thresholdPct <= 0 {
+		thresholdPct = 3.0
+	}
+	prof, err := s.repo.GetActiveProfileOptional(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if prof == nil {
+		return nil, nil
+	}
+
+	inst, err := s.repo.GetInstrumentBySymbol(ctx, "", symbol)
+	if err != nil {
+		return nil, err
+	}
+
+	prevDecision, _ := s.repo.GetLatestDecisionForInstrument(ctx, prof.ID, inst.ID)
+	prevProposal, _ := s.repo.GetLatestTradeProposalForInstrument(ctx, prof.ID, inst.ID)
+
+	var bar *investment.MarketBarValue
+	if md, mErr := s.repo.GetLatestMarketData(ctx, inst.ID); mErr == nil && md != nil {
+		var b investment.MarketBarValue
+		if json.Unmarshal([]byte(md.ValueJSON), &b) == nil {
+			bar = &b
+		}
+	}
+
+	res := &MaterialityResult{
+		Symbol:           symbol,
+		InstrumentID:     inst.ID,
+		PreviousDecision: prevDecision,
+		PreviousProposal: prevProposal,
+		LatestBar:        bar,
+	}
+
+	if prevDecision == nil {
+		res.IsMaterial = true
+		res.Reason = fmt.Sprintf("Initial thesis required: No prior investment decision recorded for %s (%s)", inst.Name, symbol)
+		return res, nil
+	}
+
+	var prevPrice float64
+	if prevProposal != nil && prevProposal.EstimatedPrice > 0 {
+		prevPrice = prevProposal.EstimatedPrice
+	} else {
+		var actRes struct {
+			ReferencePrice float64 `json:"reference_price"`
+		}
+		if json.Unmarshal([]byte(prevDecision.ActionResultJSON), &actRes) == nil && actRes.ReferencePrice > 0 {
+			prevPrice = actRes.ReferencePrice
+		} else {
+			var rawInput struct {
+				Price float64 `json:"price"`
+			}
+			if json.Unmarshal([]byte(prevDecision.RawInputJSON), &rawInput) == nil && rawInput.Price > 0 {
+				prevPrice = rawInput.Price
+			}
+		}
+	}
+
+	if bar != nil && bar.Close > 0 && prevPrice > 0 {
+		diff := bar.Close - prevPrice
+		if diff < 0 {
+			diff = -diff
+		}
+		pctChange := diff / prevPrice * 100.0
+		res.PriceChangePct = pctChange
+		if pctChange >= thresholdPct {
+			res.IsMaterial = true
+			res.Reason = fmt.Sprintf("Material price shift on %s: %.2f%% change (%.1f -> %.1f, threshold %.1f%%)", symbol, pctChange, prevPrice, bar.Close, thresholdPct)
+			return res, nil
+		}
+	}
+
+	if docs, dErr := s.repo.ListRawDocuments(ctx, inst.ID, 20); dErr == nil {
+		newCount := 0
+		for _, d := range docs {
+			if d.PublishedAt.After(prevDecision.CreatedAt) {
+				newCount++
+			}
+		}
+		res.NewDocumentsCount = newCount
+		if newCount > 0 {
+			res.IsMaterial = true
+			res.Reason = fmt.Sprintf("New corporate disclosures for %s: %d announcements published after prior thesis", symbol, newCount)
+			return res, nil
+		}
+	}
+
+	res.IsMaterial = false
+	res.Reason = fmt.Sprintf("Calm market for %s: price moved %.2f%% (< %.1f%%) with 0 new disclosures; existing %s thesis intact", symbol, res.PriceChangePct, thresholdPct, prevDecision.DecisionType)
+	return res, nil
+}
+
+// ExecuteVirtualProposal settles an approved or autonomous virtual trade proposal into the virtual portfolio ledger.
+func (s *Service) ExecuteVirtualProposal(ctx context.Context, proposalID domain.ID) (*investment.PortfolioSnapshot, error) {
+	prop, err := s.repo.GetTradeProposal(ctx, proposalID)
+	if err != nil {
+		return nil, fmt.Errorf("proposal not found: %w", err)
+	}
+	if prop.Status != investment.ProposalApproved && prop.Status != investment.ProposalPending {
+		return nil, fmt.Errorf("proposal %s cannot be settled from status %s", proposalID, prop.Status)
+	}
+
+	newSnap, err := s.repo.SettleVirtualProposal(ctx, prop, s.costCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.auditRepo != nil {
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:           uuid.New().String(),
+			ActorType:    "AGENT",
+			ActorID:      "investment-agent",
+			Action:       "VIRTUAL_TRADE_SETTLED",
+			ResourceType: "INVESTMENT_SNAPSHOT",
+			ResourceID:   newSnap.ID,
+			Outcome:      "SUCCESS",
+			Details: json.RawMessage(fmt.Sprintf(
+				`{"proposal_id":%q,"action":%q,"quantity":%d,"price":%.2f,"available_cash":%d,"total_value":%d}`,
+				prop.ID, prop.Action, prop.Quantity, prop.EstimatedPrice, newSnap.AvailableCash, newSnap.TotalPortfolioValue,
+			)),
+			CreatedAt: time.Now().UTC(),
+		})
+	}
+
+	if s.bus != nil {
+		s.bus.Publish(eventbus.InvestmentUpdated, map[string]any{
+			"type":                  "virtual_trade_settled",
+			"proposal_id":           prop.ID,
+			"snapshot_id":           newSnap.ID,
+			"available_cash":        newSnap.AvailableCash,
+			"total_portfolio_value": newSnap.TotalPortfolioValue,
+		})
+	}
+
+	return newSnap, nil
 }
 

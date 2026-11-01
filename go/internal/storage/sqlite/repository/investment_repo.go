@@ -151,6 +151,35 @@ func (r *InvestmentRepository) GetProfile(ctx context.Context, id domain.ID) (*i
 	return scanProfile(row)
 }
 
+// GetActiveProfileOptional returns the active portfolio profile if one exists,
+// or (nil, nil) without mutating/seeding the database.
+func (r *InvestmentRepository) GetActiveProfileOptional(ctx context.Context) (*investment.PortfolioProfile, error) {
+	row := r.db.RawDB().QueryRowContext(ctx, "SELECT id, name, market, currency, capital_limit, capital_limit_basis, auto_trading_enabled, configuration_json, created_at, updated_at FROM investment_portfolio_profiles LIMIT 1")
+	p, err := scanProfile(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return p, err
+}
+
+// GetInstrumentByID retrieves an instrument by primary key ID.
+func (r *InvestmentRepository) GetInstrumentByID(ctx context.Context, id domain.ID) (*investment.Instrument, error) {
+	row := r.db.RawDB().QueryRowContext(ctx, `
+		SELECT id, symbol, exchange, asset_type, name, currency, is_active, created_at, updated_at
+		FROM investment_instruments WHERE id = ?
+	`, id)
+	var inst investment.Instrument
+	var activeInt int
+	var ca, ua string
+	if err := row.Scan(&inst.ID, &inst.Symbol, &inst.Exchange, &inst.AssetType, &inst.Name, &inst.Currency, &activeInt, &ca, &ua); err != nil {
+		return nil, err
+	}
+	inst.IsActive = activeInt == 1
+	inst.CreatedAt, _ = time.Parse(time.RFC3339, ca)
+	inst.UpdatedAt, _ = time.Parse(time.RFC3339, ua)
+	return &inst, nil
+}
+
 // UpdateCapitalLimit updates the capital ceiling of a portfolio profile.
 func (r *InvestmentRepository) UpdateCapitalLimit(ctx context.Context, profileID domain.ID, limit int64) error {
 	now := time.Now().UTC()
@@ -232,7 +261,7 @@ func (r *InvestmentRepository) UpdateAvailableCash(ctx context.Context, profileI
 func (r *InvestmentRepository) GetLatestSnapshot(ctx context.Context, profileID domain.ID) (*investment.PortfolioSnapshot, error) {
 	row := r.db.RawDB().QueryRowContext(ctx, `
 		SELECT id, portfolio_profile_id, as_of, source, currency, available_cash, total_portfolio_value, validation_status, metadata_json, created_at
-		FROM investment_portfolio_snapshots WHERE portfolio_profile_id = ? ORDER BY as_of DESC LIMIT 1
+		FROM investment_portfolio_snapshots WHERE portfolio_profile_id = ? ORDER BY as_of DESC, rowid DESC LIMIT 1
 	`, profileID)
 
 	var s investment.PortfolioSnapshot
@@ -394,7 +423,7 @@ func (r *InvestmentRepository) GetLatestDecisionForInstrument(ctx context.Contex
 			expected_horizon, strategy_version, action_result_json, raw_input_json, source, created_at
 		FROM investment_decisions
 		WHERE portfolio_profile_id = ? AND instrument_id = ?
-		ORDER BY created_at DESC LIMIT 1
+		ORDER BY created_at DESC, rowid DESC LIMIT 1
 	`, profileID, instrumentID)
 
 	var dec investment.Decision
@@ -547,7 +576,7 @@ func (r *InvestmentRepository) GetLatestTradeProposalForInstrument(ctx context.C
 			status, status_reason, created_at, expires_at, updated_at
 		FROM investment_trade_proposals
 		WHERE portfolio_profile_id = ? AND instrument_id = ?
-		ORDER BY created_at DESC LIMIT 1
+		ORDER BY created_at DESC, rowid DESC LIMIT 1
 	`, profileID, instrumentID)
 
 	var p investment.TradeProposal
@@ -706,7 +735,7 @@ func (r *InvestmentRepository) GetLatestMarketData(ctx context.Context, instrume
 		SELECT id, instrument_id, data_type, period, value_json, source_id, fetched_at, effective_at
 		FROM investment_market_data
 		WHERE instrument_id = ?
-		ORDER BY effective_at DESC LIMIT 1
+		ORDER BY effective_at DESC, rowid DESC LIMIT 1
 	`, instrumentID)
 	var md investment.MarketData
 	var fa, ea string
@@ -961,4 +990,140 @@ func (r *InvestmentRepository) ListEvaluationResults(ctx context.Context, limit 
 		list = append(list, ev)
 	}
 	return list, rows.Err()
+}
+
+// SettleVirtualProposal atomically settles a virtual trade proposal into a new PortfolioSnapshot
+// with updated cash, weighted average cost, position shares, and ProposalExecuted status (AIA-05, Plan Phase 3 §4.4).
+func (r *InvestmentRepository) SettleVirtualProposal(ctx context.Context, proposal *investment.TradeProposal, costCfg investment.CostConfig) (*investment.PortfolioSnapshot, error) {
+	snap, err := r.GetLatestSnapshot(ctx, proposal.PortfolioProfileID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load latest snapshot for virtual settlement: %w", err)
+	}
+	positions, err := r.ListPositions(ctx, snap.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load positions for virtual settlement: %w", err)
+	}
+
+	cost := investment.CalculateTransactionCost(proposal.Action, proposal.Quantity, proposal.EstimatedPrice, costCfg)
+	newCash := snap.AvailableCash
+
+	var updatedPositions []investment.Position
+	foundInst := false
+
+	switch proposal.Action {
+	case investment.DecisionBuy:
+		if newCash < cost.TotalCost {
+			return nil, fmt.Errorf("insufficient virtual cash (%d) for total cost (%d)", newCash, cost.TotalCost)
+		}
+		newCash -= cost.TotalCost
+		for _, pos := range positions {
+			if pos.InstrumentID == proposal.InstrumentID {
+				foundInst = true
+				totalPrevCost := pos.AverageCost * float64(pos.Quantity)
+				newQty := pos.Quantity + proposal.Quantity
+				newAvg := (totalPrevCost + float64(cost.TotalCost)) / float64(newQty)
+				pos.Quantity = newQty
+				pos.AverageCost = newAvg
+				pos.LastKnownPrice = proposal.EstimatedPrice
+				pos.MarketValue = int64(float64(newQty)*proposal.EstimatedPrice + 0.5)
+			}
+			updatedPositions = append(updatedPositions, pos)
+		}
+		if !foundInst {
+			avgCost := float64(cost.TotalCost) / float64(proposal.Quantity)
+			updatedPositions = append(updatedPositions, investment.Position{
+				InstrumentID:   proposal.InstrumentID,
+				Quantity:       proposal.Quantity,
+				AverageCost:    avgCost,
+				LastKnownPrice: proposal.EstimatedPrice,
+				MarketValue:    int64(float64(proposal.Quantity)*proposal.EstimatedPrice + 0.5),
+				Currency:       snap.Currency,
+				MetadataJSON:   "{}",
+			})
+		}
+
+	case investment.DecisionSell:
+		for _, pos := range positions {
+			if pos.InstrumentID == proposal.InstrumentID {
+				foundInst = true
+				if pos.Quantity < proposal.Quantity {
+					return nil, fmt.Errorf("insufficient position shares (%d) to sell (%d)", pos.Quantity, proposal.Quantity)
+				}
+				newQty := pos.Quantity - proposal.Quantity
+				newCash += cost.TotalCost // Net proceeds after fee and 0.3% tax
+				if newQty > 0 {
+					pos.Quantity = newQty
+					pos.LastKnownPrice = proposal.EstimatedPrice
+					pos.MarketValue = int64(float64(newQty)*proposal.EstimatedPrice + 0.5)
+					updatedPositions = append(updatedPositions, pos)
+				}
+				continue
+			}
+			updatedPositions = append(updatedPositions, pos)
+		}
+		if !foundInst {
+			return nil, fmt.Errorf("cannot settle SELL: instrument %s not held in virtual portfolio", proposal.InstrumentID)
+		}
+
+	default:
+		return nil, fmt.Errorf("unsupported proposal action for settlement: %s", proposal.Action)
+	}
+
+	var totalPosValue int64
+	for _, p := range updatedPositions {
+		totalPosValue += p.MarketValue
+	}
+
+	now := time.Now().UTC()
+	newSnap := &investment.PortfolioSnapshot{
+		ID:                  uuid.New().String(),
+		PortfolioProfileID:  proposal.PortfolioProfileID,
+		AsOf:                now,
+		Source:              "VIRTUAL_LEDGER_SETTLEMENT",
+		Currency:            snap.Currency,
+		AvailableCash:       newCash,
+		TotalPortfolioValue: newCash + totalPosValue,
+		ValidationStatus:    "VALIDATED",
+		MetadataJSON:        fmt.Sprintf(`{"settled_proposal_id":%q,"action":%q,"quantity":%d,"price":%.2f,"broker_fee":%d,"tax":%d}`, proposal.ID, proposal.Action, proposal.Quantity, proposal.EstimatedPrice, cost.BrokerFee, cost.TransactionTax),
+		CreatedAt:           now,
+	}
+
+	err = r.db.WithTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO investment_portfolio_snapshots (
+				id, portfolio_profile_id, as_of, source, currency,
+				available_cash, total_portfolio_value, validation_status, metadata_json, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, newSnap.ID, newSnap.PortfolioProfileID, newSnap.AsOf.Format(time.RFC3339),
+			newSnap.Source, newSnap.Currency, newSnap.AvailableCash, newSnap.TotalPortfolioValue,
+			newSnap.ValidationStatus, newSnap.MetadataJSON, newSnap.CreatedAt.Format(time.RFC3339))
+		if err != nil {
+			return err
+		}
+
+		for _, pos := range updatedPositions {
+			_, err = tx.ExecContext(ctx, `
+				INSERT INTO investment_portfolio_positions (
+					id, portfolio_snapshot_id, instrument_id, quantity, average_cost,
+					last_known_price, market_value, currency, metadata_json
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`, uuid.New().String(), newSnap.ID, pos.InstrumentID, pos.Quantity, pos.AverageCost,
+				pos.LastKnownPrice, pos.MarketValue, pos.Currency, pos.MetadataJSON)
+			if err != nil {
+				return err
+			}
+		}
+
+		_, err = tx.ExecContext(ctx, `
+			UPDATE investment_trade_proposals
+			SET status = ?, status_reason = ?, updated_at = ?
+			WHERE id = ?
+		`, string(investment.ProposalExecuted), "Settled in virtual portfolio ledger", now.Format(time.RFC3339), proposal.ID)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to commit virtual trade settlement: %w", err)
+	}
+
+	return newSnap, nil
 }

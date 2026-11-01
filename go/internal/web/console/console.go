@@ -5,13 +5,17 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wade/aia/internal/domain"
+	"github.com/wade/aia/internal/domain/governance"
 	"github.com/wade/aia/internal/domain/investment"
 	domainMemory "github.com/wade/aia/internal/domain/memory"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/provider"
 	agentService "github.com/wade/aia/internal/service/agent"
+	approvalService "github.com/wade/aia/internal/service/approval"
+	govService "github.com/wade/aia/internal/service/governance"
 	invService "github.com/wade/aia/internal/service/investment"
 	memoryService "github.com/wade/aia/internal/service/memory"
 	taskService "github.com/wade/aia/internal/service/task"
@@ -22,15 +26,17 @@ import (
 )
 
 type ConsoleServices struct {
-	TaskSvc   *taskService.Service
-	AgentSvc  *agentService.Service
-	MemorySvc *memoryService.Service
-	AuditRepo *repository.AuditRepository
-	InvSvc    *invService.Service
-	DB        *sqlite.DB
-	Provider  provider.Provider
-	Host      *host.Host
-	WorkerMgr *worker.Manager
+	TaskSvc       *taskService.Service
+	AgentSvc      *agentService.Service
+	MemorySvc     *memoryService.Service
+	AuditRepo     *repository.AuditRepository
+	InvSvc        *invService.Service
+	DB            *sqlite.DB
+	Provider      provider.Provider
+	Host          *host.Host
+	WorkerMgr     *worker.Manager
+	ApprovalSvc   *approvalService.Service
+	GovernanceSvc *govService.Service
 }
 
 func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
@@ -44,6 +50,10 @@ func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
 	mux.HandleFunc("/api/v1/system/health", s.handleSystemHealth)
 	mux.HandleFunc("/api/v1/system/activity", s.handleActivityMonitor)
 
+	// 2.1 Governance & Emergency Stop
+	mux.HandleFunc("/api/v1/system/emergency-stop", s.handleEmergencyStop)
+	mux.HandleFunc("/api/v1/system/resume", s.handleResumeDispatch)
+
 	// 3. Tasks
 	mux.HandleFunc("/api/v1/tasks", s.handleTasks)
 	mux.HandleFunc("/api/v1/tasks/", s.handleTaskSubroutes)
@@ -56,10 +66,13 @@ func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
 	mux.HandleFunc("/api/v1/memory", s.handleMemory)
 	mux.HandleFunc("/api/v1/memory/", s.handleMemorySubroutes)
 
-	// 6. Pending Approvals (Unified: Tasks + Memory Candidates + Trade Proposals)
-	// Does NOT create fictitious approval entity; aggregates directly from real models.
+	// 6. Pending Approvals (Unified: Formal Approvals + Tasks + Memory Candidates + Trade Proposals)
 	mux.HandleFunc("/api/v1/pending", s.handlePendingList)
 	mux.HandleFunc("/api/v1/pending/", s.handlePendingAction)
+
+	// 6.1 Formal Approvals API
+	mux.HandleFunc("/api/v1/approvals", s.handleApprovals)
+	mux.HandleFunc("/api/v1/approvals/", s.handleApprovalSubroutes)
 
 	// 7. Audit
 	mux.HandleFunc("/api/v1/audit", s.handleAudit)
@@ -67,6 +80,16 @@ func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
 
 func getReqID(r *http.Request) string {
 	return r.Header.Get("X-Request-ID")
+}
+
+func (s *ConsoleServices) getRequestActor(r *http.Request) governance.Actor {
+	actor := governance.Actor{Type: "HUMAN", ID: "web_operator"}
+	if cookie, err := r.Cookie("aia_session"); err == nil && cookie.Value != "" && s.Host != nil && s.Host.AuthMgr != nil {
+		if sess, ok := s.Host.AuthMgr.ValidateSession(cookie.Value); ok && sess != nil && sess.ActorID != "" {
+			actor.ID = sess.ActorID
+		}
+	}
+	return actor
 }
 
 // -------------------------------------------------------------
@@ -449,13 +472,20 @@ func (s *ConsoleServices) handlePendingList(w http.ResponseWriter, r *http.Reque
 		tradeProposals, _ = s.InvSvc.ListProposals(ctx, investment.ProposalPending, 100)
 	}
 
-	totalPending := len(tasks) + len(candidates) + len(tradeProposals)
+	// 4. Formal Approvals in PENDING (AIA-17 / Phase 2)
+	var formalApprovals []*governance.Approval
+	if s.ApprovalSvc != nil {
+		formalApprovals, _ = s.ApprovalSvc.ListPending(ctx)
+	}
+
+	totalPending := len(tasks) + len(candidates) + len(tradeProposals) + len(formalApprovals)
 
 	host.WriteJSON(w, http.StatusOK, map[string]any{
-		"total_count":     totalPending,
-		"tasks":           tasks,
-		"memories":        candidates,
-		"trade_proposals": tradeProposals,
+		"total_count":      totalPending,
+		"tasks":            tasks,
+		"memories":         candidates,
+		"trade_proposals":  tradeProposals,
+		"formal_approvals": formalApprovals,
 	}, reqID)
 }
 
@@ -476,6 +506,34 @@ func (s *ConsoleServices) handlePendingAction(w http.ResponseWriter, r *http.Req
 	itemType, itemID, action := parts[0], parts[1], parts[2]
 
 	switch itemType {
+	case "approvals":
+		if s.ApprovalSvc == nil {
+			host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Approval service not enabled", reqID)
+			return
+		}
+		var req struct {
+			Comment string `json:"comment"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
+		actor := s.getRequestActor(r)
+
+		if action == "approve" {
+			if err := s.ApprovalSvc.Approve(ctx, itemID, actor.ID, req.Comment, actor.Type); err != nil {
+				host.WriteError(w, http.StatusBadRequest, "APPROVE_FAILED", err.Error(), reqID)
+				return
+			}
+		} else if action == "reject" {
+			if err := s.ApprovalSvc.Reject(ctx, itemID, actor.ID, req.Comment, actor.Type); err != nil {
+				host.WriteError(w, http.StatusBadRequest, "REJECT_FAILED", err.Error(), reqID)
+				return
+			}
+		} else {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be approve or reject", reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "UPDATED"}, reqID)
+
 	case "tasks":
 		if action == "approve" {
 			if err := s.TaskSvc.UpdateStatus(ctx, itemID, task.StatusReady); err != nil {
@@ -564,4 +622,194 @@ func (s *ConsoleServices) handleAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host.WriteJSON(w, http.StatusOK, logs, reqID)
+}
+
+// -------------------------------------------------------------
+// Emergency Stop & Governance Handlers (AIA-17 / Phase 2)
+// -------------------------------------------------------------
+
+func (s *ConsoleServices) handleEmergencyStop(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method must be POST", reqID)
+		return
+	}
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if strings.TrimSpace(req.Reason) == "" {
+		req.Reason = "Emergency Stop triggered from Web Console"
+	}
+
+	actor := s.getRequestActor(r)
+
+	if s.WorkerMgr != nil {
+		if err := s.WorkerMgr.TriggerEmergencyStop(ctx, actor, req.Reason); err != nil {
+			host.WriteError(w, http.StatusInternalServerError, "EMERGENCY_STOP_FAILED", err.Error(), reqID)
+			return
+		}
+	} else if s.GovernanceSvc != nil {
+		if err := s.GovernanceSvc.TriggerEmergencyStop(ctx, actor, req.Reason); err != nil {
+			host.WriteError(w, http.StatusInternalServerError, "EMERGENCY_STOP_FAILED", err.Error(), reqID)
+			return
+		}
+	} else {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Governance runtime not available", reqID)
+		return
+	}
+
+	host.WriteJSON(w, http.StatusOK, map[string]any{
+		"status":    "EMERGENCY_STOP",
+		"reason":    req.Reason,
+		"actor":     actor,
+		"timestamp": time.Now().UTC(),
+	}, reqID)
+}
+
+func (s *ConsoleServices) handleResumeDispatch(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method must be POST", reqID)
+		return
+	}
+
+	actor := s.getRequestActor(r)
+
+	var req struct {
+		Force bool `json:"force"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	if s.WorkerMgr != nil {
+		if err := s.WorkerMgr.ResumeDispatch(ctx, actor, req.Force); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "RESUME_FAILED", err.Error(), reqID)
+			return
+		}
+	} else if s.GovernanceSvc != nil {
+		if err := s.GovernanceSvc.ResumeDispatch(ctx, actor, req.Force); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "RESUME_FAILED", err.Error(), reqID)
+			return
+		}
+	} else {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Governance runtime not available", reqID)
+		return
+	}
+
+	host.WriteJSON(w, http.StatusOK, map[string]any{
+		"status":    "RUNNING",
+		"actor":     actor,
+		"timestamp": time.Now().UTC(),
+	}, reqID)
+}
+
+// -------------------------------------------------------------
+// Formal Approvals Subroutes (AIA-17 §7)
+// -------------------------------------------------------------
+
+func (s *ConsoleServices) handleApprovals(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+
+	if s.ApprovalSvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Approval service not available", reqID)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		status := r.URL.Query().Get("status")
+		limit := 100
+		if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+			limit = l
+		}
+
+		var approvals []*governance.Approval
+		var err error
+		if status == "" || strings.EqualFold(status, "PENDING") {
+			approvals, err = s.ApprovalSvc.ListPending(ctx)
+		} else {
+			approvals, err = s.ApprovalSvc.List(ctx, repository.ApprovalFilter{
+				Status: governance.ApprovalStatus(strings.ToUpper(status)),
+				Limit:  limit,
+			})
+		}
+
+		if err != nil {
+			host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, approvals, reqID)
+
+	default:
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+	}
+}
+
+func (s *ConsoleServices) handleApprovalSubroutes(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+
+	if s.ApprovalSvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Approval service not available", reqID)
+		return
+	}
+
+	// Format: /api/v1/approvals/{id} or /api/v1/approvals/{id}/{approve|reject}
+	subpath := strings.TrimPrefix(r.URL.Path, "/api/v1/approvals/")
+	parts := strings.Split(strings.Trim(subpath, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_ID", "Approval ID required", reqID)
+		return
+	}
+	apprID := parts[0]
+
+	if len(parts) == 1 {
+		if r.Method == http.MethodGet {
+			appr, err := s.ApprovalSvc.Get(ctx, apprID)
+			if err != nil {
+				host.WriteError(w, http.StatusNotFound, "NOT_FOUND", err.Error(), reqID)
+				return
+			}
+			host.WriteJSON(w, http.StatusOK, appr, reqID)
+			return
+		}
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	action := parts[1]
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method must be POST", reqID)
+		return
+	}
+
+	var req struct {
+		Comment string `json:"comment"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	actor := s.getRequestActor(r)
+
+	switch strings.ToLower(action) {
+	case "approve":
+		if err := s.ApprovalSvc.Approve(ctx, apprID, actor.ID, req.Comment, actor.Type); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "APPROVE_FAILED", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "APPROVED"}, reqID)
+
+	case "reject":
+		if err := s.ApprovalSvc.Reject(ctx, apprID, actor.ID, req.Comment, actor.Type); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "REJECT_FAILED", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "REJECTED"}, reqID)
+
+	default:
+		host.WriteError(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be approve or reject", reqID)
+	}
 }

@@ -3,21 +3,30 @@ package worker
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/wade/aia/internal/domain/governance"
+	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/eventbus"
 	"github.com/wade/aia/internal/orchestrator"
 	"github.com/wade/aia/internal/provider"
+	govService "github.com/wade/aia/internal/service/governance"
 	invService "github.com/wade/aia/internal/service/investment"
 	scheduleService "github.com/wade/aia/internal/service/schedule"
 	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
+)
+
+var (
+	ErrEmergencyStopActive = errors.New("dispatch frozen: system is under EMERGENCY_STOP")
 )
 
 // WorkerConfig defines operating parameters for runtime background workers.
@@ -42,6 +51,7 @@ func DefaultWorkerConfig() WorkerConfig {
 // WorkerStats tracks live runtime performance and counts.
 type WorkerStats struct {
 	Running             bool       `json:"running"`
+	EmergencyStopped    bool       `json:"emergency_stopped"`
 	SchedulesChecked    int64      `json:"schedules_checked"`
 	TasksDispatched     int64      `json:"tasks_dispatched"`
 	TasksCompleted      int64      `json:"tasks_completed"`
@@ -62,7 +72,7 @@ type WorkerRunSummary struct {
 
 // ActivityMonitorSnapshot presents the unified activity metrics (AIA Activity Monitor).
 type ActivityMonitorSnapshot struct {
-	Runtime                string `json:"runtime"`                  // "RUNNING" or "STOPPED"
+	Runtime                string `json:"runtime"`                  // "RUNNING", "STOPPED", or "EMERGENCY_STOP"
 	ScheduleWorker         string `json:"schedule_worker"`          // "RUNNING" or "STOPPED"
 	TaskWorker             string `json:"task_worker"`              // "IDLE" or "BUSY" / "RUNNING"
 	LastDataSync           string `json:"last_data_sync"`           // "YYYY-MM-DD HH:MM" or "never"
@@ -83,6 +93,8 @@ type Manager struct {
 	prov           provider.Provider
 	bus            eventbus.Publisher
 	auditRepo      *repository.AuditRepository
+	govRepo        *repository.GovernanceRepository
+	govSvc         *govService.Service
 	scheduleWorker *ScheduleWorker
 	taskWorker     *TaskWorker
 
@@ -90,6 +102,13 @@ type Manager struct {
 	stats  WorkerStats
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// emergencyStop atomic flag for 1-second freeze on new task dispatch
+	emergencyStopped atomic.Bool
+
+	// activeTaskCancels tracks cancel funcs for currently running tasks
+	activeTaskCancelsMu sync.Mutex
+	activeTaskCancels   map[string]context.CancelFunc
 }
 
 // NewManager creates a new background worker runtime manager.
@@ -115,17 +134,21 @@ func NewManager(
 		cfg.MaxConcurrentTasks = 3
 	}
 
+	govRepo := repository.NewGovernanceRepository(db)
+
 	m := &Manager{
-		cfg:          cfg,
-		db:           db,
-		scheduleSvc:  schedSvc,
-		taskSvc:      taskSvc,
-		invSvc:       invSvc,
-		collectorSvc: collectorSvc,
-		scheduler:    scheduler,
-		prov:         prov,
-		bus:          bus,
-		auditRepo:    auditRepo,
+		cfg:               cfg,
+		db:                db,
+		scheduleSvc:       schedSvc,
+		taskSvc:           taskSvc,
+		invSvc:            invSvc,
+		collectorSvc:      collectorSvc,
+		scheduler:         scheduler,
+		prov:              prov,
+		bus:               bus,
+		auditRepo:         auditRepo,
+		govRepo:           govRepo,
+		activeTaskCancels: make(map[string]context.CancelFunc),
 	}
 
 	m.scheduleWorker = newScheduleWorker(m)
@@ -134,12 +157,140 @@ func NewManager(
 	return m
 }
 
+// SetGovernanceService connects the governance service.
+func (m *Manager) SetGovernanceService(govSvc *govService.Service) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.govSvc = govSvc
+}
+
+// IsEmergencyStopped checks whether dispatch is frozen.
+func (m *Manager) IsEmergencyStopped() bool {
+	if m.emergencyStopped.Load() {
+		return true
+	}
+	// Check database persisted state
+	if m.govRepo != nil {
+		ctrl, err := m.govRepo.GetControl(context.Background())
+		if err == nil && ctrl.IsEmergencyStopped() {
+			m.emergencyStopped.Store(true)
+			return true
+		}
+	}
+	return false
+}
+
+// TriggerEmergencyStop engages the Controlled Emergency Stop (AIA-17 §11.5).
+// 1. Immediately sets atomic flag (within milliseconds, well under 1-second requirement)
+// 2. Halts new task dispatch
+// 3. Cancels all actively running tasks and marks them CANCELLED
+// 4. Persists the state to SQLite runtime_controls table
+func (m *Manager) TriggerEmergencyStop(ctx context.Context, actor governance.Actor, reason string) error {
+	m.emergencyStopped.Store(true)
+	now := time.Now().UTC()
+
+	m.mu.Lock()
+	m.stats.EmergencyStopped = true
+	m.mu.Unlock()
+
+	slog.Warn("EMERGENCY STOP TRIGGERED: freezing task dispatch immediately", "reason", reason, "actor", actor)
+
+	// Persist to DB
+	if m.govRepo != nil {
+		actorStr := fmt.Sprintf("%s:%s", actor.Type, actor.ID)
+		_ = m.govRepo.SetEmergencyStop(ctx, actorStr, reason)
+	}
+
+	// Cancel all actively executing tasks
+	m.activeTaskCancelsMu.Lock()
+	runningCancels := make(map[string]context.CancelFunc, len(m.activeTaskCancels))
+	for tid, cancel := range m.activeTaskCancels {
+		runningCancels[tid] = cancel
+	}
+	m.activeTaskCancelsMu.Unlock()
+
+	for tid, cancel := range runningCancels {
+		if cancel != nil {
+			cancel()
+		}
+		// Persist task status as CANCELLED to avoid re-dispatch on restart
+		if m.taskSvc != nil {
+			_ = m.taskSvc.UpdateStatus(ctx, tid, task.StatusCancelled)
+		}
+	}
+
+	// Broadcast via eventbus
+	if m.bus != nil {
+		m.bus.Publish("runtime.emergency_stop", map[string]any{
+			"actor":     actor,
+			"reason":    reason,
+			"timestamp": now,
+		})
+	}
+
+	return nil
+}
+
+// ResumeDispatch restores task dispatching from an Emergency Stop.
+// AIA-17 Rule: Only a human operator can resume the system.
+func (m *Manager) ResumeDispatch(ctx context.Context, actor governance.Actor, force bool) error {
+	if !actor.IsHuman() {
+		return fmt.Errorf("unauthorized actor: only a human owner can resume runtime from emergency stop")
+	}
+
+	if m.govRepo != nil {
+		actorStr := fmt.Sprintf("%s:%s", actor.Type, actor.ID)
+		if err := m.govRepo.ResumeDispatch(ctx, actorStr); err != nil {
+			return err
+		}
+	}
+
+	m.emergencyStopped.Store(false)
+
+	m.mu.Lock()
+	m.stats.EmergencyStopped = false
+	m.mu.Unlock()
+
+	slog.Info("runtime resumed from emergency stop", "actor", actor)
+
+	if m.bus != nil {
+		m.bus.Publish("runtime.resumed", map[string]any{
+			"actor":     actor,
+			"timestamp": time.Now().UTC(),
+		})
+	}
+
+	return nil
+}
+
+func (m *Manager) registerRunningTask(taskID string, cancel context.CancelFunc) {
+	m.activeTaskCancelsMu.Lock()
+	defer m.activeTaskCancelsMu.Unlock()
+	m.activeTaskCancels[taskID] = cancel
+}
+
+func (m *Manager) unregisterRunningTask(taskID string) {
+	m.activeTaskCancelsMu.Lock()
+	defer m.activeTaskCancelsMu.Unlock()
+	delete(m.activeTaskCancels, taskID)
+}
+
 // Start launches the background worker goroutines.
 func (m *Manager) Start(ctx context.Context) error {
 	m.mu.Lock()
 	if m.stats.Running {
 		m.mu.Unlock()
 		return fmt.Errorf("worker manager is already running")
+	}
+
+	// Sync emergency stop status from DB
+	if m.govRepo != nil {
+		ctrl, err := m.govRepo.GetControl(ctx)
+		if err == nil && ctrl.IsEmergencyStopped() {
+			m.emergencyStopped.Store(true)
+			m.stats.EmergencyStopped = true
+			slog.Warn("starting worker manager in EMERGENCY_STOP state from persisted controls")
+		}
 	}
 
 	workerCtx, cancel := context.WithCancel(ctx)
@@ -193,12 +344,18 @@ func (m *Manager) Stop() {
 func (m *Manager) Status() WorkerStats {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.stats
+	st := m.stats
+	st.EmergencyStopped = m.IsEmergencyStopped()
+	return st
 }
 
 // RunOnce executes a single manual pass of schedule dispatching followed by task execution.
 func (m *Manager) RunOnce(ctx context.Context) (WorkerRunSummary, error) {
 	summary := WorkerRunSummary{}
+
+	if m.IsEmergencyStopped() {
+		return summary, ErrEmergencyStopActive
+	}
 
 	// 1. Dispatch due schedules
 	dispatched, err := m.DispatchDue(ctx)
@@ -219,6 +376,10 @@ func (m *Manager) RunOnce(ctx context.Context) (WorkerRunSummary, error) {
 
 // DispatchDue immediately checks and dispatches due schedules.
 func (m *Manager) DispatchDue(ctx context.Context) (int, error) {
+	if m.IsEmergencyStopped() {
+		return 0, ErrEmergencyStopActive
+	}
+
 	if m.scheduleSvc == nil {
 		return 0, nil
 	}
@@ -239,6 +400,9 @@ func (m *Manager) DispatchDue(ctx context.Context) (int, error) {
 
 // ProcessReady immediately runs all currently READY tasks.
 func (m *Manager) ProcessReady(ctx context.Context) (int, error) {
+	if m.IsEmergencyStopped() {
+		return 0, ErrEmergencyStopActive
+	}
 	return m.taskWorker.processPendingTasks(ctx)
 }
 
@@ -258,7 +422,11 @@ func (m *Manager) GetActivityMonitor(ctx context.Context) (*ActivityMonitorSnaps
 		NextScheduledRun:       "none",
 	}
 
-	if isRunning {
+	if m.IsEmergencyStopped() {
+		snap.Runtime = "EMERGENCY_STOP"
+		snap.ScheduleWorker = "STOPPED"
+		snap.TaskWorker = "STOPPED"
+	} else if isRunning {
 		snap.Runtime = "RUNNING"
 		snap.ScheduleWorker = "RUNNING"
 		if m.taskWorker != nil && m.taskWorker.ActiveTasks() > 0 {
@@ -337,4 +505,3 @@ func (m *Manager) GetActivityMonitor(ctx context.Context) (*ActivityMonitorSnaps
 
 	return snap, nil
 }
-

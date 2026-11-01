@@ -34,8 +34,9 @@ func (r *MemoryRepository) Create(ctx context.Context, m *memory.Memory) error {
 		INSERT INTO memories (
 			id, type, scope, project_id, agent_id, title, content,
 			source_type, source_id, confidence, status, version,
-			created_at, updated_at, last_used_at, expires_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			created_at, updated_at, last_used_at, expires_at,
+			provenance_type, provenance_ref_type, provenance_ref_id, provenance_status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	now := time.Now().UTC()
 	if m.CreatedAt.IsZero() {
@@ -43,7 +44,17 @@ func (r *MemoryRepository) Create(ctx context.Context, m *memory.Memory) error {
 	}
 	m.UpdatedAt = now
 
-	var projID, agentID, srcID, lastUsed, expires sql.NullString
+	if m.ProvenanceType == "" {
+		m.ProvenanceType = "INFERENCE"
+	}
+	if m.ProvenanceRefType == "" {
+		m.ProvenanceRefType = "NONE"
+	}
+	if m.ProvenanceStatus == "" {
+		m.ProvenanceStatus = "UNVERIFIED"
+	}
+
+	var projID, agentID, srcID, lastUsed, expires, provRefID sql.NullString
 	if m.ProjectID != "" {
 		projID = sql.NullString{String: m.ProjectID, Valid: true}
 	}
@@ -59,12 +70,16 @@ func (r *MemoryRepository) Create(ctx context.Context, m *memory.Memory) error {
 	if m.ExpiresAt != nil {
 		expires = sql.NullString{String: m.ExpiresAt.Format(time.RFC3339), Valid: true}
 	}
+	if m.ProvenanceRefID != nil && *m.ProvenanceRefID != "" {
+		provRefID = sql.NullString{String: *m.ProvenanceRefID, Valid: true}
+	}
 
 	_, err := r.db.RawDB().ExecContext(
 		ctx, query,
 		m.ID, string(m.Type), string(m.Scope), projID, agentID, m.Title, m.Content,
 		m.SourceType, srcID, m.Confidence, m.Status, m.Version,
 		m.CreatedAt.Format(time.RFC3339), m.UpdatedAt.Format(time.RFC3339), lastUsed, expires,
+		m.ProvenanceType, m.ProvenanceRefType, provRefID, m.ProvenanceStatus,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create memory: %w", err)
@@ -76,19 +91,22 @@ func (r *MemoryRepository) Get(ctx context.Context, id domain.ID) (*memory.Memor
 	query := `
 		SELECT id, type, scope, project_id, agent_id, title, content,
 		       source_type, source_id, confidence, status, version,
-		       created_at, updated_at, last_used_at, expires_at
+		       created_at, updated_at, last_used_at, expires_at,
+		       provenance_type, provenance_ref_type, provenance_ref_id, provenance_status
 		FROM memories WHERE id = ?
 	`
 	row := r.db.RawDB().QueryRowContext(ctx, query, id)
 
 	var m memory.Memory
 	var mType, scope, createdAt, updatedAt string
-	var projID, agentID, srcID, lastUsed, expires sql.NullString
+	var projID, agentID, srcID, lastUsed, expires, provRefID sql.NullString
+	var provType, provRefType, provStatus sql.NullString
 
 	err := row.Scan(
 		&m.ID, &mType, &scope, &projID, &agentID, &m.Title, &m.Content,
 		&m.SourceType, &srcID, &m.Confidence, &m.Status, &m.Version,
 		&createdAt, &updatedAt, &lastUsed, &expires,
+		&provType, &provRefType, &provRefID, &provStatus,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -118,6 +136,12 @@ func (r *MemoryRepository) Get(ctx context.Context, id domain.ID) (*memory.Memor
 		ex, _ := time.Parse(time.RFC3339, expires.String)
 		m.ExpiresAt = &ex
 	}
+	m.ProvenanceType = provType.String
+	m.ProvenanceRefType = provRefType.String
+	if provRefID.Valid {
+		m.ProvenanceRefID = &provRefID.String
+	}
+	m.ProvenanceStatus = provStatus.String
 
 	return &m, nil
 }
@@ -126,7 +150,8 @@ func (r *MemoryRepository) Search(ctx context.Context, q MemoryQuery) ([]memory.
 	query := `
 		SELECT id, type, scope, project_id, agent_id, title, content,
 		       source_type, source_id, confidence, status, version,
-		       created_at, updated_at, last_used_at, expires_at
+		       created_at, updated_at, last_used_at, expires_at,
+		       provenance_type, provenance_ref_type, provenance_ref_id, provenance_status
 		FROM memories WHERE status = 'ACTIVE'
 	`
 	var args []any
@@ -166,12 +191,14 @@ func (r *MemoryRepository) Search(ctx context.Context, q MemoryQuery) ([]memory.
 	for rows.Next() {
 		var m memory.Memory
 		var mType, scope, createdAt, updatedAt string
-		var projID, agentID, srcID, lastUsed, expires sql.NullString
+		var projID, agentID, srcID, lastUsed, expires, provRefID sql.NullString
+		var provType, provRefType, provStatus sql.NullString
 
 		if err := rows.Scan(
 			&m.ID, &mType, &scope, &projID, &agentID, &m.Title, &m.Content,
 			&m.SourceType, &srcID, &m.Confidence, &m.Status, &m.Version,
 			&createdAt, &updatedAt, &lastUsed, &expires,
+			&provType, &provRefType, &provRefID, &provStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -197,6 +224,13 @@ func (r *MemoryRepository) Search(ctx context.Context, q MemoryQuery) ([]memory.
 			ex, _ := time.Parse(time.RFC3339, expires.String)
 			m.ExpiresAt = &ex
 		}
+		m.ProvenanceType = provType.String
+		m.ProvenanceRefType = provRefType.String
+		if provRefID.Valid {
+			m.ProvenanceRefID = &provRefID.String
+		}
+		m.ProvenanceStatus = provStatus.String
+
 		memories = append(memories, m)
 	}
 

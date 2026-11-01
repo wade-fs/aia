@@ -14,28 +14,38 @@ import (
 )
 
 type AuditLogEntry struct {
-	ID           domain.ID       `json:"id"`
-	Sequence     int64           `json:"sequence"`
-	ActorType    string          `json:"actor_type"`
-	ActorID      string          `json:"actor_id"`
-	Action       string          `json:"action"`
-	ResourceType string          `json:"resource_type"`
-	ResourceID   string          `json:"resource_id"`
-	Outcome      string          `json:"outcome"`
-	Details      json.RawMessage `json:"details"`
-	RequestID    string          `json:"request_id"`
-	Source       string          `json:"source"`
-	Metadata     json.RawMessage `json:"metadata"`
-	CreatedAt    time.Time       `json:"created_at"`
+	ID               domain.ID       `json:"id"`
+	Sequence         int64           `json:"sequence"`
+	ActorType        string          `json:"actor_type"`
+	ActorID          string          `json:"actor_id"`
+	Action           string          `json:"action"`
+	ResourceType     string          `json:"resource_type"`
+	ResourceID       string          `json:"resource_id"`
+	Outcome          string          `json:"outcome"`
+	Details          json.RawMessage `json:"details"`
+	RequestID        string          `json:"request_id"`
+	Source           string          `json:"source"`
+	Metadata         json.RawMessage `json:"metadata"`
+	PolicyID         *string         `json:"policy_id,omitempty"`
+	DecisionID       *string         `json:"decision_id,omitempty"`
+	ApprovalID       *string         `json:"approval_id,omitempty"`
+	RiskTier         *string         `json:"risk_tier,omitempty"`
+	GovernanceAction *string         `json:"governance_action,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
 }
 
 // AuditFilter narrows audit queries.
 type AuditFilter struct {
-	Limit        int
-	Source       string
-	ResourceType string
-	ResourceID   string
-	RequestID    string
+	Limit            int
+	Source           string
+	ResourceType     string
+	ResourceID       string
+	RequestID        string
+	PolicyID         string
+	DecisionID       string
+	ApprovalID       string
+	RiskTier         string
+	GovernanceAction string
 }
 
 type AuditRepository struct {
@@ -89,14 +99,16 @@ func (r *AuditRepository) Append(ctx context.Context, entry *AuditLogEntry) erro
 		query := `
 			INSERT INTO audit_logs (
 				id, sequence, actor_type, actor_id, action, resource_type, resource_id, outcome, details_json,
-				request_id, source, metadata_json, created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				request_id, source, metadata_json, policy_id, decision_id, approval_id, risk_tier, governance_action, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`
 		_, err := tx.ExecContext(
 			ctx, query,
 			entry.ID, entry.Sequence, entry.ActorType, entry.ActorID, entry.Action,
 			entry.ResourceType, entry.ResourceID, entry.Outcome, string(entry.Details),
-			entry.RequestID, entry.Source, string(entry.Metadata), entry.CreatedAt.Format(time.RFC3339),
+			entry.RequestID, entry.Source, string(entry.Metadata),
+			entry.PolicyID, entry.DecisionID, entry.ApprovalID, entry.RiskTier, entry.GovernanceAction,
+			entry.CreatedAt.Format(time.RFC3339),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to append audit log: %w", err)
@@ -144,8 +156,29 @@ func (r *AuditRepository) Query(ctx context.Context, f AuditFilter) ([]AuditLogE
 		where = append(where, "request_id = ?")
 		args = append(args, f.RequestID)
 	}
+	if f.PolicyID != "" {
+		where = append(where, "policy_id = ?")
+		args = append(args, f.PolicyID)
+	}
+	if f.DecisionID != "" {
+		where = append(where, "decision_id = ?")
+		args = append(args, f.DecisionID)
+	}
+	if f.ApprovalID != "" {
+		where = append(where, "approval_id = ?")
+		args = append(args, f.ApprovalID)
+	}
+	if f.RiskTier != "" {
+		where = append(where, "risk_tier = ?")
+		args = append(args, f.RiskTier)
+	}
+	if f.GovernanceAction != "" {
+		where = append(where, "governance_action = ?")
+		args = append(args, f.GovernanceAction)
+	}
+
 	query := `SELECT id, sequence, actor_type, actor_id, action, resource_type, resource_id, outcome, details_json,
-		request_id, source, metadata_json, created_at FROM audit_logs`
+		request_id, source, metadata_json, policy_id, decision_id, approval_id, risk_tier, governance_action, created_at FROM audit_logs`
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -162,15 +195,33 @@ func (r *AuditRepository) Query(ctx context.Context, f AuditFilter) ([]AuditLogE
 	for rows.Next() {
 		var e AuditLogEntry
 		var details, metadata, createdAt string
+		var policyID, decisionID, approvalID, riskTier, govAction sql.NullString
 		if err := rows.Scan(
 			&e.ID, &e.Sequence, &e.ActorType, &e.ActorID, &e.Action,
 			&e.ResourceType, &e.ResourceID, &e.Outcome, &details,
-			&e.RequestID, &e.Source, &metadata, &createdAt,
+			&e.RequestID, &e.Source, &metadata,
+			&policyID, &decisionID, &approvalID, &riskTier, &govAction,
+			&createdAt,
 		); err != nil {
 			return nil, err
 		}
 		e.Details = json.RawMessage(details)
 		e.Metadata = json.RawMessage(metadata)
+		if policyID.Valid {
+			e.PolicyID = &policyID.String
+		}
+		if decisionID.Valid {
+			e.DecisionID = &decisionID.String
+		}
+		if approvalID.Valid {
+			e.ApprovalID = &approvalID.String
+		}
+		if riskTier.Valid {
+			e.RiskTier = &riskTier.String
+		}
+		if govAction.Valid {
+			e.GovernanceAction = &govAction.String
+		}
 		e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		list = append(list, e)
 	}

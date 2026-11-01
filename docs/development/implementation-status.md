@@ -55,42 +55,56 @@ go/
 
 ## 2. Module Implementation & Gap Matrix
 
-| Module / Package | Status at Commit 7597902 | Target v2.0 Capability (AIA-00~19) | Implementation Gap & Next Action |
+| Module / Package | Status | Target v2.0 Capability (AIA-00~19) | Implementation Gap & Next Action |
 |:---|:---:|:---|:---|
-| **`internal/worker`** | **Production Ready** | Runtime Concurrency Manager | Add controlled Emergency Stop (1s new task dispatch freeze + graceful cancel). |
-| **`internal/storage/sqlite`** | **Production Ready** | Multi-schema persistence | Add Migrations 004 (`event_history`, `evidence`) and 005 (`goals`, `snapshots`). |
-| **`internal/web/host`** | **Production Ready** | Single-user HTTP/REST Host | Add Approval pending cards & emergency stop button to Web Console. |
-| **`internal/service/investment`** | **Production Ready** | Autonomous Investment Pilot | Add dynamic virtual capital ledger (NT$100,000) and monthly self-review cycle. |
-| **`internal/recovery`** | **Functional Prototype**| Complete Context Reconstruction | Expand from basic task reset to full Project & Goal Context Reconstruction. |
-| **`internal/orchestrator`** | **Functional Prototype**| PersonalAgent Coordination | Refactor PersonalAgent to delegate to the shared `internal/autonomy/` package. |
-| **`internal/policy`** | **Functional Prototype**| G0~G3 Governance Engine | Separate Policy (rules), Approval (human gates), and Permission (OS boundary). |
+| **`internal/continuity`** | **Production Ready (Phase 1)** | Context Reconstruction Engine | Reconstructs project state, goals, pending issues, snapshot, and decisions after restart. |
+| **`internal/service/knowledge`** | **Production Ready (Phase 1)** | Provenance & Knowledge Integrity | 5D source evaluation, evidence management, claim revisions, AIA-16 Rule 5 promotion guard, decision backtrack. |
+| **`internal/domain/goal`** | **Production Ready (Phase 1)** | Goal Hierarchy & Evolution | Goal domain model, revisions, status machine (`DRAFT` to `ABANDONED`), M:N project links. |
+| **`internal/domain/continuity`** | **Production Ready (Phase 1)** | Event Store & Snapshots | Append-only hash chain event history, sanitized context snapshots (`GLOBAL` / `PROJECT`). |
+| **`internal/domain/decision`** | **Production Ready (Phase 1)** | Decision & Evidence Linking | Decision model supporting `NO_ACTION`, rationale justification, and evidence links. |
+| **`internal/domain/knowledge`** | **Production Ready (Phase 1)** | Provenance, Sources & Claims | Source 5D scoring, Evidence capture methods, Claim revision tracking. |
+| **`internal/domain/governance`** | **Production Ready (Phase 2)** | Governance Models & Controls | Approvals model, risk tiers, runtime controls, strict actor human authorization. |
+| **`internal/service/approval`** | **Production Ready (Phase 2)** | Operational Approval Gates | Scope-bound approvals (Task/Decision), anti-self-approval enforcement, timeout policies. |
+| **`internal/service/governance`** | **Production Ready (Phase 2)** | Runtime Governance & Emergency Stop | Controlled Emergency Stop, dispatch freeze, human-only resume verification. |
+| **`internal/storage/sqlite`** | **Production Ready** | Multi-schema persistence | Migrations 001~009 fully implemented with triggers, audit columns, and runtime controls. |
+| **`internal/cli`** | **Production Ready (Phase 2)** | CLI Administration & Tracing | Added `aia decision`, `aia approval (list|get|approve|reject)`, and `aia stop / resume`. |
+| **`internal/worker`** | **Production Ready (Phase 2)** | Runtime Concurrency Manager | Controlled Emergency Stop (<1s dispatch freeze, context cancellation, CANCELLED task persistence). |
+| **`internal/web/console`** | **Production Ready (Phase 2)** | Console REST API & Governance | Added Emergency Stop, Resume Dispatch, and Unified Pending Approvals (`/api/v1/approvals`). |
+| **`internal/service/investment`** | **Production Ready** | Autonomous Investment Pilot | Dynamic virtual capital ledger (NT$100,000) and monthly self-review cycle. |
+| **`internal/recovery`** | **Production Ready (Phase 1)**| Complete Context Reconstruction | Task recovery integrated with project & goal context continuity. |
+| **`internal/policy`** | **Production Ready (Phase 2)**| Operational Governance Policy | Whitelist boundaries, financial transaction lock, separation of Policy/Approval/Permission. |
+| **`internal/orchestrator`** | **Functional Prototype**| PersonalAgent Coordination | Next (Phase 3): Refactor PersonalAgent to delegate to the shared `internal/autonomy/` package. |
 | **`internal/autonomy`** | **Missing (Phase 3)** | 11-step Autonomy Loop | Implement `internal/autonomy/` (Observe ➔ Reassess) with `NO_ACTION` decision. |
-| **`internal/domain/goal`** | **Missing (Phase 1)** | Goal Tree & Evolution | Implement Goal entity, revision history, and decomposition models. |
-| **`internal/evidence`** | **Missing (Phase 1)** | Provenance & Claims | Implement Evidence registry, Claim validation, and Source reliability tagging. |
 
 ---
 
 ## 3. Database Schema Status
 
-### Active Tables (Migrations 001 ~ 003)
+### Active Tables (Migrations 001 ~ 009)
 - `agents`: Registered agents, capabilities, configurations.
 - `tasks`: Work units, status machine (`READY`, `RUNNING`, `COMPLETED`, `WAITING_APPROVAL`).
 - `task_dependencies`: Inter-task DAG dependencies.
 - `executions`: Task execution instances and status codes.
 - `execution_events`: Execution log stream and events.
-- `memories`: Stored long-term memories.
+- `memories`: Stored long-term memories with multi-dimensional provenance columns (`provenance_type`, `provenance_ref_type`, `provenance_ref_id`, `provenance_status`).
 - `memory_candidates`: Pending insights awaiting promotion.
-- `projects`: Workspace directory registrations.
+- `projects`: Workspace directory registrations with continuity fields (`primary_goal_id`, `latest_snapshot_id`, `pending_issues_json`).
 - `artifacts`: Generated artifacts and file hashes.
-- `audit_logs`: System audit trail.
+- `audit_logs`: System audit trail, expanded in 009 with `policy_id`, `decision_id`, `approval_id`, `risk_tier`, `governance_action`.
 - `schedule_rules`: Periodic cron and interval rules.
 - `investment_*` (11 tables): Portfolios, positions, open orders, decisions, evidence, predictions.
+- `event_history`: Append-only immutable event store with SHA-256 hash chaining and SQLite `ABORT` triggers (Migration 007).
+- `sources`: Data origins with 5-dimensional reliability scores (Authority, Directness, Timeliness, Independence, Reproducibility) (Migration 007).
+- `evidence`: Grounded excerpts with capture method, data version, content hash, and temporal validity (Migration 007).
+- `claims`, `claim_revisions`, `claim_evidence_links`: Testable assertions and immutable revision rationales (Migration 007).
+- `autonomy_cycles`: Temporal autonomy hub tracking cycle numbers, triggers, and execution lifecycle (Migration 008).
+- `goals`, `goal_revisions`, `goal_project_links`: Multi-level goal tree with status machine and M:N project mapping (Migration 008).
+- `context_snapshots`: Sanitized workspace environment, pending issues, and active task states (Migration 008).
+- `decisions`, `decision_evidence_links`: Deliberative choices supporting `NO_ACTION`, governance results, and evidence links (Migration 008).
+- `approvals`: Scope-bound human approval gates (Migration 009).
+- `runtime_controls`: Single-row global dispatch control with anti-deletion trigger (Migration 009).
 
-### Planned Schemas (Phases 1 ～ 5)
-- `event_history` (Append-only immutable event log) ── *Phase 1 (Migration 004)*
-- `sources`, `evidence`, `claims`, `claim_evidence_links` ── *Phase 1 (Migration 004)*
-- `goals`, `goal_revisions`, `context_snapshots` ── *Phase 1 (Migration 005)*
-- `approvals`, `policy_audit_logs` ── *Phase 2 (Migration 006)*
-- `candidate_initiatives`, `decisions` ── *Phase 3 (Migration 007)*
-- `outcome_evaluations`, `root_cause_analyses`, `correction_actions` ── *Phase 4 (Migration 008)*
-- `experiments`, `delegation_requests` ── *Phase 5 (Migration 009)*
+### Planned Schemas (Phases 3 ～ 5)
+- `candidate_initiatives` ── *Phase 3 (Migration 010)*
+- `outcome_evaluations`, `root_cause_analyses`, `correction_actions` ── *Phase 4 (Migration 011)*
+- `experiments`, `delegation_requests` ── *Phase 5 (Migration 012)*

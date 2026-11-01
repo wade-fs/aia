@@ -19,6 +19,9 @@ func All() []Migration {
 		{Version: 4, Name: "investment_data_pipeline", SQL: InvestmentDataPipeline},
 		{Version: 5, Name: "investment_predictions_and_evaluations", SQL: InvestmentPredictionsAndEvaluations},
 		{Version: 6, Name: "schedules_and_automation", SQL: SchedulesAndAutomation},
+		{Version: 7, Name: "event_history_and_provenance", SQL: EventHistoryAndProvenance},
+		{Version: 8, Name: "goals_decisions_and_continuity", SQL: GoalsDecisionsAndContinuity},
+		{Version: 9, Name: "governance_and_approvals", SQL: GovernanceAndApprovals},
 	}
 }
 

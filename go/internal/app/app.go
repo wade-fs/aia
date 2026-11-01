@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/wade/aia/internal/config"
+	"github.com/wade/aia/internal/continuity"
 	"github.com/wade/aia/internal/domain"
 	"github.com/wade/aia/internal/domain/agent"
 	"github.com/wade/aia/internal/domain/task"
@@ -18,8 +19,11 @@ import (
 	"github.com/wade/aia/internal/provider/antigravity"
 	"github.com/wade/aia/internal/recovery"
 	agentService "github.com/wade/aia/internal/service/agent"
+	approvalService "github.com/wade/aia/internal/service/approval"
 	execService "github.com/wade/aia/internal/service/execution"
+	govService "github.com/wade/aia/internal/service/governance"
 	invService "github.com/wade/aia/internal/service/investment"
+	knowledgeService "github.com/wade/aia/internal/service/knowledge"
 	memoryService "github.com/wade/aia/internal/service/memory"
 	projectService "github.com/wade/aia/internal/service/project"
 	scheduleService "github.com/wade/aia/internal/service/schedule"
@@ -36,27 +40,39 @@ import (
 )
 
 type App struct {
-	Config        *config.Config
-	DB            *sqlite.DB
-	Provider      provider.Provider
-	WorkspaceMgr  *workspace.Manager
-	ProjectSvc    *projectService.Service
-	AgentSvc      *agentService.Service
-	TaskSvc       *taskService.Service
-	ExecutionSvc  *execService.Service
-	MemorySvc     *memoryService.Service
-	AuditRepo     *repository.AuditRepository
-	EventBus      *eventbus.Bus
-	InvRepo       *repository.InvestmentRepository
-	InvDataRepo   *repository.InvestmentDataRepository
-	InvSvc        *invService.Service
-	CollectorSvc  *invService.DataCollectorService
-	ScheduleRepo  *repository.ScheduleRepository
-	ScheduleSvc   *scheduleService.Service
-	RecoveryMgr   *recovery.Manager
-	Scheduler     *orchestrator.Scheduler
-	PersonalAgent *orchestrator.PersonalAgent
-	WorkerMgr     *worker.Manager
+	Config           *config.Config
+	DB               *sqlite.DB
+	Provider         provider.Provider
+	WorkspaceMgr     *workspace.Manager
+	ProjectSvc       *projectService.Service
+	AgentSvc         *agentService.Service
+	TaskSvc          *taskService.Service
+	ExecutionSvc     *execService.Service
+	MemorySvc        *memoryService.Service
+	AuditRepo        *repository.AuditRepository
+	EventBus         *eventbus.Bus
+	InvRepo          *repository.InvestmentRepository
+	InvDataRepo      *repository.InvestmentDataRepository
+	InvSvc           *invService.Service
+	CollectorSvc     *invService.DataCollectorService
+	ScheduleRepo     *repository.ScheduleRepository
+	ScheduleSvc      *scheduleService.Service
+	RecoveryMgr      *recovery.Manager
+	Scheduler        *orchestrator.Scheduler
+	PersonalAgent    *orchestrator.PersonalAgent
+	WorkerMgr        *worker.Manager
+	ContinuityRepo   *repository.ContinuityRepository
+	GoalRepo         *repository.GoalRepository
+	DecisionRepo     *repository.DecisionRepository
+	EventHistoryRepo *repository.EventHistoryRepository
+	KnowledgeRepo    *repository.KnowledgeRepository
+	Reconstructor    *continuity.Reconstructor
+	KnowledgeSvc     *knowledgeService.Service
+	ApprovalRepo     *repository.ApprovalRepository
+	ApprovalSvc      *approvalService.Service
+	GovernanceRepo   *repository.GovernanceRepository
+	GovernanceSvc    *govService.Service
+	PolicyEvaluator  *policy.Evaluator
 }
 
 func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
@@ -83,6 +99,13 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	invRepo := repository.NewInvestmentRepository(db)
 	invDataRepo := repository.NewInvestmentDataRepository(db)
 	schedRepo := repository.NewScheduleRepository(db)
+	continuityRepo := repository.NewContinuityRepository(db)
+	goalRepo := repository.NewGoalRepository(db)
+	decisionRepo := repository.NewDecisionRepository(db)
+	eventHistoryRepo := repository.NewEventHistoryRepository(db)
+	knowledgeRepo := repository.NewKnowledgeRepository(db)
+	approvalRepo := repository.NewApprovalRepository(db)
+	govRepo := repository.NewGovernanceRepository(db)
 
 	taskRepo.SetChangeHook(func(ctx context.Context, taskID domain.ID, status task.TaskStatus, created bool) {
 		if bus != nil {
@@ -126,6 +149,9 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	invSvc := invService.NewService(invRepo, auditRepo, bus)
 	collectorSvc := invService.NewDataCollectorService(invDataRepo, invRepo)
 	schedSvc := scheduleService.NewService(schedRepo, taskSvc, bus)
+	reconstructor := continuity.NewReconstructor(continuityRepo, goalRepo, decisionRepo, eventHistoryRepo, projRepo)
+	knowledgeSvc := knowledgeService.NewService(knowledgeRepo, decisionRepo, continuityRepo)
+	approvalSvc := approvalService.NewService(approvalRepo, taskSvc, auditRepo, bus)
 
 	// 6. Recovery
 	recMgr := recovery.NewManager(taskRepo, execRepo, auditRepo)
@@ -133,9 +159,11 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	recMgr.SetWorkspaceManager(wsMgr)
 	recMgr.SetArtifactRepository(artRepo)
 
-	// 7. Orchestrator & Memory Retrieval
+	// 7. Orchestrator, Policy Evaluator, Governance Service & Memory Retrieval
 	retriever := retrieval.NewRetriever(memRepo, cfg.Memory)
-	evaluator := policy.NewEvaluator()
+	evaluator := policy.NewEvaluatorWithOptions(auditRepo, nil, 0)
+	govSvc := govService.NewService(govRepo, auditRepo, evaluator, bus)
+
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	pa := orchestrator.NewPersonalAgent(prov, retriever, taskSvc, scheduler, evaluator)
 
@@ -151,29 +179,42 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		bus,
 		auditRepo,
 	)
+	workerMgr.SetGovernanceService(govSvc)
 
 	a := &App{
-		Config:        cfg,
-		DB:            db,
-		Provider:      prov,
-		WorkspaceMgr:  wsMgr,
-		ProjectSvc:    projSvc,
-		AgentSvc:      agSvc,
-		TaskSvc:       taskSvc,
-		ExecutionSvc:  execSvc,
-		MemorySvc:     memSvc,
-		AuditRepo:     auditRepo,
-		EventBus:      bus,
-		InvRepo:       invRepo,
-		InvDataRepo:   invDataRepo,
-		InvSvc:        invSvc,
-		CollectorSvc:  collectorSvc,
-		ScheduleRepo:  schedRepo,
-		ScheduleSvc:   schedSvc,
-		RecoveryMgr:   recMgr,
-		Scheduler:     scheduler,
-		PersonalAgent: pa,
-		WorkerMgr:     workerMgr,
+		Config:           cfg,
+		DB:               db,
+		Provider:         prov,
+		WorkspaceMgr:     wsMgr,
+		ProjectSvc:       projSvc,
+		AgentSvc:         agSvc,
+		TaskSvc:          taskSvc,
+		ExecutionSvc:     execSvc,
+		MemorySvc:        memSvc,
+		AuditRepo:        auditRepo,
+		EventBus:         bus,
+		InvRepo:          invRepo,
+		InvDataRepo:      invDataRepo,
+		InvSvc:           invSvc,
+		CollectorSvc:     collectorSvc,
+		ScheduleRepo:     schedRepo,
+		ScheduleSvc:      schedSvc,
+		RecoveryMgr:      recMgr,
+		Scheduler:        scheduler,
+		PersonalAgent:    pa,
+		WorkerMgr:        workerMgr,
+		ContinuityRepo:   continuityRepo,
+		GoalRepo:         goalRepo,
+		DecisionRepo:     decisionRepo,
+		EventHistoryRepo: eventHistoryRepo,
+		KnowledgeRepo:    knowledgeRepo,
+		Reconstructor:    reconstructor,
+		KnowledgeSvc:     knowledgeSvc,
+		ApprovalRepo:     approvalRepo,
+		ApprovalSvc:      approvalSvc,
+		GovernanceRepo:   govRepo,
+		GovernanceSvc:    govSvc,
+		PolicyEvaluator:  evaluator,
 	}
 
 	// Seed default domain agents, default project & recurring schedules
@@ -220,15 +261,17 @@ func (a *App) CreateWebHost() (*host.Host, string, error) {
 
 	// 1. Register Global Console Routes
 	console.RegisterConsoleRoutes(h.APIMux(), &console.ConsoleServices{
-		TaskSvc:   a.TaskSvc,
-		AgentSvc:  a.AgentSvc,
-		MemorySvc: a.MemorySvc,
-		AuditRepo: a.AuditRepo,
-		InvSvc:    a.InvSvc,
-		DB:        a.DB,
-		Provider:  a.Provider,
-		Host:      h,
-		WorkerMgr: a.WorkerMgr,
+		TaskSvc:       a.TaskSvc,
+		AgentSvc:      a.AgentSvc,
+		MemorySvc:     a.MemorySvc,
+		AuditRepo:     a.AuditRepo,
+		InvSvc:        a.InvSvc,
+		DB:            a.DB,
+		Provider:      a.Provider,
+		Host:          h,
+		WorkerMgr:     a.WorkerMgr,
+		ApprovalSvc:   a.ApprovalSvc,
+		GovernanceSvc: a.GovernanceSvc,
 	})
 
 	// 2. Register Agent Modules with isolated dedicated muxes

@@ -75,6 +75,8 @@ Memory 可以記錄：
 
 因此，Memory 是 Continuity 的資料來源之一，不是完整的 Continuity 系統。
 
+依據 [Consistent Memory Architecture (docs/memory.md)](file:///home/wade/src/github/aia/docs/memory.md)，Continuity 體系建立在四種記憶（情節、語意、程序、工作）與五層權威體系（L1 Event History ➔ L2 Evidence & Provenance ➔ L3 Knowledge & Memory ➔ L4 Context & Project State ➔ L5 Active Context）之上，貫徹「歷史不可改寫，理解可以版本化修正」的核心原則。
+
 ## 2.3 Project 不等於 Task
 
 Task 是可以執行、完成、失敗或取消的工作單位。

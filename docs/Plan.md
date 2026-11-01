@@ -52,6 +52,33 @@ AIA 嚴禁職責混淆，嚴防 Worker 演變為決策核心：
 | **Experiment** (長週期實驗) | Experiment 資料表能記錄工單 | 能持續數週/數月維持對照假設驗證、累積數據並產出統計結論 |
 | **Self-Modification** (代碼自修) | 程式能向磁碟寫入 Go 代碼 | 能在獨立隔離沙盒內自主修復工具邊界缺陷、通過全套驗證、受控部署且異常自動回滾 |
 
+### 0.5 一致性記憶與認知架構 (Consistent Memory Architecture)
+依據 [docs/memory.md](file:///home/wade/src/github/aia/docs/memory.md)，AIA 的時間連續性不等於保持 Session 不關閉，更不等於將所有字串塞入 Context 視窗；記憶系統的核心是**「歷史不可改寫，理解可以版本化修正」**。
+
+#### A. 四種記憶類型嚴格劃分 (4 Memory Types)
+1. **情節記憶 (Episodic Memory)**：曾經發生的不可變歷史事實（如：某日做出何種決策、執行了何項任務、產生的客觀結果）。
+2. **語意記憶 (Semantic Memory)**：已知的事實、定義、知識主張（如：台積電股票代號為 2330；可隨新證據修訂版本）。
+3. **程序記憶 (Procedural Memory)**：如何完成特定工作的技能、規範與演算法（如：如何執行投資風控、代碼測試流程）。
+4. **工作記憶 (Working Memory)**：當前 Session / Task 正在處理的工作區狀態與未決問題（如：當前待排查之編譯錯誤、未完成事項）。
+
+#### B. 五層記憶權威體系 (L1～L5 Authority Hierarchy)
+AIA 記憶嚴格遵循單向不可逆權威約制，低層狀態永遠不能擅自修改高層歷史：
+- **`L1 — Event History` (最高權威事實)**：不可竄改的歷史事實事件流。記錄「發生了什麼、何時發生、由誰做出決策」，由應用層與資料庫防竄改 Triggers 嚴密保護。
+- **`L2 — Evidence & Provenance` (證據與來源鏈)**：資料來源（五維信賴度評分）與證據碎片。記錄「資訊從何而來、是否可信、何時有效」。
+- **`L3 — Knowledge & Memory` (知識與認知網)**：經過評估的主張、推論、假設與記憶。支援衝突共存（保留不同主張）與版本修訂，嚴禁模型輸出自動升級為事實。
+- **`L4 — Context & Project State` (專案脈絡與工作狀態)**：專案進行進度、長期目標階層、人物關係、未決問題 (Pending Issues)，支援透過快照與重構引擎完整重建。
+- **`L5 — Active Context` (工作視窗記憶)**：當前 Agent 執行任務時所召回並脫敏之相關記憶，拒絕無差別塞滿 Context Window。
+
+#### C. 記憶治理核心子系統 (Memory Integrity & Governance)
+Autonomy Core 統一提供九大記憶治理職責：**Memory Write Control (寫入控制)、Memory Classification (記憶分類)、Provenance Management (來源追溯)、Temporal Management (時效管理)、Conflict Detection (衝突偵測)、Memory Reconciliation (修復對齊)、Context Reconstruction (脈絡重建)、Consistency Audit (一致性審計)、Memory Retrieval (關聯召回)**。
+
+#### D. 三大領域 Agent 記憶檢驗五大成功標準
+1. **不失憶**：已發生的重要事件與決策理由永久可追溯。
+2. **不亂記**：事實、推論、假設、意見不可混淆。
+3. **不亂改**：歷史不可覆寫，認知可以版本化修正（保留完整因果鏈：`原始決策 ➔ 實際結果 ➔ 重新分析 ➔ 修正認知 ➔ 後續驗證`）。
+4. **不混淆**：跨專案、跨時間、跨領域（Investment / Coding / Writing）記憶邊界分明。
+5. **不停止學習**：新經驗能修正舊認知，並主動影響未來的判斷。
+
 ---
 
 ## 1. 戰略定位與規劃核心哲學 (Strategic Positioning & Philosophy)
@@ -242,12 +269,12 @@ flowchart TD
 > - **基準確立 (Baseline Established)**：Git commit `7597902` 為程式碼基準，此為固定歷史事實。
 > - **M0 驗收通過 (M0 Verified)**：需實際執行以下測試通過後，方算達成 M0。
 
-- [ ] 執行 `cd go && go test ./...` 測試 100% 通過（包含 unit + integration）。
-- [ ] 系統可啟動、CLI 與 Web Console 指令正常運作，無 Regression。
-- [ ] 刻意以 `kill -9` 終止後重啟，Worker 狀態與 Task 紀錄能正確還原（不崩潰、不丟失）。
-- [ ] `docs/` 所有子目錄與 [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) 的術語、角色與藍圖達成 100% 一致。
-- [ ] 完成 **Phase 1 開工前 7 大確認事項**（Event History 防竄改、Memory Provenance 邏輯、Source 多維評估、Goal/Experiment 狀態機、C0~C5 授權分離、Autonomy Cycle 樞紐、Migration 007~012 欄位對齊）。
-- [ ] 清楚界定現有程式碼與目標架構的具體差距，並通過代碼映射表確認無模糊地帶。
+- [x] 執行 `cd go && go test ./...` 測試 100% 通過（包含 unit + integration）。
+- [x] 系統可啟動、CLI 與 Web Console 指令正常運作，無 Regression。
+- [x] 刻意以 `kill -9` 終止後重啟，Worker 狀態與 Task 紀錄能正確還原（不崩潰、不丟失）。
+- [x] `docs/` 所有子目錄與 [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) 的術語、角色與藍圖達成 100% 一致。
+- [x] 完成 **Phase 1 開工前 7 大確認事項**（Event History 防竄改、Memory Provenance 邏輯、Source 多維評估、Goal/Experiment 狀態機、C0~C5 授權分離、Autonomy Cycle 樞紐、Migration 007~012 欄位對齊）。
+- [x] 清楚界定現有程式碼與目標架構的具體差距，並通過代碼映射表確認無模糊地帶。
 
 ---
 
@@ -302,8 +329,8 @@ Autonomy Cycle (自主循環核心樞紐)
    - 實作資料來源檢驗邏輯，嚴禁模型生成內容自動標記為 Verified Knowledge。
 
 #### 5. 行為驗收標準 (Milestone M1 & M2)
-- [ ] **斷電/重啟恢復驗證**：在背景 Worker 執行專案任務途中強制終止程序 (`kill -9`)，重啟 AIA 後能完整還原專案狀態、未完成事項與歷史脈絡。
-- [ ] **決策回溯驗證**：任意查詢一筆決策事件，系統能精確列出其當時引用的 Context 快照、支持 Evidence（若有）、以及完整 Provenance 鏈；能夠重建判斷依據，但不要求每個斷言都必須有外部 Evidence 作為錨點。
+- [x] **斷電/重啟恢復驗證**：在背景 Worker 執行專案任務途中強制終止程序 (`kill -9`)，重啟 AIA 後能完整還原專案狀態、未完成事項與歷史脈絡。
+- [x] **決策回溯驗證**：任意查詢一筆決策事件，系統能精確列出其當時引用的 Context 快照、支持 Evidence（若有）、以及完整 Provenance 鏈；能夠重建判斷依據，但不要求每個斷言都必須有外部 Evidence 作為錨點。
 
 ---
 
@@ -337,9 +364,9 @@ Autonomy Cycle (自主循環核心樞紐)
    - CLI 提供 `aia approval list|approve|reject` 與 `aia stop --emergency`。
 
 #### 5. 行為驗收標準
-- [ ] 模擬 Agent 嘗試觸發高風險行為（如讀寫非白名單目錄），Policy Engine 必定予以攔截並產出 Audit 日誌。
-- [ ] Agent 絕對無法透過自身命令越權通過審批。
-- [ ] 觸發 Emergency Stop 後，1 秒內派發隊列凍結；正在執行工作的 Task 狀態持久化為 `CANCELLED`；子程序 10 秒內受控終止；無 SQLite 事務死鎖或半寫入損壞。
+- [x] 模擬 Agent 嘗試觸發高風險行為（如讀寫非白名單目錄），Policy Engine 必定予以攔截並產出 Audit 日誌。
+- [x] Agent 絕對無法透過自身命令越權通過審批。
+- [x] 觸發 Emergency Stop 後，1 秒內派發隊列凍結；正在執行工作的 Task 狀態持久化為 `CANCELLED`；子程序 10 秒內受控終止；無 SQLite 事務死鎖或半寫入損壞。
 
 ---
 
@@ -379,6 +406,7 @@ Autonomy Cycle (自主循環核心樞紐)
 #### 4. 關鍵實作項目
 1. **Autonomy Core 模組結構 (`internal/autonomy/`)**：
    - `observation/`：整合各領域環境變動監聽器。
+   - `recall/`：實作 L1～L5 關聯式召回 (Associative Retrieval) 與記憶治理防記錯機制，取代單純關鍵字搜尋。
    - `initiative/`：候選問題探索器。
    - `deliberation/`：決策推演器，具備 No-Action 判定。
    - `cycle/`：協調 11 步驟閉環的生命週期調度器（含 Governance Check 獨立閘道）。
@@ -496,8 +524,11 @@ Expected Outcome (預期成效) vs Actual Outcome (實際成效)
    - 管理假設 (Hypothesis)、對照組、評估指標與長期實驗存檔。
 
 #### 5. 行為驗收標準 (Milestone M7)
-- [ ] **投資自主運作**：Investment Agent 能夠跨月持續維持虛擬部位自主運作，且無人工介入完成每月覆盤報告。
+- [ ] **投資自主運作**：Investment Agent 能夠跨月持續維持虛擬部位自主運作，且無人工介入完成每月覆盤報告；記得每次買賣理由、當時市場資訊、預測與實際結果，不因後續損益竄改原始判斷。
 - [ ] **跨領域委派成功**：Writing Agent 能成功委託 Coding Agent 開發專屬史料驗證腳本，並將產出工具應用於文本校勘。
+- [ ] **領域記憶一致性檢驗 (Consistent Memory Audit)**：
+  - **Coding Agent**：牢記專案架構、修改歷史、錯誤原因與修正方法，在相同情境下絕不重複犯已知缺陷。
+  - **Writing Agent**：管理人物年表、歷史事件與使用者確認的世界觀，能主動檢出跨卷矛盾並提出修訂，絕不因生成需求破壞既有設定。
 
 ---
 

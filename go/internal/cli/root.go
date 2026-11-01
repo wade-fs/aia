@@ -61,6 +61,10 @@ func init() {
 	RootCmd.AddCommand(scheduleCmd)
 	RootCmd.AddCommand(workerCmd)
 	RootCmd.AddCommand(monitorCmd)
+	RootCmd.AddCommand(decisionCmd)
+	RootCmd.AddCommand(approvalCmd)
+	RootCmd.AddCommand(stopCmd)
+	RootCmd.AddCommand(resumeCmd)
 }
 
 var versionCmd = &cobra.Command{

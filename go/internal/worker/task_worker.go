@@ -44,7 +44,7 @@ func (w *TaskWorker) Run(ctx context.Context) {
 			slog.Info("task worker received stop signal")
 			return
 		case <-ticker.C:
-			if !w.mgr.cfg.AutoExecuteEnabled {
+			if !w.mgr.cfg.AutoExecuteEnabled || w.mgr.IsEmergencyStopped() {
 				continue
 			}
 			_, _ = w.processPendingTasks(ctx)
@@ -56,6 +56,10 @@ func (w *TaskWorker) Run(ctx context.Context) {
 func (w *TaskWorker) processPendingTasks(ctx context.Context) (int, error) {
 	if w.mgr.taskSvc == nil {
 		return 0, nil
+	}
+
+	if w.mgr.IsEmergencyStopped() {
+		return 0, ErrEmergencyStopActive
 	}
 
 	readyTasks, err := w.mgr.taskSvc.List(ctx, repository.TaskFilter{Status: task.StatusReady})
@@ -73,6 +77,11 @@ func (w *TaskWorker) processPendingTasks(ctx context.Context) (int, error) {
 	var mu sync.Mutex
 
 	for _, t := range readyTasks {
+		// Stop immediately if emergency stop or context cancelled
+		if w.mgr.IsEmergencyStopped() {
+			break
+		}
+
 		select {
 		case <-ctx.Done():
 			break
@@ -95,7 +104,15 @@ func (w *TaskWorker) processPendingTasks(ctx context.Context) (int, error) {
 			w.mgr.stats.LastTaskExecutionAt = &now
 			w.mgr.mu.Unlock()
 
-			if err := w.executeTask(ctx, &targetTask); err != nil {
+			// Create a task-specific cancellable context registered with the manager
+			taskCtx, cancelTask := context.WithCancel(ctx)
+			w.mgr.registerRunningTask(targetTask.ID, cancelTask)
+			defer func() {
+				w.mgr.unregisterRunningTask(targetTask.ID)
+				cancelTask()
+			}()
+
+			if err := w.executeTask(taskCtx, &targetTask); err != nil {
 				slog.Error("task execution error", "task_id", targetTask.ID, "title", targetTask.Title, "error", err)
 				w.mgr.mu.Lock()
 				w.mgr.stats.TasksFailed++
@@ -121,6 +138,14 @@ func (w *TaskWorker) processPendingTasks(ctx context.Context) (int, error) {
 // a Prediction Verification task, an Investment Research task (Materiality Gated),
 // or a general LLM Agent task.
 func (w *TaskWorker) executeTask(ctx context.Context, t *task.Task) error {
+	// Check if already cancelled
+	select {
+	case <-ctx.Done():
+		_ = w.mgr.taskSvc.UpdateStatus(context.Background(), t.ID, task.StatusCancelled)
+		return ctx.Err()
+	default:
+	}
+
 	// Mark RUNNING
 	_ = w.mgr.taskSvc.UpdateStatus(ctx, t.ID, task.StatusRunning)
 
@@ -153,6 +178,12 @@ func (w *TaskWorker) executeTask(ctx context.Context, t *task.Task) error {
 	}
 
 	if execErr != nil {
+		// If cancelled by emergency stop or context, update status to CANCELLED directly
+		if ctx.Err() != nil {
+			_ = w.mgr.taskSvc.UpdateStatus(context.Background(), t.ID, task.StatusCancelled)
+			return execErr
+		}
+
 		if t.RetryCount < t.MaxRetries {
 			t.RetryCount++
 			t.Status = task.StatusReady
@@ -195,6 +226,11 @@ func (w *TaskWorker) executeDataCollectionTask(ctx context.Context, t *task.Task
 	// 1. TWSE / TPEx daily market close quotes
 	if acceptance["twse_sync"] || acceptance["data_collection"] || strings.Contains(strings.ToLower(t.Title), "twse") {
 		for _, sym := range symbols {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 			if w.mgr.invSvc != nil {
 				if bar, err := w.mgr.invSvc.SyncMarketData(ctx, sym); err == nil && bar != nil {
 					collectedBars++
@@ -209,6 +245,11 @@ func (w *TaskWorker) executeDataCollectionTask(ctx context.Context, t *task.Task
 	// 2. MOPS Corporate Announcements
 	if acceptance["mops_sync"] || strings.Contains(strings.ToLower(t.Title), "mops") {
 		for _, sym := range symbols {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 			if w.mgr.invSvc != nil {
 				if docs, err := w.mgr.invSvc.SyncAnnouncements(ctx, sym); err == nil {
 					collectedDocs += len(docs)
@@ -326,6 +367,12 @@ func (w *TaskWorker) executeInvestmentResearchTask(ctx context.Context, t *task.
 	cfg := invService.DefaultMaterialityConfig()
 
 	for _, sym := range symbols {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		matRes, err := w.mgr.invSvc.EvaluateMateriality(ctx, sym, cfg)
 		if err != nil {
 			slog.Warn("materiality evaluation error for symbol", "symbol", sym, "error", err)

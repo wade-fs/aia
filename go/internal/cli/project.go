@@ -78,6 +78,27 @@ var projectShowCmd = &cobra.Command{
 		fmt.Printf("Workspace:   %s\n", p.Workspace)
 		fmt.Printf("Description: %s\n", p.Description)
 		fmt.Printf("Created At:  %s\n", p.CreatedAt.Format("2006-01-02 15:04:05"))
+
+		if appInst != nil && appInst.Reconstructor != nil {
+			if recon, err := appInst.Reconstructor.ReconstructProjectState(ctx, string(p.ID)); err == nil && recon != nil {
+				if len(recon.ActiveGoals) > 0 {
+					fmt.Println("\n--- Active Goals ---")
+					for _, g := range recon.ActiveGoals {
+						fmt.Printf("• [%s] %s (%s, priority %d)\n", g.Level, g.Name, g.Status, g.Priority)
+					}
+				}
+				if len(recon.PendingIssues) > 0 {
+					fmt.Println("\n--- Pending Issues ---")
+					for _, issue := range recon.PendingIssues {
+						fmt.Printf("• %s\n", issue)
+					}
+				}
+				if recon.LatestSnapshot != nil {
+					fmt.Printf("\nLatest Snapshot: %s (%s, captured %s)\n",
+						recon.LatestSnapshot.ID, recon.LatestSnapshot.SnapshotType, recon.LatestSnapshot.CreatedAt.Format("2006-01-02 15:04:05"))
+				}
+			}
+		}
 		return nil
 	},
 }

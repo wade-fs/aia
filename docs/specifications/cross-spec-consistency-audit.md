@@ -33,8 +33,9 @@ AIA 規格體系（AIA-00 至 AIA-19，共計 20 份文件、27,500+ 行）完�
 ├───────────────────┬───────────────────┬────────────────────────────────┤
 │ 稽核項目          │ 涉及衝突規格      │ 權威統一判定 (Authoritative)   │
 ├───────────────────┼───────────────────┼────────────────────────────────┤
-│ 1. 自修分級名詞   │ AIA-00 vs AIA-14  │ 修改範圍採 Level A/B/C；       │
-│                   │                   │ 驗證深度採 Level 1~6           │
+│ 1. 自修分級名詞   │ AIA-00 vs AIA-14  │ 修改範圍採 Scope A/B/C；       │
+│                   │                   │ 修正類型採 C1~C6；             │
+│                   │                   │ 驗證深度採 V1~V6               │
 ├───────────────────┼───────────────────┼────────────────────────────────┤
 │ 2. 治理分層體系   │ AIA-17 vs AIA-18  │ G0~G3 專指治理層級，           │
 │                   │                   │ 不用於實作階段命名             │
@@ -42,14 +43,26 @@ AIA 規格體系（AIA-00 至 AIA-19，共計 20 份文件、27,500+ 行）完�
 │ 3. 自主核心閉環   │ AIA-00/13 vs      │ 採 AIA-18 之 11 步驟閉環，     │
 │                   │ AIA-18            │ 將 Governance Check 顯式列出   │
 ├───────────────────┼───────────────────┼────────────────────────────────┤
-│ 4. 實體責任邊界   │ AIA-09/10/15/18   │ Goal(目標) ➔ Project(成果) ➔   │
-│                   │                   │ Experiment(驗證) ➔ Task(執行)  │
+│ 4. 實體責任邊界   │ AIA-09/10/15/18   │ Goal ↔ Project 採 M:N 關聯；   │
+│                   │                   │ 四實體邊界互不侵犯             │
 ├───────────────────┼───────────────────┼────────────────────────────────┤
-│ 5. 知識溯源關聯   │ AIA-10 vs AIA-16  │ Memory 不強制外鍵 Evidence，   │
-│                   │                   │ 採 Provenance 來源圖譜關聯     │
+│ 5. 知識溯源關聯   │ AIA-10 vs AIA-16  │ Memory 不強制外鍵，採多型      │
+│                   │                   │ Provenance (ref_type + ref_id) │
 ├───────────────────┼───────────────────┼────────────────────────────────┤
-│ 6. 緊急停止規範   │ AIA-17 vs AIA-19  │ 1秒內凍結派發，運行中工作      │
-│                   │                   │ 發出 Context 取消並受控收尾    │
+│ 6. 緊急停止規範   │ AIA-17 vs AIA-19  │ 1秒凍結派發，Task 標記 CANCEL，│
+│                   │                   │ 事務安全，子程序 10 秒受控終止 │
+├───────────────────┼───────────────────┼────────────────────────────────┤
+│ 7. 三事件軌職責   │ AIA-03 vs AIA-10  │ execution_events (工單微觀) vs │
+│                   │ vs AIA-17         │ event_history (系統/業務宏觀)  │
+│                   │                   │ vs audit_logs (受治理操作)     │
+├───────────────────┼───────────────────┼────────────────────────────────┤
+│ 8. 稽核日誌架構   │ AIA-17 vs 既有庫  │ 擴充既有 audit_logs 表，       │
+│                   │                   │ 不開闢重複 policy_audit_logs   │
+├───────────────────┼───────────────────┼────────────────────────────────┤
+│ 9. 決策模型落地   │ AIA-08 vs AIA-10  │ decisions 於 Phase 1 落地模型  │
+│                   │                   │ Phase 3 實作主動推演引擎       │
+├───────────────────┼───────────────────┼────────────────────────────────┤
+│ 10. Evidence 分層 │ AIA-05 vs AIA-16  │ 通用知識層與領域特化層垂直引用 │
 └───────────────────┴───────────────────┴────────────────────────────────┘
 ```
 
@@ -181,6 +194,13 @@ AIA 規格體系（AIA-00 至 AIA-19，共計 20 份文件、27,500+ 行）完�
               └─────── 產出候選行動 ──────────┘
 ```
 
+### 3.3 決策實體 (Decision) 的生命週期與落地時機
+- **衝突/歧異現象**：決策實體是僅屬於 Phase 3 自主引擎的產物，還是全系統長期的共用自主性資料？
+- **權威統一判定**：
+  - `decisions` 是跨 Session 脈絡與治理的核心樞紐，可關聯 Goal, Project, Experiment, Evidence, Deliberation 與 Outcome，且**必須原生支援 `NO_ACTION`**。
+  - **資料模型於 Phase 1 (Migration 008) 即行落地**，確保跨 Session 脈絡重建與 Phase 2 審批有結構化實體可關聯。
+  - **Phase 3 實作自主決策推演引擎 (Deliberation Engine)**，負責在無人介入時自動生成決策。兩者職責分明：Phase 1 備齊結構，Phase 3 驅動自主生成。
+
 ---
 
 ## 4. 知識、記憶與證據溯源體系 (Knowledge & Provenance Harmonization)
@@ -220,6 +240,11 @@ AIA 規格體系（AIA-00 至 AIA-19，共計 20 份文件、27,500+ 行）完�
     - `provenance_ref_id`：對應實體的 ID（polymorphic reference）
   - **強制要求的是 Provenance 鏈的完整性**，而非特定外鍵欄位。任何 Memory 記錄都必須能回答「這條記憶從哪裡來的？」——其可接受的錨點包含：Evidence、Source、Memory（先驗推導）、Context Snapshot、或先前 Decision。
   - 所有 Agent 生成內容 (Model Generated) 預設為 `HYPOTHESIS` 或 `INFERENCE`，非經驗證不得賦予 `FACT_BASED` 標籤。
+
+### 4.3 通用知識層與領域 Evidence 分層 (General vs Domain Evidence)
+- [AIA-05](file:///home/wade/src/github/aia/docs/specifications/AIA-05-Investment-Agent-Specification.md) 定義了金融專屬的 `investment_decision_evidence`、`investment_raw_documents` 等結構。
+- [AIA-16](file:///home/wade/src/github/aia/docs/specifications/AIA-16-Data-Provenance-Evidence-and-Knowledge-Integrity-Specification.md) 定義了全系統共用的 `sources`、`evidence`、`claims`。
+- **權威統一判定**：兩者採「通用知識為底座，領域特化為延伸」的分層架構。通用 Evidence 儲存跨領域客觀事實（如台積電財報公告、官方發布）；投資決策則在領域層記錄該證據如何支持具體金融論點。兩套資料庫結構透過外鍵或關聯引用，絕不相互取代或競爭。
 
 ---
 
@@ -261,6 +286,15 @@ Runtime Worker 派發執行
 1. **停止派發**：Runtime 的 `Manager` 必須在 **1 秒內** 將全域派發器切換至 `EMERGENCY_STOP` 狀態，拒絕從隊列取出任何新 Task。此為 Runtime 層級的獨立閘道，不依賴 Agent 自身邏輯或 UI 操作。
 2. **受控取消 (Graceful Cancellation)**：向所有執行中的 Worker Goroutine 發送 `ctx.Done()` 取消訊號。Worker 收到訊號後，依序執行：①將 Task 狀態持久化為 `CANCELLED`（防止重啟後重複派發）；②完成或回滾進行中的 SQLite 事務（防止半寫入損壞）；③向子處理程序發送 `SIGTERM` 並等待最多 10 秒——逾時強制 `SIGKILL`，確保無殭屍子程序。
 3. **不可逆性與審批恢復**：Emergency Stop 觸發後，Agent 絕對無權自行重啟系統，必須由人類使用者在 CLI 執行 `aia resume --force` 或在 Web Console 顯式點擊「解除緊急停止」方可恢復。
+
+### 5.3 三軌事件分離與統一稽核日誌 (Triple-Event Streams & Unified Audit)
+- **衝突/歧異現象**：既有庫已有 `execution_events` 與 `audit_logs`；新規格提出 `event_history`，且 Phase 2 計畫曾提議 `policy_audit_logs`，容易造成日誌與稽核碎片化。
+- **權威統一判定**：
+  1. **三事件軌職責獨立**：
+     - **`execution_events`**：單次工單 micro-level 執行歷程（Worker 內部）。
+     - **`event_history`**：全系統 macro-level 業務與自主性事件流（不可竄改，Continuity 基礎）。
+     - **`audit_logs`**：全系統受治理的高風險操作與審批日誌。
+  2. **稽核日誌不建重複表**：擴充既有 `audit_logs` 表（增加 `policy_id`、`decision_id`、`approval_id`、`risk_tier`），既有 AuditRepository 與 Web/CLI 介面 100% 沿用，統一系統審計出口。
 
 ---
 

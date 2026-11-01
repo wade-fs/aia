@@ -203,6 +203,11 @@ CREATE TABLE decision_evidence_links (
 
 貫徹 [AIA-16](file:///home/wade/src/github/aia/docs/specifications/AIA-16-Data-Provenance-Evidence-and-Knowledge-Integrity-Specification.md)，分離資料、來源與主張。
 
+#### 通用知識層與領域 Evidence 分層架構
+- **通用知識層 (General Knowledge Layer)**：`sources`、`evidence`、`claims`、`claim_evidence_links` 為全系統共用的客觀事實與溯源底座，不綁定特定領域。
+- **領域特化層 (Domain Evidence Layer)**：既有 `investment_decision_evidence` 與 `investment_raw_documents` 保留金融領域的特定欄位（如 ticker、財報指標、market bar、snapshot items）。
+- **垂直關聯原則**：兩套系統互補而非競爭。領域決策引用共用 `evidence` 作為依據，亦可將清洗後的結構化事實提煉為共用 `claims` 與 `evidence`，供跨領域 Agent 查閱。
+
 ```sql
 CREATE TABLE sources (
     id TEXT PRIMARY KEY,
@@ -263,9 +268,33 @@ ALTER TABLE memories ADD COLUMN confidence REAL DEFAULT 0.5;
 
 ---
 
-### 3.6 治理與審批實體 (Approval & Audit)
+### 3.6 治理、審批與三軌事件體系 (Governance, Approvals & Triple-Event Streams)
+
+#### A. 三軌事件責任分離原則 (The Triple-Event Architecture)
+為避免日誌職責不清與相互踩踏，AIA 嚴格劃分三種事件流的責任：
+
+| 資料結構 | 核心職責 | 生命週期與範圍 | 典型事件範例 |
+|---|---|---|---|
+| **`execution_events`**<br/>*(既有表 001)* | 記錄單次 Task/Execution 內部的**微觀執行細節** | 綁定 `execution_id`，短期工單遙測 | Agent 呼叫 Tool、命令輸出片段、Worker 心跳 |
+| **`event_history`**<br/>*(新增表 007)* | 記錄全系統長期存在的**業務事實與自主性演進事件** | 全域不可竄改，長期留存；Continuity 重建的第一事實來源 | Agent 發現市場異常、目標狀態變更、重大推論成立、自我修正生效 |
+| **`audit_logs`**<br/>*(既有表 001/002，擴充於 009)* | 記錄**誰在何時執行/申請何項受治理操作** | 全域安全審計日誌，法規與安全合規邊界 | 提交代碼修改提案、觸發高預算呼叫、審批通過/駁回、緊急停止觸發 |
+
+三者互相關聯但職責獨立：`audit_logs` 可關聯 `decision_id` 或 `task_id`；`event_history` 記錄宏觀狀態轉移；`execution_events` 封裝於單次執行內部。
 
 ```sql
+-- 1. 全域不可竄改業務事件流 (event_history)
+CREATE TABLE event_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,               -- GOAL_REVISED, TASK_QUEUED, EMERGENCY_STOPPED...
+    aggregate_type TEXT NOT NULL,           -- GOAL, PROJECT, EXPERIMENT, TASK, GOVERNANCE
+    aggregate_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,                 -- AGENT:xxx, USER, SYSTEM
+    payload_json TEXT NOT NULL,
+    occurred_at TIMESTAMP NOT NULL
+);
+CREATE INDEX idx_event_history_aggregate ON event_history(aggregate_type, aggregate_id);
+
+-- 2. 治理審批實體 (approvals)
 CREATE TABLE approvals (
     id TEXT PRIMARY KEY,
     task_id TEXT,
@@ -282,34 +311,36 @@ CREATE TABLE approvals (
     FOREIGN KEY (decision_id) REFERENCES decisions(id)
 );
 
-CREATE TABLE event_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_type TEXT NOT NULL,               -- GOAL_REVISED, TASK_QUEUED, EMERGENCY_STOPPED...
-    aggregate_type TEXT NOT NULL,           -- GOAL, PROJECT, EXPERIMENT, TASK, GOVERNANCE
-    aggregate_id TEXT NOT NULL,
-    actor_id TEXT NOT NULL,                 -- AGENT:xxx, USER, SYSTEM
-    payload_json TEXT NOT NULL,
-    occurred_at TIMESTAMP NOT NULL
-);
-CREATE INDEX idx_event_history_aggregate ON event_history(aggregate_type, aggregate_id);
+-- 3. 擴充既有 audit_logs 表 (不重複新建 policy_audit_logs 表)
+-- 既有欄位: id, sequence, actor_type, actor_id, action, target_type, target_id, timestamp, request_id, source, metadata_json
+ALTER TABLE audit_logs ADD COLUMN policy_id TEXT DEFAULT '';
+ALTER TABLE audit_logs ADD COLUMN decision_id TEXT DEFAULT '';
+ALTER TABLE audit_logs ADD COLUMN approval_id TEXT DEFAULT '';
+ALTER TABLE audit_logs ADD COLUMN risk_tier TEXT DEFAULT 'LOW';
+ALTER TABLE audit_logs ADD COLUMN governance_action TEXT DEFAULT '';
+CREATE INDEX idx_audit_decision ON audit_logs(decision_id);
+CREATE INDEX idx_audit_approval ON audit_logs(approval_id);
 ```
 
 ---
 
 ## 4. 既有 Schema 向下相容矩陣 (Backward Compatibility)
 
-現行資料表（`001_initial_schema.sql`、`002_audit...sql`、`003_investment_core.sql`）保留率達 **100%**：
+現行資料表（已內建於 Commit `7597902`，包含 Migration Version 1 ～ 6）保留率達 **100%**：
 
-| 現有資料表 | 處理策略 | 相容性保證 |
-|---|---|---|
-| `agents` | 沿用並擴充 `agent_type` 與 capabilities | 完全向下相容 |
-| `tasks` | 沿用現有狀態機，新增 `experiment_id` 欄位 | 完全向下相容 |
-| `task_dependencies` | 沿用 | 完全向下相容 |
-| `executions` | 沿用 | 完全向下相容 |
-| `execution_events` | 沿用 | 完全向下相容 |
-| `projects` | 擴充 `primary_goal_id` 與 `status`；M:N 關聯透過新增 `goal_project_links` 表 | 預設值保證相容 |
-| `memories` | 擴充 `provenance_type`、`provenance_ref_type`、`provenance_ref_id` 與 `confidence` | 預設值保證相容 |
-| `audit_logs` | 沿用 | 完全向下相容 |
-| `investment_*` 表 (全 11 張表)| 原樣保留，作為 Phase 3 Pilot 記帳與預測基石 | 業務邏輯 100% 沿用 |
+| 現有資料表 / 模組 | 所屬 Migration | 處理策略 | 相容性保證 |
+|---|---|---|---|
+| `projects` | 001 | 擴充 `primary_goal_id` 與 `status`；M:N 關聯透過新增 `goal_project_links` 表 | 預設值保證相容 |
+| `agents` | 001 | 沿用並擴充 `agent_type` 與 capabilities | 完全向下相容 |
+| `tasks` | 001 | 沿用現有狀態機，新增 `experiment_id` 欄位 | 完全向下相容 |
+| `task_dependencies` | 001 | 沿用 | 完全向下相容 |
+| `executions` | 001 | 沿用 | 完全向下相容 |
+| `execution_events` | 001 | 專責微觀執行日誌，與全域 `event_history` 分流 | 完全向下相容 |
+| `memories` | 001 | 擴充 `provenance_type`、`provenance_ref_type`、`provenance_ref_id` 與 `confidence` | 預設值保證相容 |
+| `memory_candidates` | 001 | 沿用，作為短期記憶候選審核載體 | 完全向下相容 |
+| `artifacts` | 001 | 沿用 | 完全向下相容 |
+| `audit_logs` | 001, 002 | 擴充治理專屬欄位（`policy_id`, `decision_id`, `approval_id`, `risk_tier`） | 預設值保證相容，不重複建表 |
+| `investment_*` 表 (全 16 張表)| 003, 004, 005 | 原樣保留，作為 Phase 3 Pilot 記帳、管線與預測基石 | 業務邏輯 100% 沿用，通用 Evidence 垂直鏈結 |
+| `schedules` | 006 | 沿用，支援 Cron 與自動化週期任務排程 | 完全向下相容 |
 
-本統一資料模型已徹底消除跨規格歧異，並為後續 Migration 提供了精確欄位規範。
+本統一資料模型已徹底消除跨規格歧異，並為後續 Migration (007 ～ 012) 提供了精確欄位規範。

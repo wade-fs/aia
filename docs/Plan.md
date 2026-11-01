@@ -82,9 +82,24 @@ AIA 的最新規格體系（[AIA-00](file:///home/wade/src/github/aia/docs/speci
 [AIA-13](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md) 的基準評估不能等到系統具備完整自主性後才介入。從 Phase 0 起就應保留各代 Baseline（原始 PersonalAgent → 初版 Autonomy Core → 加入主動性 → 加入自我修正），且**嚴格區分「系統行為指標（主動率、修正成功率、介入率）」與「領域業務成果（如投資資產增長）」**。
 
 ### 原則三：以「行為驗收」為階段邊界，不以「資料表數量」為完成標準
-資料表與 Go Package 只是工程手段。每個階段的交付必須以**「外部可觀察、可量測的系統自主行為」**作為唯一驗收依據。
+資料表與 Go Package 只是工程手段。每個階段的交付必須以**「外部可觀察、可量測的系統自主行為」**作為唯一驗收依據。例如完成 Initiative Engine 不代表具備主動性；系統必須能通過以下核心行為檢驗：
+1. **無任務探索**：在無人類下達新任務時，能否主動觀察環境並發現值得處理的事項？
+2. **經驗引導決策**：能否根據過去累積的先驗經驗與決策結果，判斷現在應該做什麼？
+3. **理性節制**：能否在情勢無重大變化或效益不足時，自主做出有據可查的 `NO_ACTION` 決策？
+4. **目標持續追蹤**：能否跨越數天甚至數週，持續追蹤並推進長期目標？
+5. **落差辨識**：能否在行動完成後，自主比對預期與實際成果，發現先前的判斷問題？
+6. **修正與驗證**：能否自主提出有效修正方案（C1～C6），並在後續情境中驗證修正成效？
+7. **時間跨越性**：能否跨越多個 Session、不同日期、多次 Process 重啟，穩定持續上述自主過程？
 
-### 原則四：永遠維持「可工作系統」原則 (Always-Working System)
+### 原則四：增量演進而非大型重構 (Incremental Evolution, Not Rewrites)
+絕對不把七個階段變成七次推倒重來的大型重構。嚴格保護並繼承既有工程資產：
+- Go Runtime、Worker Concurrency (ScheduleWorker 15s, TaskWorker 5s)、Task/Project/Agent 實體。
+- SQLite WAL 連線池、既有 Migration 001～006 結構與既有資料。
+- Cobra CLI 命令列體系與 Port 7777 Web Console。
+- Antigravity Provider、Recovery 機制、既有 Audit Logs 與 Policy 介面。
+- 調整舊元件優先採取**相容性擴充**（新增欄位給預設值、Facade/Adapter 委派），嚴禁直接推倒重寫。
+
+### 原則五：永遠維持「可工作系統」原則 (Always-Working System)
 在任何階段結束與程式碼合併時，AIA 必須隨時具備：
 1. **可啟動 (Runnable)**：單一二進位檔案隨時可常駐啟動。
 2. **可操作 (Operable)**：CLI 與 Web Console 既有指令與功能永不中斷。
@@ -208,14 +223,24 @@ Project (專案總體脈絡)
 ```
 
 #### 4. 關鍵實作項目
-1. **資料模型落地 (Migration `004` + `005`)**：
-   - `004`：新增 `event_history` (Append-only 全域歷史事件表)、`sources`、`evidence`、`claims`、`claim_evidence_links`；擴充 `memories`。
-   - `005`：新增 `goals`、`goal_revisions`、`goal_project_links` (M:N)、`context_snapshots`；擴充 `projects`。
-   - 注意：`decisions` 表完整實體將於 Phase 3 的 Migration `007` 建立；Phase 1 先藉 `event_history` 記錄決策事件，保持脈絡可回溯。
-2. **Context Reconstruction (脈絡重建引擎)**：
+1. **資料模型落地 (Migration `007` + `008`)**：
+   - `007` (基礎事實與知識溯源層)：
+     - 新增 `event_history` (Append-only 全域歷史事件表，為 Continuity 重建之第一事實來源)。
+     - 新增 `sources`、`evidence`、`claims`、`claim_evidence_links` (共用客觀事實底座，與投資領域 Evidence 垂直分層)。
+     - 擴充 `memories` (多型 provenance: `provenance_type` + `provenance_ref_type` + `provenance_ref_id`，不強制外鍵)。
+   - `008` (目標、脈絡與決策骨幹層)：
+     - 新增 `goals`、`goal_revisions`、`goal_project_links` (M:N)。
+     - 擴充 `projects` (新增 `primary_goal_id`、`status`、`pending_issues_json`)。
+     - 新增 `context_snapshots` (快照工作區、進行中 Task、近期決策與 Pending Issues)。
+     - **在 Phase 1 即行落地 `decisions` (支援 NO_ACTION) 與 `decision_evidence_links` 表**：確保跨 Session 脈絡重建與後續治理審批皆有結構化決策實體可依循；Phase 3 則專注於實作自主決策推演引擎。
+2. **三軌事件職責徹底分離**：
+   - `execution_events` (既有表)：單次工單 micro-level 執行歷程。
+   - `event_history` (007)：全系統 macro-level 業務與自主性事件流。
+   - `audit_logs` (既有表)：受治理的高風險操作日誌。
+3. **Context Reconstruction (脈絡重建引擎)**：
    - 實作 [`internal/continuity/reconstructor.go`](file:///home/wade/src/github/aia/go/internal)。
-   - 遭遇程序重啟時，自 SQLite `event_history` 與快照還原 Project 進行狀態、近期重要決策與未決問題 (Pending Issues)。
-3. **Provenance & Knowledge Service**：
+   - 遭遇程序重啟時，自 SQLite `event_history`、`decisions` 與快照還原 Project 進行狀態、近期重要決策與未決問題 (Pending Issues)。
+4. **Provenance & Knowledge Service**：
    - 實作資料來源檢驗邏輯，嚴禁模型生成內容自動標記為 Verified Knowledge。
 
 #### 5. 行為驗收標準 (Milestone M1 & M2)
@@ -240,9 +265,9 @@ Project (專案總體脈絡)
 | **Permission** | 判定底層執行環境（Harness/OS）是否具備對應工具與檔案存取權 | Harness Adapter / Sandbox |
 
 #### 4. 關鍵實作項目
-1. **治理與審批資料表 (Migration `005`)**：
-   - 新增 `approvals` 表（申請實體、操作詳情、審批狀態、逾時策略、人類批註）。
-   - 新增 `policy_audit_logs` 表（政策評估歷程與拒絕原因）。
+1. **治理與審批資料表 (Migration `009`)**：
+   - 新增 `approvals` 表（申請實體、操作詳情、審批狀態、逾時策略、人類批註，外鍵關聯 `tasks` 與 `decisions`）。
+   - **擴充既有 `audit_logs` 表**（新增 `policy_id`、`decision_id`、`approval_id`、`risk_tier` 與 `governance_action` 欄位），**絕對不重複建立獨立的 `policy_audit_logs` 表**，確保系統稽核歷史統一匯流。
 2. **Policy Engine 與動態評估**：
    - 實作多維度策略判定：檔案系統路徑白名單、金融交易絕對防護（禁止真實資金操作）、資源消耗限額 (Budget Limit)。
 3. **受控 Emergency Stop 機制**：
@@ -476,13 +501,14 @@ Expected Outcome (預期成效) vs Actual Outcome (實際成效)
 ┌────────────────────────────────────────────────────────┐
 │           現有程式碼資產庫 (Commit 7597902 凍結保護)       │
 ├────────────────────────────────────────────────────────┤
-│ • SQLite 連線池管理、WAL 模式配置與 Migration 架構       │
+│ • SQLite 連線池管理、WAL 模式配置與 Migration 001～006  │
 │ • Worker Concurrency (ScheduleWorker 15s, TaskWorker 5s)│
 │ • Cobra CLI 命令列框架與子指令體系                       │
 │ • Web Host (Port 7777, OTT Token, Cookie Session)      │
 │ • Activity Monitor 即時監控快照算力                    │
 │ • TWSE/MOPS/FRED 資料擷取與 Brier Score 校準運算        │
 │ • Antigravity CLI (agy) 子處理程序適配介面             │
+│ • 既有 Audit Logs、Policy 與 Recovery 核心機制         │
 └───────────────────────────┬────────────────────────────┘
                             │ 透過 Facade / Adapter 封裝
                             ▼

@@ -1,74 +1,97 @@
-# AIA Development: Roadmap
+# AIA Development: Master Roadmap
 
-This roadmap tracks the development milestones of the **Autonomous Intelligence Architecture (AIA)** personal agent platform.
-
----
-
-## 1. Architectural Scope & Platform Decisions
-
-### Status of Mobile Client / Android APK: `PAUSED` ⏸️
-> [!NOTE] Architecture Decision
-> Development of a native **Android APK / Mobile App** was evaluated during earlier design phases, but has been **officially paused**.
->
-> **Rationale:**
-> 1. **Zero-Overhead Access:** AIA runs as a persistent local background daemon (`systemd --user`) on Linux / macOS. Its **Embedded Web Console** is fully responsive, touch-friendly, and mobile-optimized.
-> 2. **Network Reachability:** The web console can be securely accessed from any mobile browser (Android, iOS) via local Wi-Fi, WireGuard, or Tailscale without app store packaging or Java/Kotlin runtime overhead.
-> 3. **Focus on Core Autonomy:** Engineering effort is prioritized on agent governance, 3-frequency background automation, and quantitative investment calibration rather than maintaining fragmented mobile client codebases.
+**Project:** Autonomous Intelligence Architecture (AIA)  
+**Version:** v2.0 (Official Baseline)  
+**Master Plan:** [docs/Plan.md](file:///home/wade/src/github/aia/docs/Plan.md)  
+**Last Updated:** 2026-11-01  
 
 ---
 
-## 2. Milestone Overview
+## 1. Architectural Scope & Strategic Alignment
+
+### Platform Scope & Evolution
+AIA operates as a resident, local-first autonomous intelligence platform (`systemd --user`) on Linux / macOS. It coordinates specialized domain agents (Investment, Coding, Writing), manages long-term project continuity, maintains verifiable evidence provenance, and continuously improves its capabilities through safe closed-loop self-correction.
+
+AIA executes a **Dual-Track Evolution Model**:
+- **Infrastructure Track:** Runtime ➔ Continuity ➔ Evidence ➔ Governance ➔ Autonomy Core ➔ Learning ➔ Safe Evolution.
+- **Autonomy Capability Validation Track:** Investment Pilot ➔ Closed Loop ➔ Self-Correction ➔ Multi-Domain Integration ➔ Safe Self-Modification.
+
+---
+
+## 2. Seven-Phase Implementation Roadmap
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│                        Development Milestones                          │
-├─────────────────┬─────────────────┬──────────────────┬─────────────────┤
-│ Phase 1: Core   │ Phase 2: Domain │ Phase 3: Web UI  │ Phase 4: Auto   │
-│ CLI & Runtime   │ Agents & Invest │ & Background Dmn │ & Materiality   │
-│   [COMPLETED]   │   [COMPLETED]   │   [COMPLETED]    │   [COMPLETED]   │
-├─────────────────┼─────────────────┼──────────────────┼─────────────────┤
-│ Phase 5: Multi- │ Phase 6: Memory │ Phase 7: Mobile  │ Phase 8: Multi- │
-│ Asset Expansion │ Graph & Evolve  │ Native Client    │ Machine Sync    │
-│    [PLANNED]    │    [PLANNED]    │     [PAUSED]     │    [FUTURE]     │
-└─────────────────┴─────────────────┴──────────────────┴─────────────────┘
+│                        Master Development Phases                       │
+├───────────────────┬───────────────────┬────────────────────────────────┤
+│ Phase 0: Baseline │ Phase 1: State &  │ Phase 2: Governance &          │
+│ & Alignment       │ Knowledge Integ.  │ Operational Control            │
+│   [IN PROGRESS]   │     [PLANNED]     │           [PLANNED]            │
+├───────────────────┼───────────────────┼────────────────────────────────┤
+│ Phase 3: Autonomy │ Phase 4: Self-    │ Phase 5: Domain Experiments &  │
+│ Core & Initiative │ Correction & Goal │ Cross-Domain Collaboration     │
+│     [PLANNED]     │     [PLANNED]     │           [PLANNED]            │
+├───────────────────┴───────────────────┴────────────────────────────────┤
+│ Phase 6: Safe Self-Modification & Autonomous System Evolution [PLANNED]│
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. Milestone Details
+## 3. Autonomy Milestones (M0 ～ M8)
 
-### Phase 1: Core CLI & Storage Runtime ✅ (Completed)
-- SQLite schema with WAL mode (`agents`, `tasks`, `executions`, `memories`, `projects`).
-- Personal Agent coordinator and prompt decomposition.
-- Cobra CLI interface (`aia agent`, `aia task`, `aia exec`, `aia memory`, `aia project`, `aia health`).
-- Basic task lifecycle state transitions and execution event streams.
+Progress is evaluated by verifiable autonomous behavior rather than package or table count:
 
-### Phase 2: Domain Agents & Investment Intelligence ✅ (Completed)
-- Investment Agent domain modeling (`internal/investment`).
-- TWSE OpenAPI connector for real-time EOD prices (TSMC 2330, Foxconn 2317, MediaTek 2454).
-- MOPS material announcements integration.
-- FRED macroeconomic indicators client (FEDFUNDS, CPI, Liquidity).
-- Brier Score and Directional Accuracy calibration model.
+- **M0: Persistent Runtime** ── Crash-free runtime daemon, concurrent workers, SQLite persistence. *(Baseline Ready at commit `7597902`)*
+- **M1: Temporal Continuity** ── Restoration of Project state, goals, and pending issues from Event history across process termination. *(Phase 1)*
+- **M2: Trustworthy Decision** ── Provenance verification linking every assertion and decision to original evidence and sources. *(Phase 1)*
+- **M3: Initiative & Rationality** ── Proactive discovery of valuable work; explicit and auditable `NO_ACTION` decisions when inaction is optimal. *(Phase 3)*
+- **M4: Autonomous Closed Loop** ── Execution of the 11-step loop (`Observe` to `Reassess`) with preliminary outcome verification. *(Phase 3)*
+- **M5: Self-Correction & RCA** ── Identification of outcome discrepancies, automated Root Cause Analysis, and application of lessons to future choices. *(Phase 4)*
+- **M6: Goal Evolution** ── Dynamic goal optimization, decomposition, and revision proposals based on longitudinal empirical outcomes. *(Phase 4)*
+- **M7: Domain Experiments** ── Autonomous management of live virtual capital (NT$100,000) by Investment Agent, monthly self-review, and cross-domain tool delegation. *(Phase 5)*
+- **M8: Safe Self-Modification** ── Isolated sandbox code modification, automated multi-level test verification, human approval gate, and automatic rollback. *(Phase 6)*
 
-### Phase 3: Embedded Web UI & Background Service ✅ (Completed)
-- Single-page application console embedded in Go binary via `embed.FS`.
-- Server port configured to `7777` with CLI and `AIA_PORT` binding.
-- Cryptographic One-Time Token authentication redeeming to secure HTTP-only session cookie.
-- `systemd --user` service script (`service.sh`) with rate-limiting and crash-loop prevention.
-- Dynamic key resolution fallback (`~/.config/aia/service.env`).
+---
 
-### Phase 4: Background Workers & Materiality Gate ✅ (Completed)
-- Concurrent `ScheduleWorker` (15s interval) and `TaskWorker` (5s polling, 3 parallel slots).
-- 3-Frequency background operational separation.
-- **Materiality Gate ("重大性檢驗閘道"):** Automatic volatility and disclosure filtering with `PreserveExistingDecision` to eliminate redundant LLM token expenditures.
-- **AIA Activity Monitor:** Telemetry snapshot reporting across CLI (`aia monitor`), REST endpoint (`/api/v1/system/activity`), and Web Console.
+## 4. Phase Breakdown & Deliverables
 
-### Phase 5: Multi-Asset Expansion & Portfolio Optimization 📋 (Planned)
-- Expand watchlists beyond semiconductor focus to full TWSE/TPEx universe and US tech giants (NVDA, ASML).
-- Dynamic asset correlation matrix and automated portfolio weight rebalancing.
-- Historical backtesting harness against 5-year tick/daily datasets.
+### Phase 0: Baseline & Alignment *(Current)*
+- Audit codebase at commit [`7597902`](file:///home/wade/src/github/aia).
+- Cross-specification consistency audit ([AIA-SPEC-AUDIT-01](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)).
+- Architecture-to-code mapping ([AIA-ARCH-MAP-01](file:///home/wade/src/github/aia/docs/architecture/architecture-to-code-mapping.md)).
+- Unified Data Model & lifecycle specification ([AIA-ARCH-DATA-01](file:///home/wade/src/github/aia/docs/architecture/data-model.md)).
+- Sequential migration roadmap ([AIA-DEV-MIG-01](file:///home/wade/src/github/aia/docs/development/migration-plan.md)).
 
-### Phase 6: Memory Graph & Agent Evolution 📋 (Planned)
-- Vector embedding integration for semantic memory retrieval.
-- Automated memory candidate consolidation and deduplication.
-- Experience synthesis and self-improving prompt calibration.
+### Phase 1: Persistent State & Knowledge Integrity
+- Append-only `event_history` table as primary source of historical truth.
+- `sources`, `evidence`, `claims`, and `claim_evidence_links` implementation.
+- Flexible `memories` provenance tagging (`provenance_type`, confidence, claim reference).
+- `ContextReconstructor` restoring project state, goals, and pending issues after process restart.
+
+### Phase 2: Governance & Operational Control
+- Separation of Policy (rule evaluation), Approval (human review), and Permission (environment boundary).
+- Controlled Emergency Stop: 1-second freeze on new task dispatch, graceful cancellation with state protection.
+- Web Console & CLI pending approval interface with one-click decision.
+
+### Phase 3: Autonomy Core & Initiative
+- Shared `internal/autonomy/` package coordinating the complete 11-step autonomous cycle.
+- Diverse decision outcomes: `ACT`, `DEFER`, `MONITOR`, `ASK_HUMAN`, `NO_ACTION`.
+- Goal management entity and task-to-goal alignment.
+- Investment Agent autonomous pilot loop.
+
+### Phase 4: Self-Correction & Goal Evolution
+- Automated outcome discrepancy detection and Root Cause Analysis (RCA).
+- Six levels of self-correction (Fact, Judgment, Strategy, Prompt, Workflow, Code).
+- Goal progress evaluation, priority adjustment, and revision proposals.
+- [AIA-13](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md) baseline metrics tracking.
+
+### Phase 5: Domain Experiments & Cross-Domain Collaboration
+- Investment Agent complete autonomous experiment lifecycle ([AIA-05](file:///home/wade/src/github/aia/docs/specifications/AIA-05-Investment-Agent-Specification.md)).
+- Coding Agent and Writing Agent specialized integrations.
+- Cross-domain delegation protocol (`DelegationRequest`).
+- Longitudinal experiment tracking ([AIA-15](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md)).
+
+### Phase 6: Safe Self-Modification & Autonomous System Evolution
+- Scope isolation: Level A (Domain), Level B (AIA Core - Human Approval Required), Level C (Governance - Locked).
+- Automated self-modification pipeline: Proposal ➔ Sandbox ➔ Multi-level Tests ➔ Diff Review ➔ Approval ➔ Deployment ➔ Verification ➔ Rollback.

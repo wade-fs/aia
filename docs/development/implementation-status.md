@@ -1,112 +1,96 @@
 # AIA Development: Implementation Status
 
-This document provides a comprehensive audit of the implemented components, modules, database schemas, and test suites across the AIA codebase.
+**Project:** Autonomous Intelligence Architecture (AIA)  
+**Codebase Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) (`feat: add AIA Activity Monitor for CLI and Web Console`)  
+**Specification Baseline:** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-19) v2.0  
+**Audit Report:** [docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)  
+**Last Updated:** 2026-11-01  
 
 ---
 
-## 1. Go Package Architecture
+## 1. Baseline Architecture Overview (Commit 7597902)
+
+The physical Go codebase currently implements the v1.x foundational runtime and background monitoring capabilities:
 
 ```text
 go/
-├── cmd/
-│   └── aia/                  # Cobra CLI Entrypoints & Commands
-│       ├── main.go           # Root command & flag bindings
-│       ├── agent.go          # Agent commands (list, get, register)
-│       ├── task.go           # Task lifecycle commands
-│       ├── exec.go           # Execution inspection & log tails
-│       ├── memory.go         # Memory entry & candidate commands
-│       ├── project.go        # Project workspace management
-│       ├── invest.go         # Investment decisions & predictions
-│       ├── worker.go         # Worker controls & monitor
-│       ├── monitor.go        # Top-level activity monitor command
-│       └── server.go         # Embedded Web server command
+├── cmd/aia/                  # Cobra CLI Entrypoints
+│   ├── main.go               # Root command & flag bindings
+│   ├── agent.go              # Agent commands (list, get, register)
+│   ├── task.go               # Task lifecycle commands
+│   ├── execution.go          # Execution inspection & log tails
+│   ├── memory.go             # Memory entry commands
+│   ├── project.go            # Project workspace management
+│   ├── investment.go         # Investment decisions & predictions
+│   ├── worker.go             # Worker controls & monitor
+│   ├── status.go             # System status summary
+│   ├── web.go                # Embedded Web server command
+│   └── chat.go               # Interactive prompt chat
 ├── internal/
-│   ├── agent/                # Agent metadata & lifecycle definitions
 │   ├── app/                  # Application bootstrap & dependency wiring
-│   ├── host/                 # Embedded Web server, REST API, Auth
-│   ├── investment/           # TWSE, MOPS, FRED, FinMind, Brier Scoring
-│   ├── memory/               # Short-term and long-term memory store
-│   ├── project/              # Workspace project tracker
-│   ├── storage/              # SQLite database driver & schema migrations
-│   ├── system/               # System health checks & Activity Monitor
-│   ├── task/                 # Task state machine & execution records
-│   └── worker/               # Background ScheduleWorker & TaskWorker
+│   ├── audit/                # Audit context helper
+│   ├── collector/            # TWSE, TPEx, SEC, FRED, RSS collectors
+│   ├── config/               # YAML configuration loader
+│   ├── domain/               # Core domain entities (task, agent, project, etc.)
+│   ├── eventbus/             # In-memory pub/sub event bus
+│   ├── orchestrator/         # Scheduler, PersonalAgent coordinator
+│   ├── policy/               # Evaluator for path & agent policies
+│   ├── provider/             # Antigravity CLI adapter & mock provider
+│   ├── recovery/             # Process restart recovery manager
+│   ├── service/              # Application services (agent, task, exec, inv, mem)
+│   ├── storage/sqlite/       # SQLite WAL driver, migrations 001~003, repositories
+│   ├── validation/           # Default execution validator
+│   ├── web/host/             # Port 7777, OTT token, cookie session, REST API
+│   ├── worker/               # Background ScheduleWorker (15s), TaskWorker (5s, 3 slots)
+│   └── workspace/            # Workspace directory manager
 ├── scripts/
 │   └── service.sh            # systemd --user service management utility
-└── Makefile                  # Build, test, and service automation
+├── Makefile                  # Root and go/ build automation
+└── tests/
+    ├── integration/          # 10 integration test suites (All Passing)
+    └── unit/                 # 8 unit test suites (All Passing)
 ```
 
 ---
 
-## 2. Module Implementation Matrix
+## 2. Module Implementation & Gap Matrix
 
-| Module | Implementation Status | Test Coverage | Key Capabilities |
-| :--- | :--- | :--- | :--- |
-| **`internal/app`** | Production Ready | High | Factory initialization, default agent seeding, DB initialization. |
-| **`internal/storage`** | Production Ready | High | SQLite WAL mode, foreign keys, schema migrations, connection pooling. |
-| **`internal/worker`** | Production Ready | High | `Manager`, `ScheduleWorker` (15s), `TaskWorker` (5s, 3 parallel slots). |
-| **`internal/investment`**| Production Ready | High | TWSE OpenAPI, MOPS announcements, FRED client, Materiality Gate, Brier calibration. |
-| **`internal/host`** | Production Ready | High | Port 7777, one-time token auth, HTTP-only session cookie, REST API, embedded assets. |
-| **`internal/system`** | Production Ready | High | Health status diagnostics, real-time Activity Monitor snapshot computation. |
-| **`internal/task`** | Production Ready | High | Task state machine (`DRAFT`, `READY`, `RUNNING`, `COMPLETED`, `WAITING_APPROVAL`). |
-| **`internal/memory`** | Production Ready | High | Long-term memory records and candidate review workflow. |
-| **`internal/project`** | Production Ready | High | Workspace directory tracking and active project metadata. |
+| Module / Package | Status at Commit 7597902 | Target v2.0 Capability (AIA-00~19) | Implementation Gap & Next Action |
+|:---|:---:|:---|:---|
+| **`internal/worker`** | **Production Ready** | Runtime Concurrency Manager | Add controlled Emergency Stop (1s new task dispatch freeze + graceful cancel). |
+| **`internal/storage/sqlite`** | **Production Ready** | Multi-schema persistence | Add Migrations 004 (`event_history`, `evidence`) and 005 (`goals`, `snapshots`). |
+| **`internal/web/host`** | **Production Ready** | Single-user HTTP/REST Host | Add Approval pending cards & emergency stop button to Web Console. |
+| **`internal/service/investment`** | **Production Ready** | Autonomous Investment Pilot | Add dynamic virtual capital ledger (NT$100,000) and monthly self-review cycle. |
+| **`internal/recovery`** | **Functional Prototype**| Complete Context Reconstruction | Expand from basic task reset to full Project & Goal Context Reconstruction. |
+| **`internal/orchestrator`** | **Functional Prototype**| PersonalAgent Coordination | Refactor PersonalAgent to delegate to the shared `internal/autonomy/` package. |
+| **`internal/policy`** | **Functional Prototype**| G0~G3 Governance Engine | Separate Policy (rules), Approval (human gates), and Permission (OS boundary). |
+| **`internal/autonomy`** | **Missing (Phase 3)** | 11-step Autonomy Loop | Implement `internal/autonomy/` (Observe ➔ Reassess) with `NO_ACTION` decision. |
+| **`internal/domain/goal`** | **Missing (Phase 1)** | Goal Tree & Evolution | Implement Goal entity, revision history, and decomposition models. |
+| **`internal/evidence`** | **Missing (Phase 1)** | Provenance & Claims | Implement Evidence registry, Claim validation, and Source reliability tagging. |
 
 ---
 
-## 3. Database Schema
+## 3. Database Schema Status
 
-All tables reside in SQLite at `~/.local/share/aia/aia.db`:
-
-- `agents`: Registered AI agents, capabilities, and configurations.
-- `tasks`: Work units, status, priority, and assigned agent.
-- `executions`: Task execution runs, start/end times, and exit status.
-- `execution_events`: Detailed execution event stream and logs.
-- `memories`: Categorized long-term memory entries.
+### Active Tables (Migrations 001 ~ 003)
+- `agents`: Registered agents, capabilities, configurations.
+- `tasks`: Work units, status machine (`READY`, `RUNNING`, `COMPLETED`, `WAITING_APPROVAL`).
+- `task_dependencies`: Inter-task DAG dependencies.
+- `executions`: Task execution instances and status codes.
+- `execution_events`: Execution log stream and events.
+- `memories`: Stored long-term memories.
 - `memory_candidates`: Pending insights awaiting promotion.
-- `projects`: Registered workspace project directories.
-- `schedule_rules`: Periodic cron and interval rules for background tasks.
-- `investment_decisions`: Formulated BUY/SELL/HOLD theses and target ranges.
-- `investment_predictions`: Quantified forecasts tracked for Brier scoring.
+- `projects`: Workspace directory registrations.
+- `artifacts`: Generated artifacts and file hashes.
+- `audit_logs`: System audit trail.
+- `schedule_rules`: Periodic cron and interval rules.
+- `investment_*` (11 tables): Portfolios, positions, open orders, decisions, evidence, predictions.
 
----
-
-## 4. CLI Command Reference
-
-```bash
-# System & Monitoring
-aia health                      # Inspect database, agent, and service health
-aia monitor                     # Real-time AIA Activity Monitor table
-aia worker monitor              # Worker operational status
-
-# Background Daemon & Server
-aia server start --port 7777    # Run embedded console (uses AIA_HOST / AIA_PORT)
-aia server token                # Inspect or generate active login token
-
-# Core Entities
-aia agent list                  # List registered domain agents
-aia task list                   # Query task queue and states
-aia exec list                   # View execution history
-aia memory list                 # View stored long-term memories
-aia project list                # List registered workspace projects
-
-# Investment Domain
-aia invest decision             # Latest investment recommendation
-aia invest research             # Run investment research cycle
-aia invest predict              # View directional accuracy & Brier Score
-```
-
----
-
-## 5. Web Console & REST Endpoints
-
-The embedded console runs on `http://127.0.0.1:7777/`:
-
-- `GET /` — Single Page Application UI.
-- `GET /api/v1/system/health` — Public health probe.
-- `GET /api/v1/system/activity` — Public activity monitor snapshot.
-- `GET /api/v1/agents` — Authenticated agent list.
-- `GET /api/v1/tasks` — Authenticated task list.
-- `GET /api/v1/executions` — Authenticated execution log.
-- `GET /api/v1/investment/decisions` — Authenticated decision list.
-- `GET /api/v1/investment/predictions` — Authenticated prediction records.
+### Planned Schemas (Phases 1 ～ 5)
+- `event_history` (Append-only immutable event log) ── *Phase 1 (Migration 004)*
+- `sources`, `evidence`, `claims`, `claim_evidence_links` ── *Phase 1 (Migration 004)*
+- `goals`, `goal_revisions`, `context_snapshots` ── *Phase 1 (Migration 005)*
+- `approvals`, `policy_audit_logs` ── *Phase 2 (Migration 006)*
+- `candidate_initiatives`, `decisions` ── *Phase 3 (Migration 007)*
+- `outcome_evaluations`, `root_cause_analyses`, `correction_actions` ── *Phase 4 (Migration 008)*
+- `experiments`, `delegation_requests` ── *Phase 5 (Migration 009)*

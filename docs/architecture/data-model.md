@@ -573,6 +573,89 @@ CREATE INDEX idx_goal_evolution_goal ON goal_evolution_proposals(goal_id, status
 
 ---
 
+### 3.9 長期跨世代對照實驗與跨領域協作 (Generational Experiments & Delegation — Migration 012)
+
+```sql
+CREATE TABLE experiments (
+    id TEXT PRIMARY KEY,
+    project_id TEXT REFERENCES projects(id),
+    primary_goal_id TEXT REFERENCES goals(id),
+    domain TEXT NOT NULL DEFAULT 'investment',
+    owner_agent_id TEXT NOT NULL DEFAULT 'investment-agent',
+    name TEXT NOT NULL,
+    hypothesis TEXT NOT NULL,
+    experiment_type TEXT NOT NULL DEFAULT 'GENERATIONAL_COMPARISON',
+    status TEXT NOT NULL CHECK (status IN (
+        'PROPOSED', 'PENDING_APPROVAL', 'READY', 'RUNNING', 'PAUSED',
+        'EVALUATING', 'NEEDS_REVISION', 'COMPLETED', 'STOPPED', 'FAILED', 'ARCHIVED'
+    )),
+    baseline_metrics_json TEXT NOT NULL DEFAULT '{}',
+    current_metrics_json TEXT NOT NULL DEFAULT '{}',
+    iteration_count INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE experiment_generations (
+    id TEXT PRIMARY KEY,
+    experiment_id TEXT NOT NULL REFERENCES experiments(id) ON DELETE CASCADE,
+    generation_code TEXT NOT NULL, -- 'G1', 'G2', 'G2.1', 'G2.2'
+    parent_generation_id TEXT REFERENCES experiment_generations(id),
+    role TEXT NOT NULL CHECK (role IN ('CONTROL_BASELINE', 'EXPERIMENTAL')),
+    engine_type TEXT NOT NULL CHECK (engine_type IN ('RULE_BASED', 'LLM_AGY', 'HYBRID')),
+    portfolio_profile_id TEXT NOT NULL REFERENCES investment_portfolio_profiles(id),
+    is_frozen INTEGER NOT NULL DEFAULT 0 CHECK (is_frozen IN (0, 1)),
+    harness_version TEXT NOT NULL DEFAULT '',
+    model_id TEXT NOT NULL DEFAULT '',
+    prompt_version TEXT NOT NULL DEFAULT '',
+    strategy_version TEXT NOT NULL,
+    strategy_config_json TEXT NOT NULL DEFAULT '{}',
+    source_correction_id TEXT REFERENCES correction_actions(id),
+    source_learning_id TEXT REFERENCES learning_records(id),
+    status TEXT NOT NULL CHECK (status IN ('ACTIVE', 'PROMOTED', 'ROLLED_BACK', 'RETIRED')),
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    UNIQUE(experiment_id, generation_code),
+    UNIQUE(experiment_id, portfolio_profile_id),
+    CHECK (role != 'CONTROL_BASELINE' OR is_frozen = 1)
+);
+-- 附帶 trg_exp_gen_freeze_update 與 trg_exp_gen_freeze_delete 觸發器，嚴禁修改或刪除 is_frozen=1 之 G1 基準世代
+
+CREATE TABLE experiment_comparisons (
+    id TEXT PRIMARY KEY,
+    experiment_id TEXT NOT NULL REFERENCES experiments(id) ON DELETE CASCADE,
+    baseline_generation_id TEXT NOT NULL REFERENCES experiment_generations(id),
+    candidate_generation_id TEXT NOT NULL REFERENCES experiment_generations(id),
+    as_of TIMESTAMP NOT NULL,
+    sample_count INTEGER NOT NULL DEFAULT 0,
+    performance_comparison_json TEXT NOT NULL, -- Track A: 報酬率、回撤、Brier/LogLoss 與 DecisionConfidence 雙校準
+    autonomy_comparison_json TEXT NOT NULL,    -- Track B: 合理觀望率、失效條件、世代演化深度
+    regime_verdict TEXT NOT NULL CHECK (regime_verdict IN (
+        'G2_CLEAR_ADVANTAGE', 'G2_UNRELIABLE_RISK_TAKING', 'G2_LEARNING_IN_PROGRESS',
+        'G1_RULES_SUPERIOR', 'PARITY_ADAPTIVE', 'INCONCLUSIVE_LOW_SAMPLE'
+    )),
+    summary TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE delegation_requests (
+    id TEXT PRIMARY KEY,
+    experiment_id TEXT REFERENCES experiments(id),
+    requester_agent_id TEXT NOT NULL,
+    target_agent_id TEXT NOT NULL,
+    source_project_id TEXT REFERENCES projects(id),
+    goal_id TEXT REFERENCES goals(id),
+    spawned_task_id TEXT REFERENCES tasks(id),
+    task_spec_json TEXT NOT NULL,
+    acceptance_gate_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('PENDING', 'ACCEPTED', 'IN_PROGRESS', 'DELIVERED', 'VERIFIED', 'REJECTED', 'FAILED')),
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+```
+
+---
+
 ## 4. 既有 Schema 向下相容矩陣 (Backward Compatibility)
 
 現行資料表（已內建於 Commit `7597902`，包含 Migration Version 1 ～ 6）保留率達 **100%**：

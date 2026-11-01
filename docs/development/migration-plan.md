@@ -2,9 +2,9 @@
 
 **文件代號：** AIA-DEV-MIG-01  
 **適用資料庫：** SQLite (WAL 模式)  
-**文件狀態：** Active Baseline (Migrations `001`～`011` Implemented; `012` Planned for Phase 5)  
+**文件狀態：** Active Baseline (Migrations `001`～`012` Implemented)  
 **依賴基準：** [docs/architecture/data-model.md](file:///home/wade/src/github/aia/docs/architecture/data-model.md)  
-**現有代碼基準：** Git commit `7597902` 凍結資產 + Phase 1～4 已落地遷移 (`007`～`011`)  
+**現有代碼基準：** Git commit `7597902` 凍結資產 + Phase 1～5A 已落地遷移 (`007`～`012`)  
 **最後更新：** 2026-11-01  
 
 ---
@@ -159,15 +159,21 @@
 
 ---
 
-### Phase 5 交付：長週期實驗與跨領域協作 (Migration 012)
+### Phase 5 交付：長週期跨世代實驗與跨領域協作 (Migration 012) [IMPLEMENTED]
 
 #### **`012_experiments_and_collaboration.sql`**
-*依賴：依賴 `008` 的 `goals`、`projects`、現有 `tasks`。*
+*依賴：依賴 `008` 的 `goals`、`projects`、`011` 的 `correction_actions`/`learning_records` 與現有 `tasks`、`investment_*`。*
 - 建立 `experiments`：
   - 嚴格遵循 [AIA-15](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md) 完整的 11 個生命週期狀態：
     `CHECK (status IN ('PROPOSED', 'PENDING_APPROVAL', 'READY', 'RUNNING', 'PAUSED', 'EVALUATING', 'NEEDS_REVISION', 'COMPLETED', 'STOPPED', 'FAILED', 'ARCHIVED'))`
-  - 欄位：`project_id`, `primary_goal_id REFERENCES goals(id)`, `name`, `hypothesis`, `experiment_type`, `baseline_metrics_json`, `current_metrics_json`, `iteration_count`。
+  - 欄位：`project_id`, `primary_goal_id REFERENCES goals(id)`, `domain`, `owner_agent_id`, `name`, `hypothesis`, `experiment_type`, `baseline_metrics_json`, `current_metrics_json`, `iteration_count`。
 - 建立 `experiment_goal_links`：支援 Experiment ↔ Goal 多對多驗證關聯。
+- 建立 `experiment_generations`（支撐 [AIA-05 §20](file:///home/wade/src/github/aia/docs/specifications/AIA-05-Investment-Agent-Specification.md) 雙世代投資決策對照實驗）：
+  - 隔離綁定 `portfolio_profile_id`（`UNIQUE(experiment_id, portfolio_profile_id)`）與世代代號（`G1`, `G2`, `G2.1`, `G2.2`）。
+  - 強制不變量 `CHECK (role != 'CONTROL_BASELINE' OR is_frozen = 1)`，並附加 SQLite 防竄改觸發器 `trg_exp_gen_freeze_update` 與 `trg_exp_gen_freeze_delete`，硬性阻擋對凍結 `G1` 基準組之任何修改或刪除。
+  - 關聯 `parent_generation_id`、`source_correction_id` 與 `source_learning_id`，構成不可覆寫之世代演化譜系。
+- 建立 `experiment_comparisons`：保存 Track A（績效與 Brier / LogLoss / DecisionConfidence 雙校準）及 Track B（自主能力與五大判讀情境 `RegimeVerdict`）之時間點對照紀錄。
+- **擴充 `investment_predictions` 與 `investment_prediction_outcomes`**：新增 `expected_return_pct`、`expected_range_low_pct`、`expected_range_high_pct` 與 `log_loss`。
 - **擴充現有 `tasks` 表**：
   - `ALTER TABLE tasks ADD COLUMN experiment_id TEXT REFERENCES experiments(id);`
 - 建立 `delegation_requests`：跨 Agent 委派契約（`requester_agent_id`, `target_agent_id`, `source_project_id`, `goal_id`, `task_spec`, `acceptance_gate`, `status`）。

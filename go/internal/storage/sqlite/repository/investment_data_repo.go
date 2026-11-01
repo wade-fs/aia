@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wade/aia/internal/autonomy/clock"
 	"github.com/wade/aia/internal/domain"
 	"github.com/wade/aia/internal/domain/investment"
 	"github.com/wade/aia/internal/storage/sqlite"
@@ -171,23 +172,23 @@ func (r *InvestmentDataRepository) ListRawDocuments(ctx context.Context, instrum
 	if limit <= 0 {
 		limit = 30
 	}
-	var rows *sql.Rows
-	var err error
+	query := `
+		SELECT id, source_id, instrument_id, source_record_id, source_url, title, summary,
+			content_reference, content_hash, content_type, published_at, fetched_at, metadata_json
+		FROM investment_raw_documents
+		WHERE 1 = 1`
+	var args []any
 	if instrumentID != "" {
-		rows, err = r.db.RawDB().QueryContext(ctx, `
-			SELECT id, source_id, instrument_id, source_record_id, source_url, title, summary,
-				content_reference, content_hash, content_type, published_at, fetched_at, metadata_json
-			FROM investment_raw_documents WHERE instrument_id = ?
-			ORDER BY published_at DESC LIMIT ?
-		`, instrumentID, limit)
-	} else {
-		rows, err = r.db.RawDB().QueryContext(ctx, `
-			SELECT id, source_id, instrument_id, source_record_id, source_url, title, summary,
-				content_reference, content_hash, content_type, published_at, fetched_at, metadata_json
-			FROM investment_raw_documents
-			ORDER BY published_at DESC LIMIT ?
-		`, limit)
+		query += ` AND instrument_id = ?`
+		args = append(args, instrumentID)
 	}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND published_at <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY published_at DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -222,12 +223,17 @@ func (r *InvestmentDataRepository) SaveMarketData(ctx context.Context, md *inves
 }
 
 func (r *InvestmentDataRepository) GetLatestMarketData(ctx context.Context, instrumentID domain.ID) (*investment.MarketData, error) {
-	row := r.db.RawDB().QueryRowContext(ctx, `
+	query := `
 		SELECT id, instrument_id, data_type, period, value_json, source_id, fetched_at, effective_at
 		FROM investment_market_data
-		WHERE instrument_id = ?
-		ORDER BY effective_at DESC LIMIT 1
-	`, instrumentID)
+		WHERE instrument_id = ?`
+	args := []any{instrumentID}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND effective_at <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY effective_at DESC, rowid DESC LIMIT 1`
+	row := r.db.RawDB().QueryRowContext(ctx, query, args...)
 	return scanMarketData(row)
 }
 
@@ -235,12 +241,18 @@ func (r *InvestmentDataRepository) ListHistoricalMarketData(ctx context.Context,
 	if limit <= 0 {
 		limit = 30
 	}
-	rows, err := r.db.RawDB().QueryContext(ctx, `
+	query := `
 		SELECT id, instrument_id, data_type, period, value_json, source_id, fetched_at, effective_at
 		FROM investment_market_data
-		WHERE instrument_id = ?
-		ORDER BY effective_at DESC LIMIT ?
-	`, instrumentID, limit)
+		WHERE instrument_id = ?`
+	args := []any{instrumentID}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND effective_at <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY effective_at DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,7 @@ import (
 	domainLearning "github.com/wade/aia/internal/domain/learning"
 	domainMemory "github.com/wade/aia/internal/domain/memory"
 	"github.com/wade/aia/internal/domain/task"
+	"github.com/wade/aia/internal/experiment"
 	"github.com/wade/aia/internal/provider"
 	agentService "github.com/wade/aia/internal/service/agent"
 	approvalService "github.com/wade/aia/internal/service/approval"
@@ -47,6 +48,8 @@ type ConsoleServices struct {
 	AutonomyRepo   *repository.AutonomyRepository
 	ContinuityRepo *repository.ContinuityRepository
 	LearningRepo   *repository.LearningRepository
+	ExperimentRepo *repository.ExperimentRepository
+	ExperimentCtrl *experiment.Controller
 }
 
 func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
@@ -94,6 +97,8 @@ func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
 	mux.HandleFunc("/api/v1/goals/", s.handleGoalSubroutes)
 	mux.HandleFunc("/api/v1/learnings", s.handleLearnings)
 	mux.HandleFunc("/api/v1/learnings/", s.handleLearningSubroutes)
+	mux.HandleFunc("/api/v1/experiments", s.handleExperiments)
+	mux.HandleFunc("/api/v1/experiments/", s.handleExperimentSubroutes)
 }
 
 func getReqID(r *http.Request) string {
@@ -1085,4 +1090,53 @@ func (s *ConsoleServices) handleLearningSubroutes(w http.ResponseWriter, r *http
 		}
 	}
 	host.WriteJSON(w, http.StatusOK, resp, reqID)
+}
+
+func (s *ConsoleServices) handleExperiments(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if s.ExperimentRepo == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Experiment repository not available", reqID)
+		return
+	}
+	if r.Method != http.MethodGet {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+	exps, err := s.ExperimentRepo.ListExperiments(ctx, r.URL.Query().Get("domain"), 50)
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, exps, reqID)
+}
+
+func (s *ConsoleServices) handleExperimentSubroutes(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if s.ExperimentRepo == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Experiment repository not available", reqID)
+		return
+	}
+	if r.Method != http.MethodGet {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/experiments/"), "/")
+	if id == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_ID", "Experiment ID required", reqID)
+		return
+	}
+	exp, err := s.ExperimentRepo.GetExperiment(ctx, id)
+	if err != nil {
+		host.WriteError(w, http.StatusNotFound, "NOT_FOUND", err.Error(), reqID)
+		return
+	}
+	gens, _ := s.ExperimentRepo.ListGenerations(ctx, id)
+	cmps, _ := s.ExperimentRepo.ListComparisons(ctx, id, 20)
+	host.WriteJSON(w, http.StatusOK, map[string]any{
+		"experiment":  exp,
+		"generations": gens,
+		"comparisons": cmps,
+	}, reqID)
 }

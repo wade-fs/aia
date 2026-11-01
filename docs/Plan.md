@@ -523,20 +523,24 @@ Expected Outcome (預期成效) vs Actual Outcome (實際成效)
 ```
 
 #### 4. 關鍵實作項目
-1. **Investment Agent 完整自主實驗閉環 ([AIA-05](file:///home/wade/src/github/aia/docs/specifications/AIA-05-Investment-Agent-Specification.md))**：
-   - 建立虛擬 10 萬元**現金帳本**（含買賣交易紀錄、手續費稅費）、**持股部位帳**（股數、成本、未實現損益）、**實現損益帳**與**總資產統計**。
-   - 依據設定的**風險約束條件**（如單股最大持倉比例），評估部位合規性。
-   - 營業日自主觀察盤勢、決策買賣或觀望，依決策登記虛擬交易。
-   - 每月 1 日自動產出總資產統計與策略自我修正評估報告。
+1. **Investment Agent 雙世代對照自主實驗閉環 ([AIA-05 §20](file:///home/wade/src/github/aia/docs/specifications/AIA-05-Investment-Agent-Specification.md) / [AIA-13 §21.4](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md) / [AIA-15 §21](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md)) [Phase 5A 已實作]**：
+   - **雙世代對照設計 (`G1` vs `G2 -> G2.1 -> G2.2`)**：
+     - **`G1`（Rule-Based 凍結基準組）**：固定規則、確定性邏輯、SQLite Trigger 防竄改鎖定（`is_frozen = 1`），獨立 NT$100,000 虛擬帳本。
+     - **`G2` / `G2.x`（LLM 實驗演化組）**：透過 `agy` 進行研究推論與機率預測，獨立 NT$100,000 虛擬帳本；每次經 Phase 4 RCA 與修正提案後**衍生新世代 `G2.1`、`G2.2`**，絕不覆寫歷史 `G2` 或修改 `G1`。
+   - **公平性與零前視偏差控制**：同一時間點（`AsOf`）餵入完全相同之市場行情快照（`DataSnapshot`）與台股手續費/證交稅規則，徹底隔離雙世代現金、持股、已實現/未實現損益與預測紀錄。
+   - **雙軌評估與機率/信心分離**：
+     - **Track A（投資表現 + 雙校準）**：總資產、累積報酬率、最大回撤（Max Drawdown），並**嚴格分離**「事件預測機率（`UpProbability` ── 以 Brier Score、Log Loss、區間覆蓋率校準）」與「行動信心（`DecisionConfidence` ── 獨立檢驗過度自信缺口 `OverconfidenceGap`）」。
+     - **Track B（自主能力 + 五大科學判讀矩陣）**：評估合理觀望率（`HOLD`）、失效條件觸發、世代演化深度，並自動歸類為五大情境（含辨識「報酬較高但校準極差之高風險僥倖 `G2_UNRELIABLE_RISK_TAKING`」與「`G1` 規則勝出 `G1_RULES_SUPERIOR`」）。
+     - **活體對照驗證橋接**：將凍結 `G1` 直接作為 Phase 4 `LearningEngine.VerifyCorrection` 之 `CONTROL_BENCHMARK`（雙重差分 DiD），驗證通過晉升 `PROMOTED`（`L2_VERIFIED`），造成回撤或 Brier 退化則自動標記 `ROLLED_BACK`（`REGRESSED`）。
    - **不在本階段範圍**：融資融券、保證金計算、槓桿/衍生品操作——如需納入，須另立規格正式化後方可實作。
 2. **Coding Agent 落地**：
    - 理解目標代碼庫結構、辨識測試盲區與技術債、產出修復方案。
 3. **Writing Agent 落地**：
    - 管理小說世界觀、人物年表、章節大綱，並執行歷史資料與劇情一致性校勘。
 4. **跨領域任務委派機制 ([AIA-12](file:///home/wade/src/github/aia/docs/specifications/AIA-12-Cross-Domain-Collaboration-and-Agent-Delegation-Specification.md))**：
-   - 實作經典情境：Writing/Investment Agent 發現工具不足時，向 Coding Agent 提出委派工單；Coding Agent 完成交付後，由委託 Agent 驗收並更新既有成果。
-5. **Experiment Lifecycle 管理 ([AIA-15](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md))**：
-   - 管理假設 (Hypothesis)、對照組、評估指標與長期實驗存檔。
+   - 實作經典情境：Writing/Investment Agent 發現工具不足時，向 Coding Agent 提出委派工單；Coding Agent 完成交付後，由委託 Agent 驗收並更新既有成果（資料結構 `delegation_requests` 已於 Migration `012` 落地）。
+5. **Experiment Lifecycle 管理 ([AIA-15](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md)) [Phase 5A 已實作]**：
+   - 完整 11 狀態實驗生命週期（`experiments`）、跨世代譜系表（`experiment_generations`）、對照比較紀錄（`experiment_comparisons`）與 `ExperimentController` 已落地。
 
 #### 5. 行為驗收標準 (Milestone M7)
 - [ ] **投資自主運作**：Investment Agent 能夠跨月持續維持虛擬部位自主運作，且無人工介入完成每月覆盤報告；記得每次買賣理由、當時市場資訊、預測與實際結果，不因後續損益竄改原始判斷。
@@ -627,7 +631,7 @@ Expected Outcome (預期成效) vs Actual Outcome (實際成效)
 ## 6. 階段推進紀錄與架構確認基線 (Milestone Progression & Architectural Baseline)
 
 > [!NOTE]
-> **實作進度同步**：Phase 0 架構對齊、Phase 1（Migration `007`～`008`）、Phase 2（Migration `009`）、Phase 3（Migration `010`）、Phase 3.5（預算閘門、OS 子行程隔離、Point-in-Time 回放時鐘）與 Phase 4（Migration `011` 可驗證自我修正與學習機制）均已依序落地並通過全套單元與整合行為驗收測試。後續重點推進 Phase 5（長期領域實驗以累積真實 `L3` 泛化學習證據）與 Phase 6（受控代碼演進沙盒）。
+> **實作進度同步**：Phase 0 架構對齊、Phase 1（Migration `007`～`008`）、Phase 2（Migration `009`）、Phase 3（Migration `010`）、Phase 3.5（預算閘門、OS 子行程隔離、Point-in-Time 回放時鐘）、Phase 4（Migration `011` 可驗證自我修正與學習機制）以及 **Phase 5A（Migration `012` 雙世代投資決策對照實驗 `G1` vs `G2 -> G2.x`）** 均已依序落地並通過全套單元與整合行為驗收測試。後續重點推進 Phase 5B（Coding / Writing 領域深化與跨領域委派實證）及 Phase 6（受控代碼演進沙盒）。
 
 以下 **Phase 1 開工前 7 大架構確認事項** 作為永久工程設計約束持續生效：
 

@@ -1256,4 +1256,20 @@ Agent 是否能跨越時間持續運作、主動發現問題、延續過去脈�
 
 ---
 
+# 20. 雙世代投資決策實驗契約 (Generational Investment Decision Experiment — v2.1 Normative Addendum)
+
+為科學驗證「LLM Agent 是否真的比既有規則更會投資，還是只是更會事後解釋決策」，Investment 實驗正式採行 **雙世代平行對照架構**（整合 `AIA-13` 與 `AIA-15`）：
+
+## 20.1 雙世代分工與永久基準原則
+1. **Generation 1 (`G1` — Rule-based Control Baseline)**：使用固定且明確的規則引擎產生買進、賣出、增持、減持或持有決策。`G1` 的規則與版本在實驗啟動後**永久凍結**，作為不可覆寫的長期對照基準。
+2. **Generation 2 (`G2` / `G2.x` — LLM-based Experimental Cohort)**：透過 `agy` Harness 由 LLM 根據當下市場快照、持倉、歷史決策與長期目標自主判斷；當透過 `AIA-11` 學習機制提出策略修正時，必須建立新世代版本（`G2.1`、`G2.2`），嚴禁覆寫原始 `G2` 或 `G1`。
+3. **公平對照硬約束**：每個世代各自擁有獨立的 `investment_portfolio_profiles`（初始虛擬資金均為 `NT$100,000`、台股零股交易規則一致、手續費與證交稅模擬規則一致），並在每個觀察時點（`AsOf`）接收完全相同的市場資料快照（`investment_data_snapshots`），嚴格阻斷任何未來資料（Zero Look-Ahead Bias）。
+
+## 20.2 預測機率與決策信心的嚴格分離
+LLM 世代每次決策輸出必須同時提供並嚴格區分兩類數值，禁止混為一談：
+- **事件預測機率 (`Event Probability`, 如 `up_probability = 0.70`)**：針對明確可檢驗事件（如「2330 未來 5 個交易日收盤上漲」），搭配 `expected_return_pct` 與預期區間 `[expected_range_low_pct, expected_range_high_pct]`，以 **Brier Score** 與 **Log Loss** 檢驗機率校準度。
+- **整體決策信心 (`Decision Confidence`, 如 `decision_confidence = 0.75`)**：針對行動選擇（`BUY | SELL | ADD | REDUCE | HOLD`）、主要風險（`primary_risks`）與反向失效條件（`invalidation_conditions`）的綜合把握度，必須獨立於預測機率之外評估其信心與風險調整後報酬的一致性，不得直接當成預測準確率。
+
+---
+
 **文件結束**

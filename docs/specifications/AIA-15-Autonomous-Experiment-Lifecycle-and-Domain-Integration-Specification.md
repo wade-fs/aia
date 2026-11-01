@@ -1744,3 +1744,17 @@ Investment、Coding、Writing 三個 Domain 提供不同的觀察環境：
 每一輪工作都應該讓下一輪更有根據，而不是單純重複執行。
 
 **AIA-15 的最終目標，是讓 AIA 從一個能夠執行任務的 Agent Platform，逐步成為一個能夠長期進行自主實驗、驗證自身能力並持續改善的系統。**
+
+---
+
+# 21. 雙世代演進實驗控制器規範 (Generational Experiment Controller — v2.1 Normative Addendum)
+
+為串聯 `AIA-05` 投資領域、`AIA-11` 可驗證自我修正與 `AIA-13` 自主性基準，Experiment Management 正式定義 **世代演進控制器 (`ExperimentController`)**：
+
+1. **三角色職責隔離**：
+   - **`G1` (`CONTROL_BASELINE`)**：規則版對照組，資料庫層強制 `is_frozen = 1` 並以 SQLite Trigger 禁止任何規則版本或組態覆寫。
+   - **`G2` (`EXPERIMENTAL`)**：由 `agy` Harness 承載之初始 LLM 決策世代（`agy` 僅為 LLM 執行環境，並非整個實驗控制器）。
+   - **`AIA ExperimentController`**：負責固定當下資訊切面（`AsOf` 快照）、獨立維護各世代 `NT$100,000` 虛擬帳本、結算預測、執行世代對照與管理版本譜系。
+2. **非破壞式世代演化 (`G2` ➔ `G2.1` ➔ `G2.2`)**：
+   - 當 `G2` 經由 `AIA-11` 完成偏差評估、RCA 與修正提案後，嚴禁原地覆蓋 `G2`；必須衍生子世代 `G2.x`（記錄 `parent_generation_id`、`harness_version`、`model_id`、`prompt_version`、`strategy_version`、`source_correction_id` 與 `source_learning_id`）。
+   - `G2.x` 在獨立虛擬帳本中與永久基準 `G1` 同步接受相同市場資料檢驗，並將相對 `G1` 的對照表現回傳至 `AIA-11` 的 `VerifyCorrection`（採用 `CONTROL_GROUP` 對照法），決定正式晉升（`PROMOTED` / `L2_VERIFIED`）或淘汰回滾（`ROLLED_BACK` / `REGRESSED`）。

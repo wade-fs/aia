@@ -186,20 +186,23 @@ const (
 
 // Prediction represents a quantifiable, testable future forecast by agy.
 type Prediction struct {
-	ID                domain.ID        `json:"id"`
-	DecisionID        domain.ID        `json:"decision_id"`
-	InstrumentID      domain.ID        `json:"instrument_id"`
-	PredictionType    string           `json:"prediction_type"` // e.g. "DIRECTION", "RETURN_RANGE", "TARGET_PRICE"
-	Target            string           `json:"target"`          // e.g. "PRICE_CHANGE_PCT"
-	ExpectedDirection string           `json:"expected_direction"` // UP, DOWN, FLAT
-	Probability       float64          `json:"probability"`        // Confidence 0.0 ~ 1.0
-	TargetValue       float64          `json:"target_value"`
-	BasePrice         float64          `json:"base_price"`
-	EvaluationHorizon string           `json:"evaluation_horizon"` // e.g. "5D", "20D"
-	DueAt             time.Time        `json:"due_at"`
-	StrategyVersion   string           `json:"strategy_version"`
-	Status            PredictionStatus `json:"status"`
-	CreatedAt         time.Time        `json:"created_at"`
+	ID                   domain.ID        `json:"id"`
+	DecisionID           domain.ID        `json:"decision_id"`
+	InstrumentID         domain.ID        `json:"instrument_id"`
+	PredictionType       string           `json:"prediction_type"` // e.g. "DIRECTION", "RETURN_RANGE", "TARGET_PRICE"
+	Target               string           `json:"target"`          // e.g. "PRICE_CHANGE_PCT"
+	ExpectedDirection    string           `json:"expected_direction"` // UP, DOWN, FLAT
+	Probability          float64          `json:"probability"`        // Event probability 0.0 ~ 1.0 (distinct from Decision.Confidence)
+	TargetValue          float64          `json:"target_value"`
+	ExpectedReturnPct    float64          `json:"expected_return_pct"`
+	ExpectedRangeLowPct  float64          `json:"expected_range_low_pct"`
+	ExpectedRangeHighPct float64          `json:"expected_range_high_pct"`
+	BasePrice            float64          `json:"base_price"`
+	EvaluationHorizon    string           `json:"evaluation_horizon"` // e.g. "5D", "20D"
+	DueAt                time.Time        `json:"due_at"`
+	StrategyVersion      string           `json:"strategy_version"`
+	Status               PredictionStatus `json:"status"`
+	CreatedAt            time.Time        `json:"created_at"`
 }
 
 // PredictionOutcome represents the empirical validation of a Prediction.
@@ -210,6 +213,7 @@ type PredictionOutcome struct {
 	ActualDirection    string    `json:"actual_direction"` // UP, DOWN, FLAT
 	OutcomeStatus      string    `json:"outcome_status"`   // HIT, MISS, NEUTRAL
 	BrierScore         float64   `json:"brier_score"`      // (probability - outcome)^2
+	LogLoss            float64   `json:"log_loss"`         // -(y*ln(p) + (1-y)*ln(1-p))
 	EvaluationSourceID string    `json:"evaluation_source_id"`
 	EvaluatedAt        time.Time `json:"evaluated_at"`
 	DetailsJSON        string    `json:"details_json"`

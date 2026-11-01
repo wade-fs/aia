@@ -30,7 +30,7 @@ AIA executes a **Dual-Track Evolution Model**:
 ├───────────────────┼───────────────────┼────────────────────────────────┤
 │ Phase 3 & 3.5:    │ Phase 4: Verif.   │ Phase 5: Domain Experiments &  │
 │ Autonomy & Harden │ Learning & Goal   │ Longitudinal L3 Validation     │
-│    [COMPLETED]    │    [COMPLETED]    │         [NEXT TARGET]          │
+│    [COMPLETED]    │    [COMPLETED]    │   [IN PROGRESS — 5A READY]     │
 ├───────────────────┴───────────────────┴────────────────────────────────┤
 │ Phase 6: Safe Self-Modification & Autonomous System Evolution [PLANNED]│
 └────────────────────────────────────────────────────────────────────────┘
@@ -87,10 +87,9 @@ Progress is evaluated by verifiable, computable autonomous behavior rather than 
 - Governed Goal Evolution (`PERSISTENCE`, `OPTIMIZATION`, `REVISION`) with deterministic Anti-Goalpost-Moving enforcement.
 - Computable [AIA-13](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md) M3–M7 thresholds and Learning Effectiveness Acceptance Suite (`Scenarios A–E`).
 
-### Phase 5: Domain Experiments & Cross-Domain Collaboration *(Next Target)*
-- Longitudinal validation of `L3_GENERALIZED` learning across Investment ([AIA-05](file:///home/wade/src/github/aia/docs/specifications/AIA-05-Investment-Agent-Specification.md)), Coding, and Writing domain experiments.
-- Cross-domain delegation protocol (`DelegationRequest`).
-- Longitudinal experiment tracking ([AIA-15](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md)).
+### Phase 5: Domain Experiments & Cross-Domain Collaboration *(In Progress — Phase 5A Completed)*
+- **Phase 5A (Completed — Migration `012`)**: Generational Investment Decision Experiment (`G1` Frozen Rule-Based Control Baseline vs `G2 -> G2.1 -> G2.2` LLM Experimental Cohorts, isolated NT$100,000 ledgers, Brier + LogLoss event calibration separated from decision confidence, 5-regime classification matrix, and live `G1` Difference-in-Differences control verification bridged into Phase 4 `LearningEngine`).
+- **Phase 5B (Next Target)**: Longitudinal `L3_GENERALIZED` accumulation across Coding and Writing domain experiments, plus cross-domain delegation execution (`DelegationRequest`).
 
 ### Phase 6: Safe Self-Modification & Autonomous System Evolution *(Planned)*
 - Scope isolation: Level A (Domain), Level B (AIA Core - Human Approval Required), Level C (Governance - Locked via OS namespace & immutable storage protections).

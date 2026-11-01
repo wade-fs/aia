@@ -13,6 +13,7 @@ import (
 	"github.com/wade/aia/internal/domain/agent"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/eventbus"
+	"github.com/wade/aia/internal/experiment"
 	"github.com/wade/aia/internal/memory/retrieval"
 	"github.com/wade/aia/internal/orchestrator"
 	"github.com/wade/aia/internal/policy"
@@ -78,7 +79,9 @@ type App struct {
 	PolicyEvaluator  *policy.Evaluator
 	AutonomyRepo     *repository.AutonomyRepository
 	LearningRepo     *repository.LearningRepository
+	ExperimentRepo   *repository.ExperimentRepository
 	AutonomyEngine   *autonomy.Engine
+	ExperimentCtrl   *experiment.Controller
 }
 
 func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
@@ -114,6 +117,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	govRepo := repository.NewGovernanceRepository(db)
 	autonomyRepo := repository.NewAutonomyRepository(db)
 	learningRepo := repository.NewLearningRepository(db)
+	experimentRepo := repository.NewExperimentRepository(db)
 
 	taskRepo.SetChangeHook(func(ctx context.Context, taskID domain.ID, status task.TaskStatus, created bool) {
 		if bus != nil {
@@ -210,6 +214,16 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	})
 	autonomyEng.RegisterObserver("investment", autonomy.NewInvestmentObserver(invSvc))
 
+	expCtrl := experiment.NewController(experiment.Dependencies{
+		ExpRepo:          experimentRepo,
+		InvSvc:           invSvc,
+		LearningRepo:     learningRepo,
+		LearningEngine:   autonomyEng.LearningEngine(),
+		EventHistoryRepo: eventHistoryRepo,
+		GoalRepo:         goalRepo,
+		DefaultLLMDec:    experiment.NewAgyLLMGenerationDecider(prov, cfg.Runtime.WorkspaceDir),
+	})
+
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	pa := orchestrator.NewPersonalAgent(prov, retriever, taskSvc, scheduler, evaluator)
 	pa.SetAutonomyEngine(autonomyEng)
@@ -265,7 +279,9 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		PolicyEvaluator:  evaluator,
 		AutonomyRepo:     autonomyRepo,
 		LearningRepo:     learningRepo,
+		ExperimentRepo:   experimentRepo,
 		AutonomyEngine:   autonomyEng,
+		ExperimentCtrl:   expCtrl,
 	}
 
 	// Seed default domain agents, default project & recurring schedules
@@ -328,6 +344,8 @@ func (a *App) CreateWebHost() (*host.Host, string, error) {
 		AutonomyRepo:   a.AutonomyRepo,
 		ContinuityRepo: a.ContinuityRepo,
 		LearningRepo:   a.LearningRepo,
+		ExperimentRepo: a.ExperimentRepo,
+		ExperimentCtrl: a.ExperimentCtrl,
 	})
 
 	// 2. Register Agent Modules with isolated dedicated muxes

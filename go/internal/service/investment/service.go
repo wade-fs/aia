@@ -775,3 +775,227 @@ func (s *Service) ExecuteVirtualProposal(ctx context.Context, proposalID domain.
 	return newSnap, nil
 }
 
+// Repo returns the underlying InvestmentRepository for controlled multi-portfolio experiment orchestration.
+func (s *Service) Repo() *repository.InvestmentRepository {
+	return s.repo
+}
+
+// CreateIsolatedProfile initializes a clean NT$100,000 (or custom) isolated portfolio for a generational experiment cohort.
+func (s *Service) CreateIsolatedProfile(ctx context.Context, profileID domain.ID, name string, initialCashTWD int64, maxPositionPct float64) (*investment.PortfolioProfile, *investment.PortfolioSnapshot, error) {
+	return s.repo.CreateIsolatedProfile(ctx, profileID, name, initialCashTWD, maxPositionPct)
+}
+
+// GetSnapshotForProfile returns the latest point-in-time snapshot and positions for a specific portfolio profile.
+func (s *Service) GetSnapshotForProfile(ctx context.Context, profileID domain.ID) (*investment.PortfolioProfile, *investment.PortfolioSnapshot, []investment.Position, error) {
+	prof, err := s.repo.GetProfile(ctx, profileID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	snap, err := s.repo.GetLatestSnapshot(ctx, profileID)
+	if err != nil {
+		return prof, nil, nil, err
+	}
+	positions, err := s.repo.ListPositions(ctx, snap.ID)
+	if err != nil {
+		return prof, snap, nil, err
+	}
+	return prof, snap, positions, nil
+}
+
+// ProcessDecisionForProfile evaluates and records a decision (BUY, SELL, ADD, REDUCE, HOLD) against a specific isolated portfolio profile,
+// returning both the persisted Decision and any resulting risk-checked TradeProposal.
+func (s *Service) ProcessDecisionForProfile(
+	ctx context.Context,
+	profileID domain.ID,
+	sourceLabel string,
+	enforceMinConfidence bool,
+	input investment.AgyDecisionInput,
+	price float64,
+) (*investment.Decision, *investment.TradeProposal, error) {
+	prof, snap, positions, err := s.GetSnapshotForProfile(ctx, profileID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load profile %s: %w", profileID, err)
+	}
+	if sourceLabel == "" {
+		sourceLabel = "ANTIGRAVITY_LLM"
+	}
+
+	rawInputJSON, _ := json.Marshal(input)
+	now := clock.Now(ctx)
+
+	symbol := strings.TrimSpace(input.Symbol)
+	inst, err := s.repo.GetInstrumentBySymbol(ctx, input.Exchange, symbol)
+	if err != nil || inst == nil || !inst.IsActive {
+		return nil, nil, fmt.Errorf("invalid instrument symbol: %s", symbol)
+	}
+
+	rawAction := strings.ToUpper(strings.TrimSpace(input.Action))
+	var canonicalAction investment.DecisionType
+	switch rawAction {
+	case "BUY", "ADD":
+		canonicalAction = investment.DecisionBuy
+	case "SELL", "REDUCE":
+		canonicalAction = investment.DecisionSell
+	case "HOLD", "NO_ACTION", "CASH", "MONITOR":
+		canonicalAction = investment.DecisionHold
+	default:
+		return nil, nil, fmt.Errorf("unsupported action: %s", input.Action)
+	}
+
+	if enforceMinConfidence && canonicalAction != investment.DecisionHold && input.Confidence < 0.50 {
+		// Below actionable threshold -> safely downgrade to HOLD while recording low-confidence rationale
+		canonicalAction = investment.DecisionHold
+		input.Reasoning = append(input.Reasoning, fmt.Sprintf("Action %s downgraded to HOLD because decision confidence %.2f < 0.50", rawAction, input.Confidence))
+	}
+
+	var currentQty int64
+	for _, p := range positions {
+		if p.InstrumentID == inst.ID {
+			currentQty = p.Quantity
+			break
+		}
+	}
+
+	// Default partial sizing for ADD / REDUCE if TargetAmount was omitted
+	targetAmt := input.TargetAmount
+	if targetAmt <= 0 {
+		switch rawAction {
+		case "ADD":
+			targetAmt = int64(float64(snap.AvailableCash) * 0.25)
+		case "BUY":
+			targetAmt = int64(float64(snap.AvailableCash) * 0.40)
+		case "REDUCE":
+			if currentQty > 0 {
+				targetAmt = int64(float64(currentQty) * price * 0.50)
+			}
+		}
+	}
+
+	reasoningJSON, _ := json.Marshal(input.Reasoning)
+	risksJSON, _ := json.Marshal(input.Risks)
+	invalJSON, _ := json.Marshal(input.InvalidationRules)
+	actionResJSON, _ := json.Marshal(map[string]any{
+		"reference_price": price,
+		"raw_action":      rawAction,
+		"target_amount":   targetAmt,
+	})
+
+	dec := &investment.Decision{
+		ID:                         uuid.New().String(),
+		PortfolioProfileID:         prof.ID,
+		InstrumentID:               inst.ID,
+		PortfolioSnapshotID:        snap.ID,
+		DecisionType:               canonicalAction,
+		Confidence:                 input.Confidence,
+		ReasoningJSON:              string(reasoningJSON),
+		RisksJSON:                  string(risksJSON),
+		InvalidationConditionsJSON: string(invalJSON),
+		ExpectedHorizon:            input.ExpectedHorizon,
+		StrategyVersion:            input.StrategyVersion,
+		ActionResultJSON:           string(actionResJSON),
+		RawInputJSON:               string(rawInputJSON),
+		Source:                     sourceLabel,
+		CreatedAt:                  now,
+	}
+	if err := s.repo.SaveDecision(ctx, dec); err != nil {
+		return nil, nil, fmt.Errorf("save decision: %w", err)
+	}
+
+	if canonicalAction == investment.DecisionHold {
+		return dec, nil, nil
+	}
+
+	constraints, err := s.repo.ListConstraints(ctx, prof.ID)
+	if err != nil {
+		return dec, nil, err
+	}
+	sizing := investment.EvaluateTradeLimits(prof, snap, constraints, canonicalAction, targetAmt, price, currentQty, s.costCfg)
+	if sizing.Rejected {
+		rej := &investment.DecisionRejection{
+			ID:                 uuid.New().String(),
+			PortfolioProfileID: prof.ID,
+			RawOutput:          string(rawInputJSON),
+			ErrorsJSON:         fmt.Sprintf(`[%q]`, sizing.RejectionError),
+			Source:             "LIMITS_CHECK_GO",
+			CreatedAt:          now,
+		}
+		_ = s.repo.SaveDecisionRejection(ctx, rej)
+		return dec, nil, nil
+	}
+
+	propPayload, _ := json.Marshal(map[string]any{
+		"symbol":           symbol,
+		"raw_action":       rawAction,
+		"action":           string(canonicalAction),
+		"quantity":         sizing.Quantity,
+		"estimated_price":  price,
+		"gross_amount":     sizing.Cost.GrossAmount,
+		"broker_fee":       sizing.Cost.BrokerFee,
+		"transaction_tax":  sizing.Cost.TransactionTax,
+		"total_cost":       sizing.Cost.TotalCost,
+		"confidence":       input.Confidence,
+		"strategy_version": input.StrategyVersion,
+	})
+
+	proposal := &investment.TradeProposal{
+		ID:                   uuid.New().String(),
+		PortfolioProfileID:   prof.ID,
+		DecisionID:           dec.ID,
+		PortfolioSnapshotID:  snap.ID,
+		InstrumentID:         inst.ID,
+		Action:               canonicalAction,
+		Quantity:             sizing.Quantity,
+		EstimatedPrice:       price,
+		EstimatedGrossAmount: sizing.Cost.GrossAmount,
+		EstimatedTotalCost:   sizing.Cost.TotalCost,
+		ProposalJSON:         string(propPayload),
+		Status:               investment.ProposalPending,
+		StatusReason:         sizing.AdjustmentNote,
+		CreatedAt:            now,
+		ExpiresAt:            now.Add(24 * time.Hour),
+		UpdatedAt:            now,
+	}
+	if err := s.repo.SaveTradeProposal(ctx, proposal); err != nil {
+		return dec, nil, err
+	}
+	return dec, proposal, nil
+}
+
+// EvaluatePredictionsForProfile settles due predictions for a specific portfolio profile strictly <= AsOf.
+func (s *Service) EvaluatePredictionsForProfile(ctx context.Context, profileID domain.ID) ([]investment.PredictionOutcome, error) {
+	pending, err := s.repo.ListPredictionsForProfile(ctx, profileID, investment.PredictionPending, 200)
+	if err != nil {
+		return nil, err
+	}
+	now := clock.Now(ctx)
+	isReplay := clock.IsReplay(ctx)
+	var settled []investment.PredictionOutcome
+
+	for _, pred := range pending {
+		if pred.CreatedAt.After(now) {
+			continue
+		}
+		if now.Before(pred.DueAt) {
+			continue
+		}
+		settleCtx := ctx
+		if isReplay && pred.DueAt.Before(now) {
+			settleCtx = clock.WithAsOf(ctx, pred.DueAt, true)
+		}
+		md, err := s.repo.GetLatestMarketData(settleCtx, pred.InstrumentID)
+		currentPrice := pred.BasePrice
+		if err == nil && md != nil {
+			var bar investment.MarketBarValue
+			if json.Unmarshal([]byte(md.ValueJSON), &bar) == nil && bar.Close > 0 {
+				currentPrice = bar.Close
+			}
+		}
+		oc := investment.EvaluateSinglePrediction(pred, currentPrice, "TWSE_PIT_SETTLEMENT")
+		oc.EvaluatedAt = now
+		if err := s.repo.SavePredictionOutcome(ctx, oc); err == nil {
+			settled = append(settled, *oc)
+		}
+	}
+	return settled, nil
+}
+

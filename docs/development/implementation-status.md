@@ -1,8 +1,8 @@
 # AIA Development: Implementation Status
 
 **Project:** Autonomous Intelligence Architecture (AIA)  
-**Active Implementation Status:** **Phase 0 ～ Phase 4 Completed** (including **Phase 3.5 Platform Hardening**; Migrations `001` ～ `011` active)  
-**Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Active Workspace  
+**Active Implementation Status:** **Phase 0 ～ Phase 4 Completed + Phase 5A Generational Investment Experiment Implemented** (Migrations `001` ～ `012` active)  
+**Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Baseline [`0e189d9`](file:///home/wade/src/github/aia) ➔ Phase 5A Active Workspace  
 **Specification Baseline:** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-19) v2.0  
 **Audit Report:** [docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)  
 **Last Updated:** 2026-11-01  
@@ -34,8 +34,9 @@ go/
 │   ├── config/               # YAML configuration loader (incl. Budget & Sandbox configs)
 │   ├── continuity/           # ContextReconstructor & sanitized snapshot manager
 │   ├── domain/               # Core domain entities (continuity, knowledge, governance, goal,
-│   │                         #                       decision, autonomy, learning, investment, etc.)
+│   │                         #                       decision, autonomy, learning, experiment, investment)
 │   ├── eventbus/             # In-memory pub/sub event bus
+│   ├── experiment/           # Generational Experiment Controller (G1 frozen rules vs G2/G2.x LLM)
 │   ├── orchestrator/         # Scheduler & PersonalAgent Strangler-Fig coordinator
 │   ├── policy/               # Path/agent policies + hard daily token & cycle budget gates
 │   ├── provider/             # Antigravity CLI adapter (with env secret scrubbing & bwrap/systemd
@@ -43,7 +44,7 @@ go/
 │   ├── recovery/             # Process restart recovery manager
 │   ├── service/              # Application services (agent, task, exec, inv, mem, knowledge,
 │   │                         #                       approval, governance, goal + evolution)
-│   ├── storage/sqlite/       # SQLite WAL driver, migrations 001~011, repositories
+│   ├── storage/sqlite/       # SQLite WAL driver, migrations 001~012, repositories
 │   ├── validation/           # Hardened execution validator (output/artifact/fatal-marker checks)
 │   ├── web/                  # Port 7777 host, OTT/session auth, Console REST API (/api/v1/*)
 │   ├── worker/               # Background ScheduleWorker (15s), TaskWorker (5s, 3 slots)
@@ -71,11 +72,12 @@ go/
 | **`internal/domain/governance`** | **Production Ready (Phase 2)** | Governance Models & Controls | Approvals model (`TASK`, `DECISION`, `CORRECTION`, `GOAL`), risk tiers, runtime controls, strict human actor checks. |
 | **`internal/service/approval`** | **Production Ready (Phase 2)** | Operational Approval Gates | Scope-bound approvals, anti-self-approval enforcement, timeout policies. |
 | **`internal/service/governance`** | **Production Ready (Phase 2)** | Runtime Governance & Emergency Stop | Controlled Emergency Stop, dispatch freeze, human-only resume verification. |
-| **`internal/storage/sqlite`** | **Production Ready (Phase 4)** | Multi-schema persistence | Migrations `001`～`011` active with append-only hash chain, budget token columns, PiT `<= asOf` filtering, and learning/correction invariants. |
-| **`internal/cli`** | **Production Ready (Phase 4)** | CLI Administration & Tracing | Includes `decision`, `approval`, `stop/resume`, `cycle (--as-of --replay)`, `goal (evolve)`, and `learning (evals|rcas|corrections|records|evaluate|verify)`. |
+| **`internal/storage/sqlite`** | **Production Ready (Phase 5A)** | Multi-schema persistence | Migrations `001`～`012` active with append-only hash chain, budget token columns, PiT `<= asOf` filtering, learning invariants, and frozen `G1` generation triggers. |
+| **`internal/cli`** | **Production Ready (Phase 5A)** | CLI Administration & Tracing | Includes `decision`, `approval`, `stop/resume`, `cycle`, `goal`, `learning`, and `experiment (create-dual|list|generations|step|compare)`. |
 | **`internal/worker`** | **Production Ready (Phase 2)** | Runtime Concurrency Manager | Controlled Emergency Stop (<1s dispatch freeze, context cancellation, `CANCELLED` task persistence). |
-| **`internal/web/console`** | **Production Ready (Phase 4)** | Console REST API & Governance | Emergency Stop, Resume, Approvals, Cycles (`/api/v1/cycles`), Goals (`/api/v1/goals`), and Learnings (`/api/v1/learnings`). |
-| **`internal/service/investment`** | **Production Ready (Phase 3.5)** | Autonomous Investment Pilot | Local Materiality Gate, paper-trading virtual ledger, Brier calibration, and PiT replay live-fetch guard. |
+| **`internal/web/console`** | **Production Ready (Phase 5A)** | Console REST API & Governance | Emergency Stop, Resume, Approvals, Cycles (`/api/v1/cycles`), Goals (`/api/v1/goals`), Learnings (`/api/v1/learnings`), and Experiments (`/api/v1/experiments`). |
+| **`internal/service/investment`** | **Production Ready (Phase 5A)** | Multi-Portfolio & Dual Calibration | Isolated NT$100,000 cohort profiles, virtual settlement, Brier + LogLoss event calibration separated from Decision Confidence, and PiT replay guard. |
+| **`internal/experiment`** | **Production Ready (Phase 5A)** | Generational Experiment Controller | Frozen `G1` rule baseline vs `G2 -> G2.1 -> G2.2` LLM cohorts, 5-regime classification matrix, and live `G1` Difference-in-Differences control verification. |
 | **`internal/service/goal`** | **Production Ready (Phase 4)** | Goal Lifecycle & Governed Evolution | Ancestor cycle guard, `EvaluateGoalGap`, `goal_task_links`, 3-way `EvolveGoal`, and Anti-Goalpost-Moving guard. |
 | **`internal/recovery`** | **Production Ready (Phase 1)** | Complete Context Reconstruction | Task recovery integrated with project & goal context continuity. |
 | **`internal/policy`** | **Production Ready (Phase 3.5)** | Operational & Budget Policy | Whitelist boundaries, financial transaction lock, and pre-flight `EvaluateResourceBudget` (daily tokens & cycles). |
@@ -89,7 +91,7 @@ go/
 
 ## 3. Database Schema Status
 
-### Active Tables (Migrations 001 ~ 011)
+### Active Tables (Migrations 001 ~ 012)
 - `agents`: Registered agents, capabilities, configurations.
 - `tasks`: Work units, status machine (`READY`, `RUNNING`, `COMPLETED`, `WAITING_APPROVAL`).
 - `task_dependencies`: Inter-task DAG dependencies.
@@ -120,5 +122,11 @@ go/
 - `correction_actions`: Governed corrections bound to the 3-Tier Runtime Profile (`TIER1_AUTO`, `TIER2_APPROVAL`, `TIER3_BLOCKED`) with DB-level `CHECK` blocking `SCOPE_C` and `CODE_PATCH` in Phase 4, plus prior/proposed state snapshots for deterministic rollback (Migration 011).
 - `learning_records`: Epistemic learning records enforcing `L0_RECORDED` ～ `L3_GENERALIZED`, the 7 mandatory comparison fields (`baseline_json`, `hypothesis`, `intervention_json`, `verification_json`, `regression_json`, `follow_up_json`, `confidence`), `PRE_POST_ONLY <= 0.45` confidence cap, and negative constraint suppression (`suppressed_pattern_key`) (Migration 011).
 
-### Planned Schemas (Phase 5)
-- `experiments`, `delegation_requests` ── *Phase 5 (Migration 012)*
+- `experiments`, `experiment_goal_links`: Longitudinal autonomous experiments enforcing all 11 AIA-15 lifecycle states (Migration 012).
+- `experiment_generations`: Generational cohorts (`G1` frozen rule baseline vs `G2` / `G2.1` / `G2.2` LLM cohorts) with isolated portfolio profile bindings and SQLite triggers (`trg_exp_gen_freeze_update`, `trg_exp_gen_freeze_delete`) blocking mutation/deletion of frozen `G1` (Migration 012).
+- `experiment_comparisons`: Point-in-time Track A (performance + Brier/LogLoss & decision confidence calibration) and Track B (autonomy + 5-regime verdict) comparison snapshots (Migration 012).
+- `delegation_requests`: Cross-agent delegation contract records with acceptance gates (Migration 012).
+
+### Planned Domain Extensions (Phase 5B & Phase 6)
+- Coding & Writing longitudinal domain workflows + Cross-domain `DelegationRequest` runtime orchestration ── *Phase 5B*
+- Isolated sandbox self-modification pipeline ── *Phase 6*

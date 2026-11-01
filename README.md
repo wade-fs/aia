@@ -15,20 +15,20 @@ AIA 是一個以研究與實證 AI Agent 長期自主行為為目標的本機優
 
 ## 1. Current Status
 
-目前平台已完成 **Phase 0 ～ Phase 4（含 Phase 3.5 安全與回放加固）**，資料庫推進至 **Migration `011`**，並以 **Investment Module** 作為第一個閉環試驗場；下一階段為 **Phase 5（長期領域實驗與跨世代/跨領域驗證）**。
+目前平台已完成 **Phase 0 ～ Phase 4（含 Phase 3.5 安全與回放加固）** 以及 **Phase 5A（雙世代投資決策對照實驗 `G1` vs `G2 -> G2.x`）**，資料庫推進至 **Migration `012`**；下一階段為 **Phase 5B（Coding / Writing 領域深化與跨領域委派實證）**。
 
 | Domain Module | Status | Description |
 |---|---|---|
-| **Investment** | **PILOT READY (Phase 3.5)** | 台股虛擬資金帳本（NT$100,000）、Materiality Gate、預測與 Brier 校準、零前視偏差歷史回放（Phase 5 將展開長期跨世代對照實驗） |
-| **Coding** | **PLANNED (Phase 5)** | 程式碼架構分析、技術債探索、自動除錯與測試驗證 |
-| **Writing** | **PLANNED (Phase 5)** | 長期創作目標、人物年表、史料校勘與跨卷一致性管理 |
+| **Investment** | **GENERATIONAL EXPERIMENT READY (Phase 5A)** | 雙世代獨立 NT$100,000 帳本（`G1` 凍結規則基準組 vs `G2 -> G2.x` LLM 實驗演化組）、Brier + LogLoss 機率校準與行動信心分離、五大科學判讀矩陣與零前視偏差回放 |
+| **Coding** | **PLANNED (Phase 5B)** | 程式碼架構分析、技術債探索、自動除錯與測試驗證 |
+| **Writing** | **PLANNED (Phase 5B)** | 長期創作目標、人物年表、史料校勘與跨卷一致性管理 |
 
 ### 1.1 Core Implementation Status
 
 | Component | Status | Description |
 |---|---|---|
 | **Go Runtime & Workers** | **IMPLEMENTED** | 常駐 `ScheduleWorker`（15s）與 `TaskWorker`（5s，3 並行槽位）及啟動恢復（`Recovery`） |
-| **SQLite Persistence** | **IMPLEMENTED** | WAL 模式、Migrations `001`～`011`、Repository 層與防竄改 Triggers |
+| **SQLite Persistence** | **IMPLEMENTED** | WAL 模式、Migrations `001`～`012`、Repository 層與防竄改 Triggers |
 | **Continuity & Provenance** | **IMPLEMENTED (Phase 1)** | SHA-256 Hash-Chained `event_history`、5 維度 `sources`/`evidence`/`claims`、`ContextReconstructor` |
 | **Governance & Emergency Stop** | **IMPLEMENTED (Phase 2)** | Policy / Approval / Permission 三層分離、`< 1s` 受控緊急停止（`EMERGENCY_STOP`）與人類強制復歸 |
 | **Autonomy Core (11-Step Loop)** | **IMPLEMENTED (Phase 3)** | `Observe` ➔ `Recall` ➔ `Assess` ➔ `Discover` ➔ `Deliberate` ➔ `Decide` (`ACT`/`DEFER`/`MONITOR`/`ASK_HUMAN`/`NO_ACTION`) ➔ `Governance Check` ➔ `Execute` ➔ `Verify` ➔ `Learn` ➔ `Reassess` |
@@ -36,7 +36,8 @@ AIA 是一個以研究與實證 AI Agent 長期自主行為為目標的本機優
 | **Point-in-Time Replay Clock** | **IMPLEMENTED (Phase 3.5)** | `AsOf` 時鐘與 `<= asOf` 查詢過濾、回放模式即時網路阻斷，防範前視偏差（Look-Ahead Bias） |
 | **Self-Correction & Learning** | **IMPLEMENTED (Phase 4)** | 3-Tier Runtime Profile、`L0_RECORDED`～`L3_GENERALIZED` 四階成熟度、7 大科學對照欄位、退化自動回滾與負向約束 |
 | **Goal Evolution Engine** | **IMPLEMENTED (Phase 4)** | `PERSISTENCE` / `OPTIMIZATION` / `REVISION` 三態分流與 `STRATEGIC` 目標防移動球門守衛 |
-| **Experiment & Delegation** | **PLANNED (Phase 5)** | 長期對照實驗管理（`experiments`）與跨領域任務委派（`delegation_requests`） |
+| **Generational Experiment Engine** | **IMPLEMENTED (Phase 5A)** | `experiments` 11 狀態機、凍結 `G1` 活體對照組、`G2 -> G2.1 -> G2.2` 譜系演化與雙重差分（DiD）驗證橋接 |
+| **Cross-Domain Delegation** | **SCHEMA READY / PLANNED (Phase 5B)** | `delegation_requests` 資料契約已於 Migration `012` 建立，跨領域執行協調推進中 |
 | **Safe Code Self-Modification** | **PLANNED (Phase 6)** | 隔離工作區代碼自修、多層測試流水線、Diff Review 與異常自動回滾 |
 
 > **認識論聲明**：Phase 4 完成代表「可驗證的自我修正與學習基礎機制」已落地並通過合成對抗情境（Scenarios A～E）驗證，**不代表已宣稱完成通用長期自主學習**；跨週期泛化能力（`L3`）須在 Phase 5 長期實驗中持續檢驗。
@@ -155,7 +156,11 @@ aia approval list
 aia approval approve <approval-id> --actor human-admin --note "verified"
 aia decision list
 
-# 投資試驗模組
+# 投資試驗與雙世代對照實驗 (Phase 5A)
+aia experiment create-dual --project default --capital 100000
+aia experiment step <experiment-id> --symbol 2330 --as-of 2026-05-02T06:00:00Z
+aia experiment compare <experiment-id> --baseline G1 --candidate G2
+aia experiment generations <experiment-id>
 aia investment portfolio
 aia investment sync 2330
 aia investment proposals
@@ -176,7 +181,7 @@ aia investment evaluate
 | **Phase 2** | Operational Governance, Approvals & Controlled Emergency Stop (`009`) | **COMPLETED** |
 | **Phase 3 & 3.5** | 11-Step Autonomy Core, Initiative, Budget Gate, OS Sandbox & PiT Replay (`010`) | **COMPLETED** |
 | **Phase 4** | Verifiable Self-Correction, Learning Mechanism (`L0`–`L3`) & Governed Goal Evolution (`011`) | **COMPLETED** |
-| **Phase 5** | Longitudinal Domain Experiments (Investment G1/G2, Coding, Writing) & Cross-Domain Delegation (`012`) | **NEXT TARGET** |
+| **Phase 5** | Longitudinal Domain Experiments (`5A` Investment `G1` vs `G2`/`G2.x` **READY**; `5B` Coding, Writing & Delegation) (`012`) | **IN PROGRESS** |
 | **Phase 6** | Isolated Sandbox Safe Code Self-Modification & Autonomous System Evolution | **PLANNED** |
 
 ---

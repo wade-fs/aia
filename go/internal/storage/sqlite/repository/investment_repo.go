@@ -394,12 +394,19 @@ func (r *InvestmentRepository) ListDecisions(ctx context.Context, profileID doma
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := r.db.RawDB().QueryContext(ctx, `
+	query := `
 		SELECT id, portfolio_profile_id, instrument_id, portfolio_snapshot_id, task_id, research_report_id,
 			decision_type, confidence, reasoning_json, risks_json, invalidation_conditions_json,
 			expected_horizon, strategy_version, action_result_json, raw_input_json, source, created_at
-		FROM investment_decisions WHERE portfolio_profile_id = ? ORDER BY created_at DESC LIMIT ?
-	`, profileID, limit)
+		FROM investment_decisions WHERE portfolio_profile_id = ?`
+	args := []any{profileID}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND created_at <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY created_at DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -863,10 +870,12 @@ func (r *InvestmentRepository) SavePrediction(ctx context.Context, p *investment
 	_, err := r.db.RawDB().ExecContext(ctx, `
 		INSERT INTO investment_predictions (
 			id, decision_id, instrument_id, prediction_type, target, expected_direction,
-			probability, target_value, base_price, evaluation_horizon, due_at, strategy_version, status, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			probability, target_value, expected_return_pct, expected_range_low_pct, expected_range_high_pct,
+			base_price, evaluation_horizon, due_at, strategy_version, status, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, p.ID, p.DecisionID, p.InstrumentID, p.PredictionType, p.Target, p.ExpectedDirection,
-		p.Probability, p.TargetValue, p.BasePrice, p.EvaluationHorizon, p.DueAt.Format(time.RFC3339),
+		p.Probability, p.TargetValue, p.ExpectedReturnPct, p.ExpectedRangeLowPct, p.ExpectedRangeHighPct,
+		p.BasePrice, p.EvaluationHorizon, p.DueAt.Format(time.RFC3339),
 		p.StrategyVersion, string(p.Status), p.CreatedAt.Format(time.RFC3339))
 	return err
 }
@@ -874,14 +883,16 @@ func (r *InvestmentRepository) SavePrediction(ctx context.Context, p *investment
 func (r *InvestmentRepository) GetPrediction(ctx context.Context, id domain.ID) (*investment.Prediction, error) {
 	row := r.db.RawDB().QueryRowContext(ctx, `
 		SELECT id, decision_id, instrument_id, prediction_type, target, expected_direction,
-			probability, target_value, base_price, evaluation_horizon, due_at, strategy_version, status, created_at
+			probability, target_value, expected_return_pct, expected_range_low_pct, expected_range_high_pct,
+			base_price, evaluation_horizon, due_at, strategy_version, status, created_at
 		FROM investment_predictions WHERE id = ?
 	`, id)
 	var p investment.Prediction
 	var da, ca, st string
 	if err := row.Scan(
 		&p.ID, &p.DecisionID, &p.InstrumentID, &p.PredictionType, &p.Target, &p.ExpectedDirection,
-		&p.Probability, &p.TargetValue, &p.BasePrice, &p.EvaluationHorizon, &da, &p.StrategyVersion, &st, &ca,
+		&p.Probability, &p.TargetValue, &p.ExpectedReturnPct, &p.ExpectedRangeLowPct, &p.ExpectedRangeHighPct,
+		&p.BasePrice, &p.EvaluationHorizon, &da, &p.StrategyVersion, &st, &ca,
 	); err != nil {
 		return nil, err
 	}
@@ -897,7 +908,8 @@ func (r *InvestmentRepository) ListPredictions(ctx context.Context, status inves
 	}
 	query := `
 		SELECT id, decision_id, instrument_id, prediction_type, target, expected_direction,
-			probability, target_value, base_price, evaluation_horizon, due_at, strategy_version, status, created_at
+			probability, target_value, expected_return_pct, expected_range_low_pct, expected_range_high_pct,
+			base_price, evaluation_horizon, due_at, strategy_version, status, created_at
 		FROM investment_predictions
 	`
 	args := []any{}
@@ -920,7 +932,8 @@ func (r *InvestmentRepository) ListPredictions(ctx context.Context, status inves
 		var da, ca, st string
 		if err := rows.Scan(
 			&p.ID, &p.DecisionID, &p.InstrumentID, &p.PredictionType, &p.Target, &p.ExpectedDirection,
-			&p.Probability, &p.TargetValue, &p.BasePrice, &p.EvaluationHorizon, &da, &p.StrategyVersion, &st, &ca,
+			&p.Probability, &p.TargetValue, &p.ExpectedReturnPct, &p.ExpectedRangeLowPct, &p.ExpectedRangeHighPct,
+			&p.BasePrice, &p.EvaluationHorizon, &da, &p.StrategyVersion, &st, &ca,
 		); err != nil {
 			return nil, err
 		}
@@ -937,10 +950,10 @@ func (r *InvestmentRepository) SavePredictionOutcome(ctx context.Context, oc *in
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO investment_prediction_outcomes (
 				id, prediction_id, actual_value, actual_direction, outcome_status,
-				brier_score, evaluation_source_id, evaluated_at, details_json
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				brier_score, log_loss, evaluation_source_id, evaluated_at, details_json
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, oc.ID, oc.PredictionID, oc.ActualValue, oc.ActualDirection, oc.OutcomeStatus,
-			oc.BrierScore, oc.EvaluationSourceID, oc.EvaluatedAt.Format(time.RFC3339), oc.DetailsJSON)
+			oc.BrierScore, oc.LogLoss, oc.EvaluationSourceID, oc.EvaluatedAt.Format(time.RFC3339), oc.DetailsJSON)
 		if err != nil {
 			return err
 		}
@@ -955,7 +968,7 @@ func (r *InvestmentRepository) ListPredictionOutcomes(ctx context.Context, limit
 	}
 	rows, err := r.db.RawDB().QueryContext(ctx, `
 		SELECT id, prediction_id, actual_value, actual_direction, outcome_status,
-			brier_score, evaluation_source_id, evaluated_at, details_json
+			brier_score, log_loss, evaluation_source_id, evaluated_at, details_json
 		FROM investment_prediction_outcomes
 		ORDER BY evaluated_at DESC LIMIT ?
 	`, limit)
@@ -970,7 +983,7 @@ func (r *InvestmentRepository) ListPredictionOutcomes(ctx context.Context, limit
 		var ea string
 		if err := rows.Scan(
 			&oc.ID, &oc.PredictionID, &oc.ActualValue, &oc.ActualDirection, &oc.OutcomeStatus,
-			&oc.BrierScore, &oc.EvaluationSourceID, &ea, &oc.DetailsJSON,
+			&oc.BrierScore, &oc.LogLoss, &oc.EvaluationSourceID, &ea, &oc.DetailsJSON,
 		); err != nil {
 			return nil, err
 		}
@@ -978,6 +991,302 @@ func (r *InvestmentRepository) ListPredictionOutcomes(ctx context.Context, limit
 		list = append(list, oc)
 	}
 	return list, rows.Err()
+}
+
+// CreateIsolatedProfile initializes a clean, isolated virtual portfolio profile (e.g. NT$100,000 pure cash)
+// with Taiwan odd-lot support so G1, G2, and G2.x cohorts compete on identical starting conditions (AIA-05 §20.1).
+func (r *InvestmentRepository) CreateIsolatedProfile(
+	ctx context.Context,
+	profileID domain.ID,
+	name string,
+	initialCashTWD int64,
+	maxPositionPct float64,
+) (*investment.PortfolioProfile, *investment.PortfolioSnapshot, error) {
+	if profileID == "" {
+		profileID = uuid.New().String()
+	}
+	if initialCashTWD <= 0 {
+		initialCashTWD = 100000
+	}
+	if maxPositionPct <= 0 || maxPositionPct > 1.0 {
+		maxPositionPct = 0.85
+	}
+	if existing, err := r.GetProfile(ctx, profileID); err == nil && existing != nil {
+		snap, sErr := r.GetLatestSnapshot(ctx, profileID)
+		return existing, snap, sErr
+	}
+
+	now := clock.Now(ctx)
+	prof := &investment.PortfolioProfile{
+		ID:                 profileID,
+		Name:               name,
+		Market:             "TW",
+		Currency:           "TWD",
+		CapitalLimit:       initialCashTWD,
+		CapitalLimitBasis:  "TOTAL_EQUITY",
+		AutoTradingEnabled: false,
+		ConfigurationJSON:  `{"broker_discount":1.0,"allow_odd_lots":true}`,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	initialSnap := &investment.PortfolioSnapshot{
+		ID:                  uuid.New().String(),
+		PortfolioProfileID:  prof.ID,
+		AsOf:                now,
+		Source:              "EXPERIMENT_INITIAL_SEED",
+		Currency:            "TWD",
+		AvailableCash:       initialCashTWD,
+		TotalPortfolioValue: initialCashTWD,
+		ValidationStatus:    "VALIDATED",
+		MetadataJSON:        fmt.Sprintf(`{"initial_capital":%d}`, initialCashTWD),
+		CreatedAt:           now,
+	}
+
+	err := r.db.WithTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO investment_portfolio_profiles (
+				id, name, market, currency, capital_limit, capital_limit_basis,
+				auto_trading_enabled, configuration_json, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, prof.ID, prof.Name, prof.Market, prof.Currency, prof.CapitalLimit, prof.CapitalLimitBasis,
+			0, prof.ConfigurationJSON, prof.CreatedAt.Format(time.RFC3339), prof.UpdatedAt.Format(time.RFC3339))
+		if err != nil {
+			return err
+		}
+
+		constraints := []investment.Constraint{
+			{ID: uuid.New().String(), PortfolioProfileID: prof.ID, ConstraintType: "max_position_pct", ConstraintValue: fmt.Sprintf("%.2f", maxPositionPct), Enabled: true, CreatedAt: now, UpdatedAt: now},
+			{ID: uuid.New().String(), PortfolioProfileID: prof.ID, ConstraintType: "min_cash_pct", ConstraintValue: "0.05", Enabled: true, CreatedAt: now, UpdatedAt: now},
+			{ID: uuid.New().String(), PortfolioProfileID: prof.ID, ConstraintType: "allow_odd_lots", ConstraintValue: "true", Enabled: true, CreatedAt: now, UpdatedAt: now},
+		}
+		for _, c := range constraints {
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO investment_portfolio_constraints (id, portfolio_profile_id, constraint_type, constraint_value, enabled, created_at, updated_at)
+				VALUES (?, ?, ?, ?, 1, ?, ?)
+			`, c.ID, c.PortfolioProfileID, c.ConstraintType, c.ConstraintValue, c.CreatedAt.Format(time.RFC3339), c.UpdatedAt.Format(time.RFC3339)); err != nil {
+				return err
+			}
+		}
+
+		// Ensure standard TW instruments exist without mutating any existing portfolio
+		instruments := []investment.Instrument{
+			{ID: uuid.New().String(), Symbol: "2330", Exchange: "TWSE", AssetType: "EQUITY", Name: "台積電", Currency: "TWD", IsActive: true, CreatedAt: now, UpdatedAt: now},
+			{ID: uuid.New().String(), Symbol: "2317", Exchange: "TWSE", AssetType: "EQUITY", Name: "鴻海", Currency: "TWD", IsActive: true, CreatedAt: now, UpdatedAt: now},
+			{ID: uuid.New().String(), Symbol: "2454", Exchange: "TWSE", AssetType: "EQUITY", Name: "聯發科", Currency: "TWD", IsActive: true, CreatedAt: now, UpdatedAt: now},
+			{ID: uuid.New().String(), Symbol: "0050", Exchange: "TWSE", AssetType: "ETF", Name: "元大台灣50", Currency: "TWD", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		}
+		for _, inst := range instruments {
+			_, _ = tx.ExecContext(ctx, `
+				INSERT OR IGNORE INTO investment_instruments (id, symbol, exchange, asset_type, name, currency, is_active, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+			`, inst.ID, inst.Symbol, inst.Exchange, inst.AssetType, inst.Name, inst.Currency, inst.CreatedAt.Format(time.RFC3339), inst.UpdatedAt.Format(time.RFC3339))
+		}
+
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO investment_portfolio_snapshots (
+				id, portfolio_profile_id, as_of, source, currency, available_cash,
+				total_portfolio_value, validation_status, metadata_json, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, initialSnap.ID, initialSnap.PortfolioProfileID, initialSnap.AsOf.Format(time.RFC3339),
+			initialSnap.Source, initialSnap.Currency, initialSnap.AvailableCash, initialSnap.TotalPortfolioValue,
+			initialSnap.ValidationStatus, initialSnap.MetadataJSON, initialSnap.CreatedAt.Format(time.RFC3339))
+		return err
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("create isolated profile: %w", err)
+	}
+	return prof, initialSnap, nil
+}
+
+// ListSnapshotsForProfile returns chronological portfolio snapshots (<= AsOf when set) for equity curve & max drawdown computation.
+func (r *InvestmentRepository) ListSnapshotsForProfile(ctx context.Context, profileID domain.ID) ([]investment.PortfolioSnapshot, error) {
+	query := `
+		SELECT id, portfolio_profile_id, as_of, source, currency, available_cash, total_portfolio_value, validation_status, metadata_json, created_at
+		FROM investment_portfolio_snapshots WHERE portfolio_profile_id = ?`
+	args := []any{profileID}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND as_of <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY as_of ASC, rowid ASC`
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []investment.PortfolioSnapshot
+	for rows.Next() {
+		var s investment.PortfolioSnapshot
+		var ao, ca string
+		if err := rows.Scan(&s.ID, &s.PortfolioProfileID, &ao, &s.Source, &s.Currency, &s.AvailableCash, &s.TotalPortfolioValue, &s.ValidationStatus, &s.MetadataJSON, &ca); err != nil {
+			return nil, err
+		}
+		s.AsOf, _ = time.Parse(time.RFC3339, ao)
+		s.CreatedAt, _ = time.Parse(time.RFC3339, ca)
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// MarkToMarketProfile records an updated point-in-time snapshot valuing held positions at current AsOf prices.
+func (r *InvestmentRepository) MarkToMarketProfile(ctx context.Context, profileID domain.ID, prices map[domain.ID]float64) (*investment.PortfolioSnapshot, error) {
+	snap, err := r.GetLatestSnapshot(ctx, profileID)
+	if err != nil {
+		return nil, err
+	}
+	positions, err := r.ListPositions(ctx, snap.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(positions) == 0 {
+		return snap, nil
+	}
+
+	var totalPosVal int64
+	for i := range positions {
+		if px, ok := prices[positions[i].InstrumentID]; ok && px > 0 {
+			positions[i].LastKnownPrice = px
+			positions[i].MarketValue = int64(float64(positions[i].Quantity)*px + 0.5)
+		}
+		totalPosVal += positions[i].MarketValue
+	}
+
+	now := clock.Now(ctx)
+	mtmSnap := &investment.PortfolioSnapshot{
+		ID:                  uuid.New().String(),
+		PortfolioProfileID:  profileID,
+		AsOf:                now,
+		Source:              "MARK_TO_MARKET",
+		Currency:            snap.Currency,
+		AvailableCash:       snap.AvailableCash,
+		TotalPortfolioValue: snap.AvailableCash + totalPosVal,
+		ValidationStatus:    "VALIDATED",
+		MetadataJSON:        `{"reason":"mark_to_market"}`,
+		CreatedAt:           now,
+	}
+
+	err = r.db.WithTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO investment_portfolio_snapshots (
+				id, portfolio_profile_id, as_of, source, currency, available_cash,
+				total_portfolio_value, validation_status, metadata_json, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, mtmSnap.ID, mtmSnap.PortfolioProfileID, mtmSnap.AsOf.Format(time.RFC3339),
+			mtmSnap.Source, mtmSnap.Currency, mtmSnap.AvailableCash, mtmSnap.TotalPortfolioValue,
+			mtmSnap.ValidationStatus, mtmSnap.MetadataJSON, mtmSnap.CreatedAt.Format(time.RFC3339)); err != nil {
+			return err
+		}
+		for _, pos := range positions {
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO investment_portfolio_positions (
+					id, portfolio_snapshot_id, instrument_id, quantity, average_cost,
+					last_known_price, market_value, currency, metadata_json
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`, uuid.New().String(), mtmSnap.ID, pos.InstrumentID, pos.Quantity, pos.AverageCost,
+				pos.LastKnownPrice, pos.MarketValue, pos.Currency, pos.MetadataJSON); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mtmSnap, nil
+}
+
+// ListPredictionsForProfile returns predictions linked to decisions of a specific portfolio profile.
+func (r *InvestmentRepository) ListPredictionsForProfile(ctx context.Context, profileID domain.ID, status investment.PredictionStatus, limit int) ([]investment.Prediction, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	query := `
+		SELECT p.id, p.decision_id, p.instrument_id, p.prediction_type, p.target, p.expected_direction,
+			p.probability, p.target_value, p.expected_return_pct, p.expected_range_low_pct, p.expected_range_high_pct,
+			p.base_price, p.evaluation_horizon, p.due_at, p.strategy_version, p.status, p.created_at
+		FROM investment_predictions p
+		JOIN investment_decisions d ON d.id = p.decision_id
+		WHERE d.portfolio_profile_id = ?`
+	args := []any{profileID}
+	if status != "" {
+		query += ` AND p.status = ?`
+		args = append(args, string(status))
+	}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND p.created_at <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY p.created_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []investment.Prediction
+	for rows.Next() {
+		var p investment.Prediction
+		var da, ca, st string
+		if err := rows.Scan(
+			&p.ID, &p.DecisionID, &p.InstrumentID, &p.PredictionType, &p.Target, &p.ExpectedDirection,
+			&p.Probability, &p.TargetValue, &p.ExpectedReturnPct, &p.ExpectedRangeLowPct, &p.ExpectedRangeHighPct,
+			&p.BasePrice, &p.EvaluationHorizon, &da, &p.StrategyVersion, &st, &ca,
+		); err != nil {
+			return nil, err
+		}
+		p.DueAt, _ = time.Parse(time.RFC3339, da)
+		p.CreatedAt, _ = time.Parse(time.RFC3339, ca)
+		p.Status = investment.PredictionStatus(st)
+		list = append(list, p)
+	}
+	return list, rows.Err()
+}
+
+// ListPredictionOutcomesForProfile returns prediction outcomes linked to a specific portfolio profile, plus a map keyed by DecisionID.
+func (r *InvestmentRepository) ListPredictionOutcomesForProfile(ctx context.Context, profileID domain.ID, limit int) ([]investment.PredictionOutcome, map[string]investment.PredictionOutcome, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	query := `
+		SELECT o.id, o.prediction_id, o.actual_value, o.actual_direction, o.outcome_status,
+			o.brier_score, o.log_loss, o.evaluation_source_id, o.evaluated_at, o.details_json, p.decision_id
+		FROM investment_prediction_outcomes o
+		JOIN investment_predictions p ON p.id = o.prediction_id
+		JOIN investment_decisions d ON d.id = p.decision_id
+		WHERE d.portfolio_profile_id = ?`
+	args := []any{profileID}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND o.evaluated_at <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY o.evaluated_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	var list []investment.PredictionOutcome
+	byDec := make(map[string]investment.PredictionOutcome)
+	for rows.Next() {
+		var oc investment.PredictionOutcome
+		var ea, decID string
+		if err := rows.Scan(
+			&oc.ID, &oc.PredictionID, &oc.ActualValue, &oc.ActualDirection, &oc.OutcomeStatus,
+			&oc.BrierScore, &oc.LogLoss, &oc.EvaluationSourceID, &ea, &oc.DetailsJSON, &decID,
+		); err != nil {
+			return nil, nil, err
+		}
+		oc.EvaluatedAt, _ = time.Parse(time.RFC3339, ea)
+		list = append(list, oc)
+		byDec[decID] = oc
+	}
+	return list, byDec, rows.Err()
 }
 
 func (r *InvestmentRepository) SaveEvaluationResult(ctx context.Context, ev *investment.EvaluationResult) error {
@@ -1154,4 +1463,39 @@ func (r *InvestmentRepository) SettleVirtualProposal(ctx context.Context, propos
 	}
 
 	return newSnap, nil
+}
+
+// SaveDataSnapshot records a Point-in-Time Research DataSnapshot and its items (AIA-05 §10, §20.1).
+func (r *InvestmentRepository) SaveDataSnapshot(ctx context.Context, snap *investment.DataSnapshot, items []investment.SnapshotItem) error {
+	now := clock.Now(ctx)
+	if snap.CreatedAt.IsZero() {
+		snap.CreatedAt = now
+	}
+	return r.db.WithTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO investment_data_snapshots (
+				id, snapshot_type, data_cutoff_at, instrument_scope_json, source_versions_json,
+				validation_summary_json, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
+		`, snap.ID, string(snap.SnapshotType), snap.DataCutoffAt.Format(time.RFC3339),
+			snap.InstrumentScopeJSON, snap.SourceVersionsJSON, snap.ValidationSummaryJSON,
+			snap.CreatedAt.Format(time.RFC3339))
+		if err != nil {
+			return err
+		}
+		for _, it := range items {
+			if it.CreatedAt.IsZero() {
+				it.CreatedAt = now
+			}
+			_, err = tx.ExecContext(ctx, `
+				INSERT INTO investment_snapshot_items (
+					id, snapshot_id, item_type, reference_id, payload_json, created_at
+				) VALUES (?, ?, ?, ?, ?, ?)
+			`, it.ID, snap.ID, string(it.ItemType), it.ReferenceID, it.PayloadJSON, it.CreatedAt.Format(time.RFC3339))
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

@@ -1,6 +1,6 @@
 # AIA Go Workspace (`go/`)
 
-This directory contains the Go runtime, 11-step Autonomy Core, SQLite persistence layer (Migrations `001`–`011`), embedded Web Console, Cobra CLI, and automated unit/integration test suites for **AIA (Autonomous Intelligence Architecture)**.
+This directory contains the Go runtime, 11-step Autonomy Core, Generational Experiment Controller, SQLite persistence layer (Migrations `001`–`012`), embedded Web Console, Cobra CLI, and automated unit/integration test suites for **AIA (Autonomous Intelligence Architecture)**.
 
 ---
 
@@ -26,12 +26,13 @@ go/
 │   ├── continuity/           # ContextReconstructor & sanitized snapshots
 │   ├── domain/               # Pure domain models & invariants
 │   ├── eventbus/             # In-process pub/sub event bus
+│   ├── experiment/           # Generational Experiment Controller (G1 frozen baseline vs G2/G2.x LLM)
 │   ├── orchestrator/         # Scheduler & PersonalAgent Strangler-Fig facade
 │   ├── policy/               # Path/financial policies & pre-flight token/cycle budget gates
 │   ├── provider/             # Antigravity CLI (agy) sandboxed adapter & mock executor
 │   ├── recovery/             # Startup crash recovery
 │   ├── service/              # Application services (task, exec, inv, knowledge, approval, goal)
-│   ├── storage/sqlite/       # SQLite WAL connection pool, migrations 001~011 & repositories
+│   ├── storage/sqlite/       # SQLite WAL connection pool, migrations 001~012 & repositories
 │   ├── validation/           # Output/artifact/fatal-marker execution validator
 │   ├── web/                  # Loopback HTTP host (7777), OTT auth & Console REST API
 │   ├── worker/               # Resident ScheduleWorker (15s) & TaskWorker (5s, 3 slots)

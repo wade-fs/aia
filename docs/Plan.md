@@ -4,7 +4,53 @@
 **文件版本：** v2.0 (Official Baseline)  
 **文件狀態：** Formal Plan & Architectural Baseline  
 **依賴基準：** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-19)  
+**現有代碼基準：** Git commit `7597902` (保留現有 Go Runtime、Worker Concurrency、CLI、Web Console、Migration 001～006)  
 **最後更新：** 2026-11-01  
+
+---
+
+## 0. AIA 核心自主演進憲章與開發哲學 (AIA Engineering Charter)
+
+> [!IMPORTANT]
+> **AIA 終極研發共識：**  
+> **不要預先替 AIA 寫死它應該怎麼思考，而是建立讓它能「觀察、判斷、嘗試、犯錯、修正與驗證」的機制。**  
+> 例如投資 Agent，不要替它寫死台積電應該買多少；Coding Agent，不要只讓它按照固定流程修 Bug；Writing Agent，也不要把人物、劇情和歷史修正全部限制成固定模板。  
+> **我們要設計的是「能力與治理邊界」，而不是替 Agent 預先寫好所有答案。**  
+> 這也是為什麼七個階段必須循序漸進：我們不是在開發一個功能繁多的 AI 工具，而是在建立一個能長期持續運作、逐步改善自身表現的自主系統。
+
+### 0.1 終極五大研發鐵律 (The Five Golden Rules)
+1. **不要為了新架構犧牲舊功能**：既有已驗證的 Go Runtime、Worker、CLI、Web Console 與 SQLite 資料是寶貴工程資產，優先相容擴充，絕不推倒重寫。
+2. **不要為了完成資料表而忽略資料的語意與生命週期**：先確立資料模型、依賴關係與生命週期狀態機，再落筆 Migration。
+3. **不要把自動化當成自主性**：定時排程、自動產生 Task、記住字串或微調 Prompt 不等於主動思考與時間連續性。
+4. **不要讓 Agent 自己成為自己的最高權限管理者**：治理獨立於自主決策之外；Agent 絕不能自行擴權、解除審批或竄改審計日誌。
+5. **不要以功能完成作為自主性完成的證明**：資料表落地與測試全綠只是手段；唯一的驗收標準是系統在真實情境下的自主行為。
+
+### 0.2 五層職責分離架構 (Separation of Concerns)
+AIA 嚴禁職責混淆，嚴防 Worker 演變為決策核心：
+- **Autonomy Core (`internal/autonomy/`)**：決定「做什麼、為什麼做、何時做」。負責深思推演、主動發現與成效評估。
+- **Runtime (`internal/app/`, `internal/worker/`)**：負責「如何調度與持續運作」。負責排程、派發隊列、並行槽位控制與重啟恢復。
+- **Worker (`TaskWorker`, `ScheduleWorker`)**：負責「具體工單執行」。專注於執行任務、心跳回報與微觀事件收集。
+- **Domain Agent (`Investment`, `Coding`, `Writing`)**：負責「領域專業情境判斷」。提供領域知識、專業分析與特定目標評估。
+- **Harness Adapter (`Antigravity`, `Subprocess`)**：提供「底層 AI 模型與工具執行沙盒環境」。
+
+### 0.3 治理邊界與執行驗證底線 (Governance Boundaries)
+1. **權限單向約束**：Agent 可以提出目標變更與代碼修訂提案，但絕對無法自行擴張權限、解除 Policy、繞過 Approval 或解除 Emergency Stop。
+2. **審計防竄改**：Audit 歷史與 Hash-chained Event History 具備應用層防竄改 Triggers，Agent 無權刪改。
+3. **嚴防 Harness 虛假成功**：**嚴禁僅憑 Harness 回傳 exit code 0 就認定工單成功**；Worker 必須深度比對工具調用事件、執行錯誤日誌、實際產出成果與 Workspace Diff，方可標記 Task 完成。
+4. **受控自我修改**：嚴格落實 Scope A/B/C 分級。所有代碼修正必須在獨立隔離沙盒執行，產出 Diff Review，通過 V1～V6 驗證流水線，並具備異常自動回滾機制。
+
+### 0.4 行為驗收對照矩陣 (Behavioral Verification vs Code Verification)
+每個階段的驗收必須超越單元測試，直接檢驗實質自主行為：
+
+| 自主能力面向 | 不應只驗收 (功能層次) | 真正必須驗收的自主行為 (行為層次) |
+|---|---|---|
+| **Continuity** (時間連續性) | Memory 資料表可以讀寫查詢 | 任意強制 `kill -9` 後，跨 Session 完整還原長期工作脈絡與未決事項 |
+| **Initiative** (主動性) | 程式能按排程自動產生 Task | 在完全沒有人類下達新指令時，自發觀察環境並發現值得處理的高價值問題 |
+| **Deliberation** (深思推演) | 程式能夠呼叫 LLM 取得文字 | 能理性比較行動與不行動的成本效益，在情勢平穩時做出有據可查的 `NO_ACTION` |
+| **Self-Correction** (自我修正) | 程式碼或 Prompt 檔案可以被覆寫 | 能自發比對預期與實際成果，執行 RCA 找出根因，提出修正方案並驗證後續效果 |
+| **Goal Evolution** (目標演化) | Goal 資料表的欄位可以更新 | 能根據長期執行數據與環境反饋，客觀評估既定目標是否仍值得追求並提出修訂 |
+| **Experiment** (長週期實驗) | Experiment 資料表能記錄工單 | 能持續數週/數月維持對照假設驗證、累積數據並產出統計結論 |
+| **Self-Modification** (代碼自修) | 程式能向磁碟寫入 Go 代碼 | 能在獨立隔離沙盒內自主修復工具邊界缺陷、通過全套驗證、受控部署且異常自動回滾 |
 
 ---
 

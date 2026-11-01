@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/wade/aia/internal/autonomy"
@@ -15,6 +16,8 @@ var (
 	cycleProjectID string
 	cycleTrigger   string
 	cycleSummary   string
+	cycleAsOf      string
+	cycleReplay    bool
 	cycleLimit     int
 )
 
@@ -47,12 +50,24 @@ var cycleRunCmd = &cobra.Command{
 			sum = "Manual autonomy cycle invocation via CLI"
 		}
 
+		var asOfPtr *time.Time
+		if cycleAsOf != "" {
+			parsed, pErr := time.Parse(time.RFC3339, cycleAsOf)
+			if pErr != nil {
+				return fmt.Errorf("invalid --as-of timestamp (expected RFC3339): %w", pErr)
+			}
+			u := parsed.UTC()
+			asOfPtr = &u
+		}
+
 		fmt.Println("⏳ Initiating 11-step Autonomy Closed Loop...")
 		outcome, err := appInst.AutonomyEngine.RunCycle(ctx, autonomy.RunCycleInput{
 			ProjectID:   projID,
 			TriggerType: trigType,
 			TriggerRef:  "cli",
 			Summary:     sum,
+			AsOf:        asOfPtr,
+			ReplayMode:  cycleReplay || asOfPtr != nil,
 		})
 		if err != nil {
 			return fmt.Errorf("autonomy cycle failed: %w", err)
@@ -184,6 +199,8 @@ func init() {
 	cycleRunCmd.Flags().StringVarP(&cycleProjectID, "project", "p", "default", "Target project ID")
 	cycleRunCmd.Flags().StringVarP(&cycleTrigger, "trigger", "t", "MANUAL", "Cycle trigger type (SCHEDULED, MANUAL, EVENT_TRIGGERED)")
 	cycleRunCmd.Flags().StringVarP(&cycleSummary, "summary", "s", "", "Cycle intent or run summary")
+	cycleRunCmd.Flags().StringVar(&cycleAsOf, "as-of", "", "Point-in-Time historical timestamp (RFC3339) for zero-look-ahead replay")
+	cycleRunCmd.Flags().BoolVar(&cycleReplay, "replay", false, "Run in Point-in-Time replay mode (blocks live HTTP fetches)")
 	cycleListCmd.Flags().IntVarP(&cycleLimit, "limit", "n", 20, "Maximum cycles to list")
 
 	cycleCmd.AddCommand(cycleRunCmd)

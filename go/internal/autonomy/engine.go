@@ -3,10 +3,12 @@ package autonomy
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/wade/aia/internal/autonomy/cycle"
 	"github.com/wade/aia/internal/autonomy/deliberation"
 	"github.com/wade/aia/internal/autonomy/initiative"
+	"github.com/wade/aia/internal/autonomy/learning"
 	"github.com/wade/aia/internal/autonomy/observation"
 	"github.com/wade/aia/internal/autonomy/recall"
 	domainAutonomy "github.com/wade/aia/internal/domain/autonomy"
@@ -33,6 +35,8 @@ type Dependencies struct {
 	AutonomyRepo     *repository.AutonomyRepository
 	DecisionRepo     *repository.DecisionRepository
 	ContinuityRepo   *repository.ContinuityRepository
+	ExecutionRepo    *repository.ExecutionRepository
+	LearningRepo     *repository.LearningRepository
 	GoalRepo         *repository.GoalRepository
 	EventHistoryRepo *repository.EventHistoryRepository
 	KnowledgeRepo    *repository.KnowledgeRepository
@@ -56,15 +60,18 @@ type RunCycleInput struct {
 	GoalID                   *string
 	Summary                  string
 	MaxConcurrentActiveTasks int
+	AsOf                     *time.Time
+	ReplayMode               bool
 }
 
 // Engine exposes the unified Autonomy Core API while delegating to modular subpackages:
-// observation, recall, initiative, deliberation, and cycle (AIA-08, AIA-09, AIA-18, Plan Phase 3 §4.1).
+// observation, recall, initiative, deliberation, learning, and cycle (AIA-08, AIA-09, AIA-11, AIA-18).
 type Engine struct {
 	obsRegistry *observation.Registry
 	recallEng   *recall.Engine
 	discoverer  *initiative.Discoverer
 	deliberator *deliberation.Deliberator
+	learningEng *learning.Engine
 	coordinator *cycle.Coordinator
 	cfg         EngineConfig
 }
@@ -109,8 +116,23 @@ func NewEngineWithDeps(deps Dependencies) *Engine {
 		deps.ProjectRepo,
 		deps.TaskRepo,
 	)
+	if deps.LearningRepo != nil {
+		recallEng.SetLearningRepository(deps.LearningRepo)
+	}
 	disc := initiative.NewDiscoverer(deps.AutonomyRepo)
 	delib := deliberation.NewDeliberator()
+	var learnEng *learning.Engine
+	if deps.LearningRepo != nil {
+		learnEng = learning.NewEngine(learning.Dependencies{
+			LearningRepo:     deps.LearningRepo,
+			KnowledgeRepo:    deps.KnowledgeRepo,
+			MemoryRepo:       deps.MemoryRepo,
+			DecisionRepo:     deps.DecisionRepo,
+			EventHistoryRepo: deps.EventHistoryRepo,
+			AuditRepo:        deps.AuditRepo,
+			ApprovalSvc:      deps.ApprovalSvc,
+		})
+	}
 
 	coord := cycle.NewCoordinator(cycle.CoordinatorDeps{
 		ObserverRegistry: obsReg,
@@ -120,6 +142,7 @@ func NewEngineWithDeps(deps Dependencies) *Engine {
 		AutonomyRepo:     deps.AutonomyRepo,
 		DecisionRepo:     deps.DecisionRepo,
 		ContinuityRepo:   deps.ContinuityRepo,
+		ExecutionRepo:    deps.ExecutionRepo,
 		GoalRepo:         deps.GoalRepo,
 		EventHistoryRepo: deps.EventHistoryRepo,
 		KnowledgeRepo:    deps.KnowledgeRepo,
@@ -141,6 +164,7 @@ func NewEngineWithDeps(deps Dependencies) *Engine {
 		recallEng:   recallEng,
 		discoverer:  disc,
 		deliberator: delib,
+		learningEng: learnEng,
 		coordinator: coord,
 		cfg:         deps.Config,
 	}
@@ -162,6 +186,10 @@ func (e *Engine) RecallEngine() *recall.Engine {
 	return e.recallEng
 }
 
+func (e *Engine) LearningEngine() *learning.Engine {
+	return e.learningEng
+}
+
 // RunCycle executes one complete 11-step Autonomy Closed Loop.
 func (e *Engine) RunCycle(ctx context.Context, in RunCycleInput) (*domainAutonomy.CycleOutcome, error) {
 	maxConc := in.MaxConcurrentActiveTasks
@@ -175,6 +203,8 @@ func (e *Engine) RunCycle(ctx context.Context, in RunCycleInput) (*domainAutonom
 		GoalID:                   in.GoalID,
 		Summary:                  in.Summary,
 		MaxConcurrentActiveTasks: maxConc,
+		AsOf:                     in.AsOf,
+		ReplayMode:               in.ReplayMode,
 	})
 	if errors.Is(err, cycle.ErrEmergencyStopped) {
 		return nil, ErrAutonomyEmergencyStopped

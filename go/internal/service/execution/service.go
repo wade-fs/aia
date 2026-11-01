@@ -13,6 +13,7 @@ import (
 	"github.com/wade/aia/internal/domain/execution"
 	"github.com/wade/aia/internal/domain/profile"
 	"github.com/wade/aia/internal/domain/task"
+	"github.com/wade/aia/internal/policy"
 	"github.com/wade/aia/internal/provider"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 	"github.com/wade/aia/internal/validation"
@@ -27,6 +28,7 @@ type Service struct {
 	prov         provider.Provider
 	wsMgr        *workspace.Manager
 	validator    validation.Validator
+	evaluator    *policy.Evaluator
 }
 
 func NewService(
@@ -49,7 +51,22 @@ func NewService(
 	}
 }
 
+func (s *Service) SetPolicyEvaluator(eval *policy.Evaluator) {
+	s.evaluator = eval
+}
+
 func (s *Service) Execute(ctx context.Context, t *task.Task, ag *agent.Agent, prof profile.ExecutionProfile, contextPrompt string) (*execution.Execution, error) {
+	now := time.Now().UTC()
+	if s.evaluator != nil && s.execRepo != nil {
+		dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		if usedTokens, tErr := s.execRepo.SumTokensSince(ctx, dayStart); tErr == nil {
+			bDec := s.evaluator.EvaluateResourceBudget(ctx, ag.ID, usedTokens, 0)
+			if !bDec.Allowed {
+				return nil, fmt.Errorf("execution blocked by budget gate: %s", bDec.Reason)
+			}
+		}
+	}
+
 	execID := uuid.New().String()
 
 	// 1. Prepare Workspace
@@ -59,7 +76,7 @@ func (s *Service) Execute(ctx context.Context, t *task.Task, ag *agent.Agent, pr
 	}
 
 	// 2. Create Execution in STARTING state
-	now := time.Now().UTC()
+	now = time.Now().UTC()
 	execRecord := &execution.Execution{
 		ID:             execID,
 		TaskID:         t.ID,
@@ -166,7 +183,28 @@ func (s *Service) Execute(ctx context.Context, t *task.Task, ag *agent.Agent, pr
 
 	execRecord.ConversationID = result.ConversationID
 	execRecord.ResultStatus = result.Status
+	execRecord.InputTokens = result.Usage.InputTokens
+	execRecord.OutputTokens = result.Usage.OutputTokens
+	execRecord.TotalTokens = result.Usage.TotalTokens
+	if execRecord.TotalTokens == 0 && (execRecord.InputTokens > 0 || execRecord.OutputTokens > 0) {
+		execRecord.TotalTokens = execRecord.InputTokens + execRecord.OutputTokens
+	}
 	_ = s.execRepo.Update(ctx, execRecord)
+
+	if s.evaluator != nil {
+		limits := s.evaluator.GetBudgetLimits()
+		if limits.MaxSingleExecutionTokens > 0 && execRecord.TotalTokens > limits.MaxSingleExecutionTokens && s.auditRepo != nil {
+			_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+				ID:           uuid.New().String(),
+				ActorType:    "PROVIDER",
+				ActorID:      ag.ID,
+				Action:       "SINGLE_EXECUTION_TOKEN_CAP_EXCEEDED",
+				ResourceType: "EXECUTION",
+				ResourceID:   execID,
+				Outcome:      "WARNING",
+			})
+		}
+	}
 
 	// 8. Result Validation
 	valReq := validation.ValidationRequest{

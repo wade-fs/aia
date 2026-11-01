@@ -2,9 +2,9 @@
 
 **文件代號：** AIA-DEV-MIG-01  
 **適用資料庫：** SQLite (WAL 模式)  
-**文件狀態：** Planned Architecture  
+**文件狀態：** Active Baseline (Migrations `001`～`011` Implemented; `012` Planned for Phase 5)  
 **依賴基準：** [docs/architecture/data-model.md](file:///home/wade/src/github/aia/docs/architecture/data-model.md)  
-**現有代碼基準：** Git commit `7597902` (已內建 Migration Version 1 ～ 6)  
+**現有代碼基準：** Git commit `7597902` 凍結資產 + Phase 1～4 已落地遷移 (`007`～`011`)  
 **最後更新：** 2026-11-01  
 
 ---
@@ -146,17 +146,16 @@
 
 ---
 
-### Phase 4 交付：自我修正與持續學習 (Migration 011)
+### Phase 4 交付：可驗證自我修正、學習機制與目標演化 (Migration 011) [IMPLEMENTED]
 
 #### **`011_learning_and_correction.sql`**
-*依賴：依賴 `008` 的 `autonomy_cycles`、`decisions`、現有 `tasks`。*
-- 建立 `outcome_evaluations`：預期成果 vs 實際成果落差量測（`cycle_id`, `decision_id`, `task_id`, `expected_outcome_json`, `actual_outcome_json`, `discrepancy_score`, `is_anomaly`, `evaluation_status`）。
-- 建立 `root_cause_analyses`：根因歸類與分析結論（**外鍵明確關聯至 `outcome_evaluation_id REFERENCES outcome_evaluations(id)`**，`root_cause_category`, `analysis_narrative`, `confidence`）。
-- 建立 `correction_actions`：
-  - **徹底分離修正類型與授權等級**：
-    - `correction_type TEXT CHECK (correction_type IN ('FACT', 'JUDGMENT', 'STRATEGY', 'PROMPT', 'WORKFLOW', 'CODE'))`
-    - `authorization_level TEXT CHECK (authorization_level IN ('C0', 'C1', 'C2', 'C3', 'C4', 'C5'))`
-  - 欄位：`rca_id REFERENCES root_cause_analyses(id)`, `target_entity_ref`, `before_state_json`, `proposed_state_json`, `applied_state_json`, `approval_id REFERENCES approvals(id)`, `verification_status`。
+*依賴：依賴 `008` 的 `autonomy_cycles`、`decisions`、`goals`、`009` 的 `approvals` 與現有 `tasks`、`executions`。*
+- **擴充 `executions` 表**：新增 `input_tokens`、`output_tokens`、`total_tokens` 欄位（支撐每日 Token 預算硬閘門聚合）。
+- 建立 `outcome_evaluations`：預期成果 vs 實際成果落差量測（`cycle_id`, `decision_id`, `task_id`, `project_id`, `domain`, `expected_outcome_json`, `actual_outcome_json`, `discrepancy_score`, `is_anomaly`, `evaluation_status`）。
+- 建立 `root_cause_analyses`：具證據錨點與可證偽假設之根因分析（外鍵關聯 `outcome_evaluation_id REFERENCES outcome_evaluations(id)`，含 `falsifiable_hypothesis`, `causal_evidence_refs_json`, `competing_factors_json`, `rca_validity_status`, `confidence`）。
+- 建立 `correction_actions`：徹底分離 `scope_level` (`A/B/C`)、`correction_type` (`FACT/JUDGMENT/STRATEGY/PROMPT/WORKFLOW/CODE`)、`authorization_level` (`C0~C5`)、`validation_level` (`V1~V6`) 與 `tier_profile` (`TIER1_AUTO/TIER2_APPROVAL/TIER3_BLOCKED`)，含 `regression_status` 與四態結論（支援 `INCONCLUSIVE` 與 `REGRESSED`）。
+- 建立 `learning_records`：強制保存 7 大科學對照欄位（`baseline_json`, `hypothesis_json`, `intervention_json`, `verification_json`, `regression_json`, `followup_json`, `epistemic_confidence`）、對照方法（`CONTROL_BENCHMARK / PIT_REPLAY / SIMILAR_COHORT / PRE_POST_ONLY`）與 `L0_RECORDED ~ L3_GENERALIZED` 成熟度分級。
+- 建立 `goal_evolution_proposals`：支援 `PERSISTENCE | OPTIMIZATION | REVISION` 三態分流與「防移動球門 (`invalidated_claim_ids_json`, `REJECTED_GOALPOST_MOVING`)」審批追蹤。
 
 ---
 

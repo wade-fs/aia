@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/wade/aia/internal/autonomy/clock"
 	"github.com/wade/aia/internal/domain/continuity"
 	"github.com/wade/aia/internal/storage/sqlite"
 )
@@ -193,19 +194,24 @@ func (r *ContinuityRepository) GetSnapshot(ctx context.Context, id string) (*con
 	return s, nil
 }
 
-// GetLatestSnapshotByProject returns the newest snapshot for a specific project.
+// GetLatestSnapshotByProject returns the newest snapshot for a specific project (respecting clock.AsOf if set).
 func (r *ContinuityRepository) GetLatestSnapshotByProject(ctx context.Context, projectID string) (*continuity.ContextSnapshot, error) {
 	query := `
 	SELECT id, scope, project_id, snapshot_type, workspace_state_json, active_tasks_json, recent_decisions_json, pending_issues_json, created_at
 	FROM context_snapshots 
-	WHERE project_id = ? 
-	ORDER BY created_at DESC, rowid DESC LIMIT 1`
+	WHERE project_id = ?`
+	args := []any{projectID}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND created_at <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY created_at DESC, rowid DESC LIMIT 1`
 
 	s := &continuity.ContextSnapshot{}
 	var createdStr string
 	var projID sql.NullString
 
-	err := r.db.RawDB().QueryRowContext(ctx, query, projectID).Scan(
+	err := r.db.RawDB().QueryRowContext(ctx, query, args...).Scan(
 		&s.ID, &s.Scope, &projID, &s.SnapshotType, &s.WorkspaceStateJSON, &s.ActiveTasksJSON, &s.RecentDecisionsJSON, &s.PendingIssuesJSON, &createdStr,
 	)
 	if err != nil {
@@ -215,4 +221,19 @@ func (r *ContinuityRepository) GetLatestSnapshotByProject(ctx context.Context, p
 	s.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 	s.ProjectID = projID.String
 	return s, nil
+}
+
+// CountCyclesSince counts autonomy cycles started at or after `since` (used by the daily budget gate).
+func (r *ContinuityRepository) CountCyclesSince(ctx context.Context, since time.Time, upTo *time.Time) (int, error) {
+	query := `SELECT COUNT(1) FROM autonomy_cycles WHERE started_at >= ?`
+	args := []any{since.UTC().Format(time.RFC3339)}
+	if upTo != nil && !upTo.IsZero() {
+		query += ` AND started_at <= ?`
+		args = append(args, upTo.UTC().Format(time.RFC3339))
+	}
+	var count int
+	if err := r.db.RawDB().QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }

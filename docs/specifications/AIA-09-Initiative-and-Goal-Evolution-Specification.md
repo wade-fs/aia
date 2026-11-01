@@ -1435,3 +1435,21 @@ AIA-09 的核心不是讓 Agent 不斷產生工作，而是讓 Agent 能夠自�
 目標演化讓 AIA 知道為什麼要做，以及原本的方法是否仍然值得繼續。
 
 兩者結合，才使時間連續性真正轉化為持續的自主行為。
+
+---
+
+# 25. 目標演化三態分流與「防移動球門」硬性治理約束 (v2.1 Normative Addendum)
+
+當長期運作結果與目標指標產生落差時，AIA 必須明確區分以下三種演化模式，嚴禁混淆「方法失敗」與「目標錯誤」：
+
+| 演化模式 | 核心問題 | 適用情境 | 系統允許動作 | 授權要求 |
+|---|---|---|---|---|
+| **Goal Persistence** | 原本目標是否仍值得繼續？ | 策略短期遭遇逆風但基本前提仍成立；或目標合理但算力/預算/資料資源暫時不足 | 維持 `ACTIVE`，或因資源瓶頸轉為 `PAUSED` 並記錄約束，**嚴禁修改目標指標** | `C0~C1`（暫停須留存證據與通知） |
+| **Goal Optimization** | 有沒有更好的達成方式？ | 頂層目標仍合理，但現行執行策略、閾值或子任務拆解效率不佳 | **鎖定頂層 `STRATEGIC` Goal 的名稱與 `TargetMetricJSON` 不變**，僅調整下層 `Strategy` 或重組 `OPERATIONAL` 子目標 | `C1~C2` |
+| **Goal Revision** | 原本的目標本身是否已失效？ | 支撐原目標的外部前提主張（Premise Claims）已被新證據推翻 | 提出含前後指標 Diff 的 `GoalEvolutionProposal`，經核准後寫入 `goal_revisions` | **`STRATEGIC` 強制人類 `Approval` (`C3`)** |
+
+## 25.1 防移動球門硬規則 (Anti-Goalpost-Moving Guard)
+
+1. **禁止因虧損或未達標自行降級目標**：例如 Investment Agent 目標為「最大化總資產」，絕對不能因為短期投資虧損，就自行將目標改寫為「降低波動」以美化帳面績效。
+2. **單純績效落後退件規則**：若 `ActorType == AGENT` 對 `STRATEGIC` Goal 提出 `REVISION`，但僅附帶指標落後（Metric Shortfall）而未附上至少一筆經知識庫確認已失效/衝突之前提主張（`invalidated_claim_ids`），Runtime 必須直接退回（`REJECTED_GOALPOST_MOVING`），強制導向 `PERSISTENCE` 或 `OPTIMIZATION`。
+3. **零直接寫入權**：Agent 對 `STRATEGIC` Goal 僅具備提案權（`ProposeEvolution`），唯有通過人類顯式 `Approval` 後，系統方可推進 `goal_revisions` 版本號並更新目標定義。

@@ -75,12 +75,30 @@ This guarantees that other local non-root users cannot read stored API tokens.
 
 ---
 
-## 4. Execution Workspace Isolation
+## 4. Execution Workspace & Subprocess OS Isolation
 
-When executing tasks via domain agents or Antigravity (`agy`):
-- **Project Sandbox:** Agents are confined to the designated `project_path`.
-- **Restricted Tooling:** Antigravity harnesses use fine-grained permission flags, disallowing arbitrary system modification unless explicitly approved.
-- **Task Approval Gates:** Tasks marked with elevated risk transition to `WAITING_APPROVAL`, requiring explicit user confirmation before any state-mutating execution proceeds.
+### 4.1 Threat Model: Single-UID Subprocess Escalation
+Because `aia.service` runs under `systemd --user` and spawns external CLI harnesses (`agy`) that can execute shell commands, relying solely on Go-level `PolicyEvaluator` checks or SQLite triggers/hash-chains is **insufficient**:
+- Under an unisolated single `$UID`, a child shell process could inherit `service.env` variables from parent process memory, directly open `~/.local/share/aia/aia.db` via `sqlite3`, `DROP TRIGGER trg_event_history_no_update`, or modify AIA governance code on disk.
+- Hash chains (`event_history`) provide **tamper detection**, NOT **tamper prevention**.
+
+### 4.2 Three-Layer OS Isolation Architecture
+To make Level B (Core Runtime) and Level C (Governance/Policy/Audit) write protection genuinely enforceable against shell-capable subprocesses, AIA enforces defense-in-depth at the OS boundary (`internal/provider/antigravity/sandbox.go`):
+
+1. **Layer 1 — Mandatory Environment Whitelist Scrubbing (`ScrubEnvironment`)**:
+   - Every child `exec.Cmd` explicitly constructs a clean `cmd.Env` whitelist (`PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL`, `TERM`, `TMPDIR`).
+   - All secrets loaded from `~/.config/aia/service.env` (`*_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `DATABASE_*`, `AIA_*`) are stripped unconditionally before `cmd.Start()`.
+
+2. **Layer 2 — Linux Mount Namespace Isolation (`bwrap` / `systemd-run --user`)**:
+   - Subprocesses execute inside an unprivileged mount namespace (`SandboxMode: auto | bwrap | systemd | strict`) probed against real kernel execution capability (`ProbeBwrap` / `ProbeSystemdUser`, never trusting `LookPath` alone):
+     - **Read-Only Root & AIA Core (`Level B/C`)**: `/` and the AIA source/binary tree (especially `internal/policy`, `internal/service/governance`, `internal/service/approval`) are mounted **read-only (`--ro-bind` / `ReadOnlyPaths=/`)**.
+     - **Inaccessible / Masked State & Secrets**: `~/.config/aia` (`service.env`) and `~/.local/share/aia` (SQLite `.db`, WAL/SHM files, OTT session secrets) are masked via `--tmpfs` / `InaccessiblePaths=` so child processes cannot read or mutate the SQLite database or drop triggers.
+     - **Confined Read-Write Workspace**: Only the task's dedicated `WorkDir` (`workspaces/<execution_id>`) and ephemeral `/tmp` are mounted read-write.
+   - **Fail-Closed Enforcement (`RequireOSNamespace: true`)**: High-risk tasks and Phase 6 code self-modification profiles fail closed (`ErrOSSandboxUnavailable`) if kernel namespace isolation is unavailable on the host.
+
+3. **Layer 3 — Dual-UID Production Hardening (Required for Phase 6 Autonomous Code Evolution)**:
+   - For unattended Phase 6 deployments, run the control plane (`aia` daemon owning SQLite & `service.env` with `0600` permissions) as user `aia-daemon`, and invoke external `agy` workers via a constrained `sudo -u aia-worker` wrapper so the OS DAC kernel permission model enforces UID separation independent of namespaces.
+   - Task Approval Gates (`WAITING_APPROVAL`) remain enforced at Step 7 (`Governance Check`) prior to spawning any subprocess.
 
 ---
 

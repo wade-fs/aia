@@ -15,10 +15,18 @@ type Config struct {
 	Runtime      RuntimeConfig      `yaml:"runtime"`
 	Database     DatabaseConfig     `yaml:"database"`
 	Provider     ProviderConfig     `yaml:"provider"`
+	Budget       BudgetConfig       `yaml:"budget"`
 	Memory       MemoryConfig       `yaml:"memory"`
 	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
 	Logging      LoggingConfig      `yaml:"logging"`
 	DataSources  DataSourcesConfig  `yaml:"data_sources"`
+}
+
+type BudgetConfig struct {
+	MaxDailyTokens           int64   `yaml:"max_daily_tokens"`
+	MaxDailyCycles           int     `yaml:"max_daily_cycles"`
+	MaxSingleExecutionTokens int64   `yaml:"max_single_execution_tokens"`
+	MaxDailySpend            float64 `yaml:"max_daily_spend"`
 }
 
 type DataSourcesConfig struct {
@@ -54,14 +62,19 @@ type ProviderConfig struct {
 }
 
 type AntigravityConfig struct {
-	Executable      string        `yaml:"executable"`
-	RequiredVersion string        `yaml:"required_version"`
-	VersionPolicy   string        `yaml:"version_policy"`
-	OutputFormat    string        `yaml:"output_format"`
-	InputFormat     string        `yaml:"input_format"`
-	DefaultTimeout  time.Duration `yaml:"default_timeout"`
-	SandboxRequired bool          `yaml:"sandbox_required"`
-	SkipPermissions bool          `yaml:"skip_permissions"`
+	Executable         string        `yaml:"executable"`
+	RequiredVersion    string        `yaml:"required_version"`
+	VersionPolicy      string        `yaml:"version_policy"`
+	OutputFormat       string        `yaml:"output_format"`
+	InputFormat        string        `yaml:"input_format"`
+	DefaultTimeout     time.Duration `yaml:"default_timeout"`
+	SandboxRequired    bool          `yaml:"sandbox_required"`
+	SandboxMode        string        `yaml:"sandbox_mode"` // "auto", "bwrap", "systemd", "strict", "env_only"
+	RequireOSNamespace bool          `yaml:"require_os_namespace"`
+	HiddenPaths        []string      `yaml:"hidden_paths"`
+	ReadOnlyPaths      []string      `yaml:"read_only_paths"`
+	AllowedEnvVars     []string      `yaml:"allowed_env_vars"`
+	SkipPermissions    bool          `yaml:"skip_permissions"`
 }
 
 type MemoryConfig struct {
@@ -117,8 +130,19 @@ func DefaultConfig() *Config {
 				InputFormat:     "stream-json",
 				DefaultTimeout:  30 * time.Minute,
 				SandboxRequired: true,
+				SandboxMode:     "auto",
+				HiddenPaths: []string{
+					filepath.Join(home, ".config", "aia"),
+					dataDir,
+				},
 				SkipPermissions: false,
 			},
+		},
+		Budget: BudgetConfig{
+			MaxDailyTokens:           500000,
+			MaxDailyCycles:           48,
+			MaxSingleExecutionTokens: 120000,
+			MaxDailySpend:            100000,
 		},
 		Memory: MemoryConfig{
 			MaxContextItems:    20,

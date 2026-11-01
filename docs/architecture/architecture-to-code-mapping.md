@@ -1,10 +1,13 @@
 # AIA 架構與程式碼映射對照表 (Architecture-to-Code Mapping)
 
 **文件代號：** AIA-ARCH-MAP-01  
-**程式碼基準點：** Commit [`7597902`](file:///home/wade/src/github/aia) (`feat: add AIA Activity Monitor for CLI and Web Console`)  
+**歷史盤點基準點：** Commit [`7597902`](file:///home/wade/src/github/aia) (`feat: add AIA Activity Monitor for CLI and Web Console`)  
 **對照規格：** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-19)  
-**文件狀態：** Baseline Reference  
+**文件狀態：** Phase 0 Historical Baseline Audit Reference  
 **最後更新：** 2026-11-01  
+
+> [!NOTE]
+> **歷史快照說明**：本文件完整保留 **Phase 0（Commit `7597902`）啟動前的歷史差距盤點基準**，用以對照既有資產保護邊界。目前系統已完成 **Phase 0 ～ Phase 4（含 Phase 3.5 加固，Migrations `001`～`011`）**，最新模組與資料表實作狀態請參閱 [implementation-status.md](file:///home/wade/src/github/aia/docs/development/implementation-status.md) 與 [roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md)。  
 
 ---
 

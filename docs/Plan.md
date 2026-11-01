@@ -424,60 +424,75 @@ Autonomy Cycle (自主循環核心樞紐)
 
 ---
 
-### Phase 4 — Self-Correction & Goal Evolution (自我修正、持續學習與目標演化)
+### Phase 4 — Verifiable Self-Correction & Goal Evolution (可驗證自我修正、學習機制與目標演化)
 
-#### 1. 階段核心目標
-讓 AIA 真正具備從過去經驗中學習並自我進化的能力。貫通 [AIA-11](file:///home/wade/src/github/aia/docs/specifications/AIA-11-Self-Correction-and-Learning-Specification.md) 完整的根本原因分析 (RCA) 與自我修正閉環；依據實際長期成效推動 [AIA-09](file:///home/wade/src/github/aia/docs/specifications/AIA-09-Initiative-and-Goal-Evolution-Specification.md) 的目標演化 (Goal Evolution)。
+#### 1. 階段核心目標與定位校正
+**定位校正：Phase 4 不宣稱「完成自我學習」，而是「建立可驗證的自我修正與學習機制 (Verifiable Self-Correction & Learning Mechanism)」。**  
+真正的長期跨週期泛化學習能力（`L3`），由 Phase 5 的 Investment、Coding、Writing 長期實驗提供實證資料，Phase 6 再於作業系統級隔離約束下開放程式碼演進。
+
+本階段貫通 [AIA-11](file:///home/wade/src/github/aia/docs/specifications/AIA-11-Self-Correction-and-Learning-Specification.md) 可證偽根因分析 (Falsifiable RCA)、Baseline 對照驗證與失敗經驗保留機制；並落實 [AIA-09](file:///home/wade/src/github/aia/docs/specifications/AIA-09-Initiative-and-Goal-Evolution-Specification.md) 具備「防移動球門 (Anti-Goalpost-Moving)」治理保護的目標演化。
 
 #### 2. 對應規格
 [AIA-09](file:///home/wade/src/github/aia/docs/specifications/AIA-09-Initiative-and-Goal-Evolution-Specification.md), [AIA-11](file:///home/wade/src/github/aia/docs/specifications/AIA-11-Self-Correction-and-Learning-Specification.md), [AIA-13](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md)
 
-#### 3. 自我修正標準流水線
+#### 3. 可驗證自我修正與學習流水線
 ```text
 Expected Outcome (預期成效) vs Actual Outcome (實際成效)
                      │
                      ▼
-        Discrepancy Detection (落差偵測)
+        Discrepancy Detection (落差偵測 → L0 Experience Recorded)
                      │
                      ▼
-          Root Cause Analysis (RCA 根因歸納)
+   Falsifiable Root Cause Analysis (具因果證據錨點與競爭解釋之根因假設)
                      │
                      ▼
-       Correction Proposal (六層修正提案)
+       Correction Proposal (對準根因之修正提案 + 3-Tier 查表授權分流)
                      │
                      ▼
-     Risk Assessment & Authorization (風險評估與授權)
+     Controlled Correction (受控套用 → L1 Correction Applied)
                      │
                      ▼
-           Controlled Correction (受控修正執行)
+  Baseline / Control & Regression Verification (對照驗證 + 退化檢查)
+          ├── EFFECTIVE + 無退化 ──► L2 Correction Verified
+          ├── INCONCLUSIVE (無對照/樣本不足) ──► 信心鎖上限 (<= 0.45)
+          └── REGRESSED / INEFFECTIVE ──► 自動回滾並保留為反面約束 (Anti-Pattern)
                      │
                      ▼
-          Verification (修正後驗證與學習落盤)
+  Cross-Scenario Generalization (跨循環/異質情境重複驗證正向 ──► L3 Learning Generalized)
 ```
 
 #### 4. 關鍵實作項目
-1. **徹底分離自修的四個正交維度 (AIA-11 & AIA-14)**：
+1. **四個正交命名空間 + Runtime 三層查表式收斂 (Table-Driven 3-Tier Profile)**：
+   - 資料模型維持 **Scope (`A/B/C`)**、**Correction Type (`FACT/JUDGMENT/STRATEGY/PROMPT/WORKFLOW/CODE`)**、**Authorization (`C0~C5`)**、**Validation (`V1~V6`)** 四維正交欄位不混用；但在 Runtime 執行層收斂為精簡的 **3 層 Profile**，避免單人維護過度複雜的狀態機：
+     - **Tier 1（自動生效）**：`Scope A` + `FACT / JUDGMENT` (`C0~C1`, `V1~V2`) —— 如過期知識失效標記、記憶信心權重微調，通過不變量驗證後自動生效。
+     - **Tier 2（人類審批生效）**：`Scope A/B` + `STRATEGY / PROMPT / WORKFLOW` (`C2~C3`, `V3~V5`) —— 統一產生 `approvals` 審批單，核准後方可套用。
+     - **Tier 3（Phase 6 凍結區）**：`Scope B/C` + `CODE` (`C4~C5`, `V4~V6`) —— 在 Phase 6 沙箱未啟用前硬性 `BLOCKED`。
+   - **RCA 與 Evaluation 外鍵綁定及結構防呆**：`root_cause_analyses` 強制關聯 `outcome_evaluation_id`，並要求填寫 `causal_evidence_refs_json`、`falsifiable_hypothesis` 與 `competing_factors_json`，分離「根因假設真偽 (`rca_validity_status`)」與「介入手段成敗 (`effectiveness_verdict`)」。
+2. **學習成熟度分級 (`L0~L3`) 與 7 大科學對照紀錄 (`learning_records`)**：
+   - 每筆修正與學習紀錄強制保存：**`Baseline`**、**`Hypothesis`**、**`Intervention`**、**`Verification`**、**`Regression`**、**`Follow-up`**、**`Confidence`**。
+   - 驗證結論採四態：**`EFFECTIVE` | `INEFFECTIVE` | `REGRESSED` | `INCONCLUSIVE`（證據不足）**；若缺少對照組或 Point-in-Time 回放基準（`PRE_POST_ONLY`），系統強制將信心值鎖死於 `<= 0.45` 且最高僅能判定為 `INCONCLUSIVE`。
+   - **Recall 連動防污染**：`L0/L1` 不得提高決策權重；`L2/L3` 作為正向經驗召回；`REGRESSED/INEFFECTIVE` 作為反面警示（禁止重複提案失敗修法）；禁止同週期自封 `L3`。
+3. **Goal Evolution 三態分流與「防移動球門 (Anti-Goalpost-Moving)」約束**：
+   - 明確區分 **`PERSISTENCE`（持續/資源受限暫停）**、**`OPTIMIZATION`（鎖定頂層目標指標不變，僅優化下層策略/子目標）**、**`REVISION`（目標本身修訂）**。
+   - **防移動球門硬規則**：嚴禁 Agent 因投資虧損或指標未達標就自行把「最大化總資產」偷改為「降低波動」。程式碼層禁止 `AGENT` 直接修改 `STRATEGIC` Goal；若提案僅有績效落後而無「前提主張被新證據推翻 (`invalidated_claim_ids`)」，系統直接拒絕修訂並強制導向 `OPTIMIZATION`；合法修訂提案亦須經人類 `Approval` 簽核後寫入 `goal_revisions`。
+4. **Phase 3.5 安全與評估基建（支撐 Phase 4 實證之必要地基）**：
+   - **預算硬閘門**：每日 Token / 自主循環次數上限閘道，超標自動安全降級為 `DEFER`。
+   - **子行程 OS 隔離**：`cmd.Env` 白名單淨化（剝離 `service.env` 密鑰）+ Linux Mount Namespace 路徑遮蔽（保護 `~/.config/aia` 與 SQLite DB）。
+   - **Point-in-Time (`AsOf` Clock) 零前視偏差回放器**：所有 SQLite 查詢過濾 `<= as_of` 並阻斷即時網路請求，提供快速 A/B 對照基準。
 
-   AIA 嚴格避免將「修正類型」與「授權等級」混淆，採用四個獨立命名空間：
+#### 5. 行為驗收標準：Learning Effectiveness Acceptance (Milestone M5 & M6)
+> **核心原則**：不要求每一次修正都成功，但要求 AIA **能憑基準與對照正確分辨「有效學習」、「無效學習（含外部順風假陽性）」、「造成退化」與「證據不足」**。
 
-   | 維度 | 命名規範 | 語意範疇 | 規範定義 |
-   |---|---|---|---|
-   | **修改範圍** | **Scope A / B / C** | 影響之程式碼邊界 | A=領域工具/Prompt；B=Runtime/Core；C=治理核心（Agent 禁止自修） |
-   | **修正類型** | **Correction Type** | 「修正的是什麼對象」 | `FACT` (事實), `JUDGMENT` (判斷), `STRATEGY` (策略), `PROMPT` (提示詞), `WORKFLOW` (工作流), `CODE` (程式碼) |
-   | **授權等級** | **Authorization Level C0～C5** | 「需要何種層級授權」 | C0 (自主安全), C1 (低風險通知), C2 (專案核准), C3 (策略核准), C4 (系統行為), C5 (核心代碼最高審批) |
-   | **驗證深度** | **Validation Level V1～V6** | 「須經過哪些驗證關卡」 | V1 (Static) → V2 (Unit) → V3 (Integration) → V4 (Regression) → V5 (Behavioral) → V6 (Benchmark) |
-
-   - **RCA 與 Evaluation 外鍵綁定**：`root_cause_analyses` 嚴格透過 `outcome_evaluation_id` 外鍵關聯至 `outcome_evaluations`，杜絕孤兒根因記錄。
-2. **Goal Evolution 深化模組**：
-   - 實作目標進度追蹤評估、目標優先級動態調整、目標拆解 (Decomposition)、目標合併 (Merge) 與目標修訂提案 (Revision Proposal)。
-   - 重大目標修訂強制產出版本比對並呈報人類審批。
-3. **[AIA-13](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md) 評估指標導入**：
-   - 自動化計算「預測校準誤差 (Brier Score)」、「決策修正收斂率」與「目標推進達成率」。
-
-#### 5. 行為驗收標準 (Milestone M5 & M6)
-- [ ] **主動故障修正驗證**：模擬任務產出與預期指標產生顯著落差時，系統能自動觸發 RCA，產出根因歸類並提出對應授權等級 (C0～C3) 的修正方案。
-- [ ] **學習有效性驗證**：修正紀錄寫入記憶後，在後續相同的模擬情境中，系統能引用該學習成果做出更優決策。
-- [ ] **目標演化紀錄**：目標調整過程具備完整版本差異與修訂動機紀錄，禁止覆蓋歷史目標。
+- [x] **情境 A（真有效學習 `L0 -> L1 -> L2 -> L3`）**：注入明確缺陷 → 提出具證據錨點的可檢驗 RCA 假設與對準根因之修正 → 經 Baseline/對照回放驗證改善且無退化（`EFFECTIVE`, `L2`）→ 於後續跨週期異質情境自動召回並改善決策（晉升 `L3`）。
+- [x] **情境 B（假陽性順風辨識）**：套用無效修正但外部環境順風（如大盤普漲使帳面獲利）→ 對照基準顯示無超額改善 → 系統必須判定為 `INEFFECTIVE` 或 `INCONCLUSIVE`，嚴禁誤標為 `EFFECTIVE`。
+- [x] **情境 C（退化攔截與反面記憶）**：修正改善單一指標但破壞既有能力/回歸檢查 → 自動攔截回滾並標記 `REGRESSED`，後續週期能召回此反面經驗不再重犯。
+- [x] **情境 D（防移動球門目標演化）**：模擬連續虧損但基本面假設未變 → 系統拒絕擅自降級或偷換 `STRATEGIC` 目標指標，正確歸類為 `PERSISTENCE` / `OPTIMIZATION` 或送交人類審批，並完整保留 `goal_revisions` 歷史。
+- **M3～M7 可計算量化門檻**（詳見 [AIA-13 §21](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md)）：
+  - **M3**：低於顯著性閾值時 `NO_ACTION` 精確率 $= 100\%$、活躍目標重複建單率 $= 0\%$、重大事件漏報率 $\le 5\%$。
+  - **M4**：跨重啟脈絡重建一致率 $= 100\%$、無證據支撐之 `FACT_BASED` 結論採信率 $= 0\%$。
+  - **M5**：對照組假陽性誤判率 $= 0\%$、退化修正放行率 $= 0\%$、$N \ge 30$ 結算預測 `Brier Score <= 0.25` 且有效修正後 $\Delta\text{Brier} < 0$。
+  - **M6**：未經核准之 `STRATEGIC` 目標變更率 $= 0\%$、單純未達標偷換目標攔截率 $= 100\%$。
+  - **M7**：跨代理越權寫入率 $= 0\%$、沙箱測試未全綠之自修部署率 $= 0\%$。
 
 ---
 
@@ -609,11 +624,12 @@ Expected Outcome (預期成效) vs Actual Outcome (實際成效)
 
 ---
 
-## 6. 立即執行指南 (Pre-Implementation Action Checklist)
+## 6. 階段推進紀錄與架構確認基線 (Milestone Progression & Architectural Baseline)
 
-> [!IMPORTANT]
-> **遵照指導方針：暫不啟動任何 Phase 1 的資料庫 Migration 或功能程式碼撰寫任務。**  
-> 必須嚴格完成以下 **Phase 1 開工前 7 大確認事項** 後，方可進入 Migration 007 開發：
+> [!NOTE]
+> **實作進度同步**：Phase 0 架構對齊、Phase 1（Migration `007`～`008`）、Phase 2（Migration `009`）、Phase 3（Migration `010`）、Phase 3.5（預算閘門、OS 子行程隔離、Point-in-Time 回放時鐘）與 Phase 4（Migration `011` 可驗證自我修正與學習機制）均已依序落地並通過全套單元與整合行為驗收測試。後續重點推進 Phase 5（長期領域實驗以累積真實 `L3` 泛化學習證據）與 Phase 6（受控代碼演進沙盒）。
+
+以下 **Phase 1 開工前 7 大架構確認事項** 作為永久工程設計約束持續生效：
 
 ```text
   ┌────────────────────────────────────────────────────────────────────────┐

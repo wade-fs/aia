@@ -35,10 +35,24 @@ type Session struct {
 }
 
 func NewSession(ctx context.Context, executable string, args []string, req provider.StartRequest) (*Session, error) {
-	cmd := exec.Command(executable, args...)
+	plan := &SandboxPlan{
+		Executable:    executable,
+		Args:          args,
+		Env:           ScrubEnvironment(os.Environ(), nil),
+		IsolationTier: IsolationTierEnvOnly,
+	}
+	return NewSessionWithPlan(ctx, plan, req)
+}
+
+func NewSessionWithPlan(ctx context.Context, plan *SandboxPlan, req provider.StartRequest) (*Session, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("sandbox plan is required")
+	}
+	cmd := exec.Command(plan.Executable, plan.Args...)
 	if req.WorkDir != "" {
 		cmd.Dir = req.WorkDir
 	}
+	cmd.Env = plan.Env
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -62,7 +76,7 @@ func NewSession(ctx context.Context, executable string, args []string, req provi
 
 	if err := cmd.Start(); err != nil {
 		stdin.Close()
-		return nil, fmt.Errorf("failed to start antigravity process (%s): %w", executable, err)
+		return nil, fmt.Errorf("failed to start antigravity process (%s): %w", plan.Executable, err)
 	}
 
 	go s.readStdout(stdout)
@@ -176,6 +190,7 @@ func (s *Session) readStdout(r io.Reader) {
 	scanner.Buffer(buf, 10*1024*1024)
 
 	var lastResponse strings.Builder
+	var lastResultErr string
 	var lastStatus = "UNKNOWN"
 	var lastConvID = s.req.ConversationID
 	var usage provider.TokenUsage
@@ -218,6 +233,9 @@ func (s *Session) readStdout(r io.Reader) {
 				if st, ok := res["status"].(string); ok {
 					lastStatus = st
 				}
+				if errMsg, ok := res["error"].(string); ok && errMsg != "" {
+					lastResultErr = errMsg
+				}
 				if resp, ok := res["response"].(string); ok && resp != "" {
 					lastResponse.Reset()
 					lastResponse.WriteString(resp)
@@ -248,14 +266,26 @@ func (s *Session) readStdout(r io.Reader) {
 		}
 	}
 
-	_ = s.cmd.Wait()
+	waitErr := s.cmd.Wait()
+	errOut := strings.TrimSpace(s.stderrBuf.String())
+	if errOut == "" && lastResultErr != "" {
+		errOut = lastResultErr
+	}
+	if waitErr != nil {
+		if lastStatus == "UNKNOWN" {
+			lastStatus = "ERROR"
+		}
+		if errOut == "" {
+			errOut = waitErr.Error()
+		}
+	}
 
 	s.resultMu.Lock()
 	s.result = provider.ProviderResult{
 		ConversationID: lastConvID,
 		Status:         lastStatus,
 		Response:       lastResponse.String(),
-		Error:          s.stderrBuf.String(),
+		Error:          errOut,
 		Usage:          usage,
 		Duration:       duration,
 	}

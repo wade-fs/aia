@@ -9,21 +9,25 @@ import (
 
 	"github.com/spf13/cobra"
 	domainGoal "github.com/wade/aia/internal/domain/goal"
+	domainLearning "github.com/wade/aia/internal/domain/learning"
 	goalService "github.com/wade/aia/internal/service/goal"
 )
 
 var (
-	goalProjectID   string
-	goalParentID    string
-	goalLevel       string
-	goalStatus      string
-	goalPriority    int
-	goalDesc        string
-	goalTargetJSON  string
-	goalCurrentJSON string
-	goalReason      string
-	goalAgentID     string
-	goalTaskTitle   string
+	goalProjectID         string
+	goalParentID          string
+	goalLevel             string
+	goalStatus            string
+	goalPriority          int
+	goalDesc              string
+	goalTargetJSON        string
+	goalCurrentJSON       string
+	goalReason            string
+	goalAgentID           string
+	goalTaskTitle         string
+	goalProposedName      string
+	goalInvalidatedClaims []string
+	goalActorType         string
 )
 
 var goalCmd = &cobra.Command{
@@ -198,6 +202,37 @@ var goalDecomposeCmd = &cobra.Command{
 	},
 }
 
+var goalEvolveCmd = &cobra.Command{
+	Use:   "evolve <goal-id> <PERSISTENCE|OPTIMIZATION|REVISION>",
+	Short: "Propose a governed goal evolution (enforces Anti-Goalpost-Moving on STRATEGIC goals)",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		if appInst == nil || appInst.GoalSvc == nil {
+			return fmt.Errorf("goal service not initialized")
+		}
+		prop, err := appInst.GoalSvc.ProposeOrApplyEvolution(ctx, goalService.EvolutionInput{
+			GoalID:                   args[0],
+			Mode:                     domainLearning.GoalEvolutionMode(strings.ToUpper(args[1])),
+			ActorType:                strings.ToUpper(goalActorType),
+			ActorID:                  "cli_operator",
+			ProposedName:             goalProposedName,
+			ProposedDescription:      goalDesc,
+			ProposedTargetMetricJSON: goalTargetJSON,
+			InvalidatedClaimIDs:      goalInvalidatedClaims,
+			Rationale:                goalReason,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("✓ Goal Evolution Proposal %s (%s) -> Status: %s\n", prop.ID, prop.EvolutionMode, prop.Status)
+		if prop.ApprovalID != nil {
+			fmt.Printf("  Approval Gate: %s\n", *prop.ApprovalID)
+		}
+		return nil
+	},
+}
+
 func init() {
 	goalListCmd.Flags().StringVarP(&goalProjectID, "project", "p", "", "Filter by project ID")
 	goalListCmd.Flags().StringVarP(&goalStatus, "status", "s", "", "Filter by status (ACTIVE, PAUSED, ACHIEVED, ...)")
@@ -218,10 +253,18 @@ func init() {
 	goalDecomposeCmd.Flags().StringVarP(&goalDesc, "desc", "d", "", "Task description")
 	goalDecomposeCmd.Flags().StringVarP(&goalReason, "rationale", "r", "", "Decomposition rationale")
 
+	goalEvolveCmd.Flags().StringVarP(&goalReason, "rationale", "r", "", "Evidence-backed evolution rationale")
+	goalEvolveCmd.Flags().StringVar(&goalTargetJSON, "target", "", "Proposed target metric JSON")
+	goalEvolveCmd.Flags().StringVar(&goalProposedName, "name", "", "Proposed revised goal name")
+	goalEvolveCmd.Flags().StringVarP(&goalDesc, "desc", "d", "", "Proposed description")
+	goalEvolveCmd.Flags().StringSliceVar(&goalInvalidatedClaims, "invalidated-claims", nil, "Claim IDs proving invalidated premise")
+	goalEvolveCmd.Flags().StringVar(&goalActorType, "actor-type", "HUMAN", "Actor type (HUMAN or AGENT)")
+
 	goalCmd.AddCommand(goalListCmd)
 	goalCmd.AddCommand(goalCreateCmd)
 	goalCmd.AddCommand(goalGetCmd)
 	goalCmd.AddCommand(goalStatusCmd)
 	goalCmd.AddCommand(goalLinkProjectCmd)
 	goalCmd.AddCommand(goalDecomposeCmd)
+	goalCmd.AddCommand(goalEvolveCmd)
 }

@@ -37,36 +37,36 @@ AIA explicitly separates **platform orchestration & state management** from the 
 │                   AIA Platform (Go Runtime Daemon)                     │
 │                                                                        │
 │   ┌──────────────────────────────────────────────────────────────┐     │
-│   │                     Personal Agent                           │     │
-│   │           (Intent Analysis, Coordination & Routing)           │     │
+│   │               Autonomy Core & Personal Agent                 │     │
+│   │   (11-Step Loop, AsOf Clock, Recall, Deliberation, Learning) │     │
 │   └───────────────┬──────────────────────────────┬───────────────┘     │
 │                   │                              │                     │
 │   ┌───────────────▼──────────────┐ ┌─────────────▼─────────────────┐   │
 │   │        Domain Agents         │ │       System Workers          │   │
-│   │  • Investment Agent          │ │  • Schedule Worker (15s)      │   │
-│   │  • Coding Agent              │ │  • Task Worker (Pool: 3, 5s)  │   │
-│   │  • Writing Agent             │ │  • Materiality Gate Evaluator │   │
+│   │  • Investment Agent (Pilot)  │ │  • Schedule Worker (15s)      │   │
+│   │  • Coding Agent (Phase 5)    │ │  • Task Worker (Pool: 3, 5s)  │   │
+│   │  • Writing Agent (Phase 5)   │ │  • Materiality Gate Evaluator │   │
 │   └───────────────┬──────────────┘ └─────────────┬─────────────────┘   │
 │                   │                              │                     │
 │   ┌───────────────▼──────────────────────────────▼─────────────────┐   │
-│   │                    Core Management Layer                       │   │
-│   │  • Task Lifecycle State Machine   • Long-Term Memory System    │   │
-│   │  • Policy & Approval Engine       • Workspace Projects         │   │
-│   │  • Prediction & Brier Evaluation  • Activity Monitor Snapshot  │   │
+│   │                 Governance & Continuity Layer                  │   │
+│   │  • Policy, Budget Gate & Approvals • Hash-Chained Event Store  │   │
+│   │  • Controlled Emergency Stop (<1s) • Provenance & Goal Tree    │   │
+│   │  • Verifiable Learning (L0~L3)     • Brier Calibration         │   │
 │   └──────────────────────────────┬─────────────────────────────────┘   │
 │                                  │                                     │
 │   ┌──────────────────────────────▼─────────────────────────────────┐   │
 │   │                    Persistence & Interfaces                    │   │
-│   │  • SQLite Storage (WAL Mode)     • Embedded Web Console (7777) │   │
-│   │  • REST & SSE API                • Cobra CLI Tooling           │   │
+│   │  • SQLite Storage (Migrations 001~011) • Web Console (7777)    │   │
+│   │  • REST & SSE API                      • Cobra CLI Tooling     │   │
 │   └──────────────────────────────┬─────────────────────────────────┘   │
 └──────────────────────────────────┼─────────────────────────────────────┘
-                                   │
+                                   │ (Env Secret Scrubbing + OS Mount Sandbox)
                                    ▼
              ┌──────────────────────────────────────────┐
              │       AI Execution Harness (agy)         │
              │   Google Antigravity CLI Subprocesses    │
-             │   Sandboxed Tools, LLMs, Subagents       │
+             │   Isolated WorkDir, Read-Only System FS  │
              └──────────────────────────────────────────┘
 ```
 

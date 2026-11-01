@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/wade/aia/internal/autonomy/clock"
 	"github.com/wade/aia/internal/domain"
 	"github.com/wade/aia/internal/domain/investment"
 	"github.com/wade/aia/internal/storage/sqlite"
@@ -32,7 +33,7 @@ func (r *InvestmentRepository) EnsureDefaultProfile(ctx context.Context) (*inves
 	}
 
 	// Create default Taiwan portfolio
-	now := time.Now().UTC()
+	now := clock.Now(ctx)
 	defaultProfile := &investment.PortfolioProfile{
 		ID:                 uuid.New().String(),
 		Name:               "Taiwan Stock Strategy",
@@ -208,7 +209,7 @@ func (r *InvestmentRepository) UpdateAvailableCash(ctx context.Context, profileI
 		totalPositionsValue += p.MarketValue
 	}
 
-	now := time.Now().UTC()
+	now := clock.Now(ctx)
 	newSnap := &investment.PortfolioSnapshot{
 		ID:                  uuid.New().String(),
 		PortfolioProfileID:  profileID,
@@ -259,10 +260,16 @@ func (r *InvestmentRepository) UpdateAvailableCash(ctx context.Context, profileI
 }
 
 func (r *InvestmentRepository) GetLatestSnapshot(ctx context.Context, profileID domain.ID) (*investment.PortfolioSnapshot, error) {
-	row := r.db.RawDB().QueryRowContext(ctx, `
+	query := `
 		SELECT id, portfolio_profile_id, as_of, source, currency, available_cash, total_portfolio_value, validation_status, metadata_json, created_at
-		FROM investment_portfolio_snapshots WHERE portfolio_profile_id = ? ORDER BY as_of DESC, rowid DESC LIMIT 1
-	`, profileID)
+		FROM investment_portfolio_snapshots WHERE portfolio_profile_id = ?`
+	args := []any{profileID}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND as_of <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY as_of DESC, rowid DESC LIMIT 1`
+	row := r.db.RawDB().QueryRowContext(ctx, query, args...)
 
 	var s investment.PortfolioSnapshot
 	var asOf, ca string
@@ -417,14 +424,19 @@ func (r *InvestmentRepository) ListDecisions(ctx context.Context, profileID doma
 }
 
 func (r *InvestmentRepository) GetLatestDecisionForInstrument(ctx context.Context, profileID domain.ID, instrumentID domain.ID) (*investment.Decision, error) {
-	row := r.db.RawDB().QueryRowContext(ctx, `
+	query := `
 		SELECT id, portfolio_profile_id, instrument_id, portfolio_snapshot_id, task_id, research_report_id,
 			decision_type, confidence, reasoning_json, risks_json, invalidation_conditions_json,
 			expected_horizon, strategy_version, action_result_json, raw_input_json, source, created_at
 		FROM investment_decisions
-		WHERE portfolio_profile_id = ? AND instrument_id = ?
-		ORDER BY created_at DESC, rowid DESC LIMIT 1
-	`, profileID, instrumentID)
+		WHERE portfolio_profile_id = ? AND instrument_id = ?`
+	args := []any{profileID, instrumentID}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND created_at <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY created_at DESC, rowid DESC LIMIT 1`
+	row := r.db.RawDB().QueryRowContext(ctx, query, args...)
 
 	var dec investment.Decision
 	var dt, ca string
@@ -570,14 +582,19 @@ func (r *InvestmentRepository) ListTradeProposals(ctx context.Context, profileID
 }
 
 func (r *InvestmentRepository) GetLatestTradeProposalForInstrument(ctx context.Context, profileID domain.ID, instrumentID domain.ID) (*investment.TradeProposal, error) {
-	row := r.db.RawDB().QueryRowContext(ctx, `
+	query := `
 		SELECT id, portfolio_profile_id, decision_id, portfolio_snapshot_id, allocation_proposal_id, instrument_id,
 			action, quantity, estimated_price, estimated_gross_amount, estimated_total_cost, proposal_json,
 			status, status_reason, created_at, expires_at, updated_at
 		FROM investment_trade_proposals
-		WHERE portfolio_profile_id = ? AND instrument_id = ?
-		ORDER BY created_at DESC, rowid DESC LIMIT 1
-	`, profileID, instrumentID)
+		WHERE portfolio_profile_id = ? AND instrument_id = ?`
+	args := []any{profileID, instrumentID}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND created_at <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY created_at DESC, rowid DESC LIMIT 1`
+	row := r.db.RawDB().QueryRowContext(ctx, query, args...)
 
 	var p investment.TradeProposal
 	var act, st, ca, ea, ua string
@@ -731,12 +748,17 @@ func (r *InvestmentRepository) SaveMarketData(ctx context.Context, md *investmen
 }
 
 func (r *InvestmentRepository) GetLatestMarketData(ctx context.Context, instrumentID domain.ID) (*investment.MarketData, error) {
-	row := r.db.RawDB().QueryRowContext(ctx, `
+	query := `
 		SELECT id, instrument_id, data_type, period, value_json, source_id, fetched_at, effective_at
 		FROM investment_market_data
-		WHERE instrument_id = ?
-		ORDER BY effective_at DESC, rowid DESC LIMIT 1
-	`, instrumentID)
+		WHERE instrument_id = ?`
+	args := []any{instrumentID}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND effective_at <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY effective_at DESC, rowid DESC LIMIT 1`
+	row := r.db.RawDB().QueryRowContext(ctx, query, args...)
 	var md investment.MarketData
 	var fa, ea string
 	if err := row.Scan(&md.ID, &md.InstrumentID, &md.DataType, &md.Period, &md.ValueJSON, &md.SourceID, &fa, &ea); err != nil {
@@ -751,12 +773,18 @@ func (r *InvestmentRepository) ListHistoricalMarketData(ctx context.Context, ins
 	if limit <= 0 {
 		limit = 30
 	}
-	rows, err := r.db.RawDB().QueryContext(ctx, `
+	query := `
 		SELECT id, instrument_id, data_type, period, value_json, source_id, fetched_at, effective_at
 		FROM investment_market_data
-		WHERE instrument_id = ?
-		ORDER BY effective_at DESC LIMIT ?
-	`, instrumentID, limit)
+		WHERE instrument_id = ?`
+	args := []any{instrumentID}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND effective_at <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY effective_at DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -792,23 +820,23 @@ func (r *InvestmentRepository) ListRawDocuments(ctx context.Context, instrumentI
 	if limit <= 0 {
 		limit = 20
 	}
-	var rows *sql.Rows
-	var err error
+	query := `
+		SELECT id, source_id, instrument_id, source_record_id, source_url, title, summary,
+			content_reference, content_hash, content_type, published_at, fetched_at, metadata_json
+		FROM investment_raw_documents
+		WHERE 1 = 1`
+	var args []any
 	if instrumentID != "" {
-		rows, err = r.db.RawDB().QueryContext(ctx, `
-			SELECT id, source_id, instrument_id, source_record_id, source_url, title, summary,
-				content_reference, content_hash, content_type, published_at, fetched_at, metadata_json
-			FROM investment_raw_documents WHERE instrument_id = ?
-			ORDER BY published_at DESC LIMIT ?
-		`, instrumentID, limit)
-	} else {
-		rows, err = r.db.RawDB().QueryContext(ctx, `
-			SELECT id, source_id, instrument_id, source_record_id, source_url, title, summary,
-				content_reference, content_hash, content_type, published_at, fetched_at, metadata_json
-			FROM investment_raw_documents
-			ORDER BY published_at DESC LIMIT ?
-		`, limit)
+		query += ` AND instrument_id = ?`
+		args = append(args, instrumentID)
 	}
+	if asOf, ok := clock.AsOf(ctx); ok {
+		query += ` AND published_at <= ?`
+		args = append(args, asOf.Format(time.RFC3339))
+	}
+	query += ` ORDER BY published_at DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1074,7 +1102,7 @@ func (r *InvestmentRepository) SettleVirtualProposal(ctx context.Context, propos
 		totalPosValue += p.MarketValue
 	}
 
-	now := time.Now().UTC()
+	now := clock.Now(ctx)
 	newSnap := &investment.PortfolioSnapshot{
 		ID:                  uuid.New().String(),
 		PortfolioProfileID:  proposal.PortfolioProfileID,

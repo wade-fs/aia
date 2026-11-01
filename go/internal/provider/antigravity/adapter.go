@@ -71,7 +71,12 @@ func (a *Adapter) Start(ctx context.Context, req provider.StartRequest) (provide
 		}
 	}
 
-	return NewSession(ctx, a.cfg.Executable, args, req)
+	plan, err := BuildSandboxPlan(ctx, a.cfg, a.cfg.Executable, args, req.WorkDir, os.Environ())
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct isolated subprocess sandbox: %w", err)
+	}
+
+	return NewSessionWithPlan(ctx, plan, req)
 }
 
 func (a *Adapter) writeSettingsFile(req provider.StartRequest) (string, error) {

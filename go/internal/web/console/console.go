@@ -13,6 +13,7 @@ import (
 	domainGoal "github.com/wade/aia/internal/domain/goal"
 	"github.com/wade/aia/internal/domain/governance"
 	"github.com/wade/aia/internal/domain/investment"
+	domainLearning "github.com/wade/aia/internal/domain/learning"
 	domainMemory "github.com/wade/aia/internal/domain/memory"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/provider"
@@ -45,6 +46,7 @@ type ConsoleServices struct {
 	AutonomyEngine *autonomy.Engine
 	AutonomyRepo   *repository.AutonomyRepository
 	ContinuityRepo *repository.ContinuityRepository
+	LearningRepo   *repository.LearningRepository
 }
 
 func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
@@ -85,11 +87,13 @@ func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
 	// 7. Audit
 	mux.HandleFunc("/api/v1/audit", s.handleAudit)
 
-	// 8. Autonomy Cycles & Long-term Goals (Phase 3)
+	// 8. Autonomy Cycles, Long-term Goals & Self-Correction Learnings (Phase 3–4)
 	mux.HandleFunc("/api/v1/cycles", s.handleCycles)
 	mux.HandleFunc("/api/v1/cycles/", s.handleCycleSubroutes)
 	mux.HandleFunc("/api/v1/goals", s.handleGoals)
 	mux.HandleFunc("/api/v1/goals/", s.handleGoalSubroutes)
+	mux.HandleFunc("/api/v1/learnings", s.handleLearnings)
+	mux.HandleFunc("/api/v1/learnings/", s.handleLearningSubroutes)
 }
 
 func getReqID(r *http.Request) string {
@@ -1017,4 +1021,68 @@ func (s *ConsoleServices) handleGoalSubroutes(w http.ResponseWriter, r *http.Req
 		"decomposed_tasks": links,
 		"revisions":        revs,
 	}, reqID)
+}
+
+func (s *ConsoleServices) handleLearnings(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if s.LearningRepo == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Learning repository not available", reqID)
+		return
+	}
+	if r.Method != http.MethodGet {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	limit := 50
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+		limit = l
+	}
+	records, err := s.LearningRepo.QueryLearningRecords(ctx, repository.LearningFilter{
+		Level:   domainLearning.LearningLevel(strings.ToUpper(r.URL.Query().Get("level"))),
+		Verdict: domainLearning.EffectivenessVerdict(strings.ToUpper(r.URL.Query().Get("verdict"))),
+		Limit:   limit,
+	})
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, records, reqID)
+}
+
+func (s *ConsoleServices) handleLearningSubroutes(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if s.LearningRepo == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Learning repository not available", reqID)
+		return
+	}
+	if r.Method != http.MethodGet {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/learnings/"), "/")
+	if id == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_ID", "Learning record ID required", reqID)
+		return
+	}
+	rec, err := s.LearningRepo.GetLearningRecord(ctx, id)
+	if err != nil {
+		host.WriteError(w, http.StatusNotFound, "NOT_FOUND", err.Error(), reqID)
+		return
+	}
+	resp := map[string]any{"learning": rec}
+	if rec.RCAID != nil && *rec.RCAID != "" {
+		if rca, rErr := s.LearningRepo.GetRCA(ctx, *rec.RCAID); rErr == nil && rca != nil {
+			resp["rca"] = rca
+		}
+	}
+	if rec.CorrectionActionID != nil && *rec.CorrectionActionID != "" {
+		if ca, cErr := s.LearningRepo.GetCorrectionAction(ctx, *rec.CorrectionActionID); cErr == nil && ca != nil {
+			resp["correction_action"] = ca
+		}
+	}
+	host.WriteJSON(w, http.StatusOK, resp, reqID)
 }

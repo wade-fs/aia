@@ -25,8 +25,10 @@ func (r *ExecutionRepository) Create(ctx context.Context, e *execution.Execution
 		INSERT INTO executions (
 			id, task_id, agent_id, provider, profile_id, profile_version,
 			workspace, conversation_id, process_id, status, exit_code,
-			result_status, error_code, error_message, started_at, ended_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			result_status, error_code, error_message,
+			input_tokens, output_tokens, total_tokens,
+			started_at, ended_at, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	now := time.Now().UTC()
 	if e.CreatedAt.IsZero() {
@@ -45,7 +47,9 @@ func (r *ExecutionRepository) Create(ctx context.Context, e *execution.Execution
 		ctx, query,
 		e.ID, e.TaskID, e.AgentID, e.Provider, e.ProfileID, e.ProfileVersion,
 		e.Workspace, e.ConversationID, e.ProcessID, string(e.Status), e.ExitCode,
-		e.ResultStatus, e.ErrorCode, e.ErrorMessage, startedAt, endedAt, e.CreatedAt.Format(time.RFC3339),
+		e.ResultStatus, e.ErrorCode, e.ErrorMessage,
+		e.InputTokens, e.OutputTokens, e.TotalTokens,
+		startedAt, endedAt, e.CreatedAt.Format(time.RFC3339),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create execution: %w", err)
@@ -57,7 +61,9 @@ func (r *ExecutionRepository) Get(ctx context.Context, id domain.ID) (*execution
 	query := `
 		SELECT id, task_id, agent_id, provider, profile_id, profile_version,
 		       workspace, conversation_id, process_id, status, exit_code,
-		       result_status, error_code, error_message, started_at, ended_at, created_at
+		       result_status, error_code, error_message,
+		       input_tokens, output_tokens, total_tokens,
+		       started_at, ended_at, created_at
 		FROM executions WHERE id = ?
 	`
 	row := r.db.RawDB().QueryRowContext(ctx, query, id)
@@ -70,20 +76,26 @@ func (r *ExecutionRepository) Get(ctx context.Context, id domain.ID) (*execution
 	err := row.Scan(
 		&e.ID, &e.TaskID, &e.AgentID, &e.Provider, &profileID, &e.ProfileVersion,
 		&e.Workspace, &convID, &e.ProcessID, &status, &exitCode,
-		&resStatus, &errCode, &errMsg, &startedAt, &endedAt, &createdAt,
+		&resStatus, &errCode, &errMsg,
+		&e.InputTokens, &e.OutputTokens, &e.TotalTokens,
+		&startedAt, &endedAt, &createdAt,
 	)
 	if err == sql.ErrNoRows && len(id) >= 6 {
 		prefixQuery := `
 			SELECT id, task_id, agent_id, provider, profile_id, profile_version,
 			       workspace, conversation_id, process_id, status, exit_code,
-			       result_status, error_code, error_message, started_at, ended_at, created_at
+			       result_status, error_code, error_message,
+			       input_tokens, output_tokens, total_tokens,
+			       started_at, ended_at, created_at
 			FROM executions WHERE id LIKE ? || '%' LIMIT 1
 		`
 		row = r.db.RawDB().QueryRowContext(ctx, prefixQuery, id)
 		err = row.Scan(
 			&e.ID, &e.TaskID, &e.AgentID, &e.Provider, &profileID, &e.ProfileVersion,
 			&e.Workspace, &convID, &e.ProcessID, &status, &exitCode,
-			&resStatus, &errCode, &errMsg, &startedAt, &endedAt, &createdAt,
+			&resStatus, &errCode, &errMsg,
+			&e.InputTokens, &e.OutputTokens, &e.TotalTokens,
+			&startedAt, &endedAt, &createdAt,
 		)
 	}
 	if err != nil {
@@ -130,7 +142,9 @@ func (r *ExecutionRepository) Update(ctx context.Context, e *execution.Execution
 	query := `
 		UPDATE executions SET
 			conversation_id = ?, process_id = ?, status = ?, exit_code = ?,
-			result_status = ?, error_code = ?, error_message = ?, started_at = ?, ended_at = ?
+			result_status = ?, error_code = ?, error_message = ?,
+			input_tokens = ?, output_tokens = ?, total_tokens = ?,
+			started_at = ?, ended_at = ?
 		WHERE id = ?
 	`
 	var startedAt, endedAt sql.NullString
@@ -144,7 +158,9 @@ func (r *ExecutionRepository) Update(ctx context.Context, e *execution.Execution
 	_, err := r.db.RawDB().ExecContext(
 		ctx, query,
 		e.ConversationID, e.ProcessID, string(e.Status), e.ExitCode,
-		e.ResultStatus, e.ErrorCode, e.ErrorMessage, startedAt, endedAt, e.ID,
+		e.ResultStatus, e.ErrorCode, e.ErrorMessage,
+		e.InputTokens, e.OutputTokens, e.TotalTokens,
+		startedAt, endedAt, e.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update execution: %w", err)
@@ -152,11 +168,28 @@ func (r *ExecutionRepository) Update(ctx context.Context, e *execution.Execution
 	return nil
 }
 
+func (r *ExecutionRepository) SumTokensSince(ctx context.Context, since time.Time) (int64, error) {
+	var sum sql.NullInt64
+	err := r.db.RawDB().QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(total_tokens), 0) FROM executions WHERE created_at >= ?`,
+		since.UTC().Format(time.RFC3339),
+	).Scan(&sum)
+	if err != nil {
+		return 0, err
+	}
+	if !sum.Valid {
+		return 0, nil
+	}
+	return sum.Int64, nil
+}
+
 func (r *ExecutionRepository) ListByTask(ctx context.Context, taskID domain.ID) ([]execution.Execution, error) {
 	query := `
 		SELECT id, task_id, agent_id, provider, profile_id, profile_version,
 		       workspace, conversation_id, process_id, status, exit_code,
-		       result_status, error_code, error_message, started_at, ended_at, created_at
+		       result_status, error_code, error_message,
+		       input_tokens, output_tokens, total_tokens,
+		       started_at, ended_at, created_at
 		FROM executions WHERE task_id = ? ORDER BY created_at ASC
 	`
 	rows, err := r.db.RawDB().QueryContext(ctx, query, taskID)
@@ -175,7 +208,9 @@ func (r *ExecutionRepository) ListByTask(ctx context.Context, taskID domain.ID) 
 		if err := rows.Scan(
 			&e.ID, &e.TaskID, &e.AgentID, &e.Provider, &profileID, &e.ProfileVersion,
 			&e.Workspace, &convID, &e.ProcessID, &status, &exitCode,
-			&resStatus, &errCode, &errMsg, &startedAt, &endedAt, &createdAt,
+			&resStatus, &errCode, &errMsg,
+			&e.InputTokens, &e.OutputTokens, &e.TotalTokens,
+			&startedAt, &endedAt, &createdAt,
 		); err != nil {
 			return nil, err
 		}

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
+	"github.com/wade/aia/internal/autonomy/clock"
 	domainAutonomy "github.com/wade/aia/internal/domain/autonomy"
 	domainInv "github.com/wade/aia/internal/domain/investment"
 	"github.com/wade/aia/internal/domain/task"
@@ -46,7 +46,7 @@ func (o *InvestmentObserver) Observe(ctx context.Context, projectID string) ([]d
 		return nil, nil
 	}
 
-	now := time.Now().UTC()
+	now := clock.Now(ctx)
 	var observations []domainAutonomy.Observation
 
 	posByInstID := make(map[string]domainInv.Position, len(positions))

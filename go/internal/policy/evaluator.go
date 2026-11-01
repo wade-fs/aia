@@ -56,11 +56,19 @@ type OperationContext struct {
 	DecisionID    string  `json:"decision_id,omitempty"`
 }
 
+type BudgetLimits struct {
+	MaxDailyTokens           int64   `json:"max_daily_tokens"`
+	MaxDailyCycles           int     `json:"max_daily_cycles"`
+	MaxSingleExecutionTokens int64   `json:"max_single_execution_tokens"`
+	MaxDailySpend            float64 `json:"max_daily_spend"`
+}
+
 type Evaluator struct {
 	defaultPolicy domainPolicy.Policy
 	auditRepo     *repository.AuditRepository
 	allowedPaths  []string
 	maxDailySpend float64
+	budgetLimits  BudgetLimits
 	mu            sync.RWMutex
 }
 
@@ -116,7 +124,74 @@ func NewEvaluatorWithOptions(auditRepo *repository.AuditRepository, allowedPaths
 		auditRepo:     auditRepo,
 		allowedPaths:  allowedPaths,
 		maxDailySpend: maxDailySpend,
+		budgetLimits: BudgetLimits{
+			MaxDailySpend: maxDailySpend,
+		},
 	}
+}
+
+func (e *Evaluator) SetBudgetLimits(limits BudgetLimits) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.budgetLimits = limits
+	if limits.MaxDailySpend > 0 {
+		e.maxDailySpend = limits.MaxDailySpend
+	}
+}
+
+func (e *Evaluator) GetBudgetLimits() BudgetLimits {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.budgetLimits
+}
+
+// EvaluateResourceBudget enforces hard daily Token & Autonomy Cycle budget gates prior to execution or cycle dispatch (AIA-08, AIA-17, AIA-19).
+func (e *Evaluator) EvaluateResourceBudget(ctx context.Context, actorID string, dailyTokens int64, dailyCycles int) PolicyDecision {
+	e.mu.RLock()
+	limits := e.budgetLimits
+	repo := e.auditRepo
+	policyID := string(e.defaultPolicy.ID)
+	e.mu.RUnlock()
+
+	dec := PolicyDecision{
+		Allowed:          true,
+		RequiresApproval: false,
+		RiskTier:         governance.RiskTierLow,
+		GovernanceAction: governance.GovernanceActionAllowed,
+		PolicyID:         policyID,
+		RuleName:         "Resource Budget Gate",
+		Reason:           "Daily token and cycle usage within configured budget.",
+	}
+
+	if limits.MaxDailyTokens > 0 && dailyTokens >= limits.MaxDailyTokens {
+		dec.Allowed = false
+		dec.RiskTier = governance.RiskTierHigh
+		dec.GovernanceAction = governance.GovernanceActionBlocked
+		dec.RuleName = "Daily Token Budget Hard Gate"
+		dec.Reason = fmt.Sprintf("Daily token consumption (%d) has reached or exceeded hard limit (%d)", dailyTokens, limits.MaxDailyTokens)
+		e.recordAudit(ctx, repo, OperationContext{
+			ActorType:     "AGENT",
+			ActorID:       actorID,
+			OperationType: "BUDGET_CHECK_TOKENS",
+		}, dec)
+		return dec
+	}
+
+	if limits.MaxDailyCycles > 0 && dailyCycles >= limits.MaxDailyCycles {
+		dec.Allowed = false
+		dec.RiskTier = governance.RiskTierMedium
+		dec.GovernanceAction = governance.GovernanceActionBlocked
+		dec.RuleName = "Daily Autonomy Cycle Hard Gate"
+		dec.Reason = fmt.Sprintf("Daily autonomy cycle count (%d) has reached or exceeded hard limit (%d)", dailyCycles, limits.MaxDailyCycles)
+		e.recordAudit(ctx, repo, OperationContext{
+			ActorType:     "AGENT",
+			ActorID:       actorID,
+			OperationType: "BUDGET_CHECK_CYCLES",
+		}, dec)
+		return dec
+	}
+
+	return dec
 }
 
 func (e *Evaluator) SetAuditRepo(repo *repository.AuditRepository) {

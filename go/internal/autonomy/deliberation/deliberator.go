@@ -9,6 +9,7 @@ import (
 	domainAutonomy "github.com/wade/aia/internal/domain/autonomy"
 	"github.com/wade/aia/internal/domain/decision"
 	"github.com/wade/aia/internal/domain/governance"
+	domainLearning "github.com/wade/aia/internal/domain/learning"
 )
 
 type DeliberateInput struct {
@@ -16,6 +17,8 @@ type DeliberateInput struct {
 	CalmObservations         []domainAutonomy.Observation
 	ActiveTaskCount          int
 	MaxConcurrentActiveTasks int
+	VerifiedLearnings        []*domainLearning.LearningRecord
+	NegativeConstraints      []*domainLearning.LearningRecord
 }
 
 type DeliberationResult struct {
@@ -124,6 +127,25 @@ func (d *Deliberator) Deliberate(in DeliberateInput) DeliberationResult {
 	} else if isBlockedOrOverloaded {
 		actProb = 0.15 // Congestion or blocked dependency degrades immediate execution success probability
 	}
+
+	var learningNote string
+	matchedNegative := findMatchingLearning(top, meta, in.NegativeConstraints)
+	matchedPositive := findMatchingLearning(top, meta, in.VerifiedLearnings)
+	if matchedNegative != nil {
+		// Suppress repeating a known REGRESSED / INEFFECTIVE intervention (AIA-11 §21)
+		actProb = round2(actProb * 0.25)
+		actRisk += 6.0
+		learningNote = fmt.Sprintf(" [NegativeConstraint %s (%s) penalized ACT utility]", matchedNegative.ID, matchedNegative.EffectivenessVerdict)
+	} else if matchedPositive != nil {
+		boost := 0.06
+		if matchedPositive.LearningLevel == domainLearning.LevelL3Generalized {
+			boost = 0.10
+		}
+		actProb = math.Min(0.98, round2(actProb+boost))
+		actRisk = math.Max(0.10, round2(actRisk-0.30))
+		learningNote = fmt.Sprintf(" [Reinforced by %s learning %s]", matchedPositive.LearningLevel, matchedPositive.ID)
+	}
+
 	actUtility := round2(actProb*value - cost - actRisk)
 
 	var opts []domainAutonomy.DeliberationOption
@@ -209,8 +231,8 @@ func (d *Deliberator) Deliberate(in DeliberateInput) DeliberationResult {
 	res.Options = opts
 	res.OptionsEvaluatedJSON = string(optsJSON)
 	res.CostBenefitAnalysis = fmt.Sprintf(
-		"Selected %s with EV=%.2f (P_s=%.2f, V=%.2f, C=%.2f, R=%.2f) across %d evaluated alternatives.",
-		chosenAction, opts[bestIdx].NetUtility, opts[bestIdx].SuccessProb, opts[bestIdx].ExpectedValue, opts[bestIdx].Cost, opts[bestIdx].RiskPenalty, len(opts),
+		"Selected %s with EV=%.2f (P_s=%.2f, V=%.2f, C=%.2f, R=%.2f) across %d evaluated alternatives.%s",
+		chosenAction, opts[bestIdx].NetUtility, opts[bestIdx].SuccessProb, opts[bestIdx].ExpectedValue, opts[bestIdx].Cost, opts[bestIdx].RiskPenalty, len(opts), learningNote,
 	)
 	res.RiskAssessment = fmt.Sprintf("Candidate risk tier=%s, confidence=%s, active_tasks=%d/%d",
 		nonEmptyRisk(top.EstimatedRisk), top.ConfidenceLevel, in.ActiveTaskCount, maxConcurrent)
@@ -218,14 +240,14 @@ func (d *Deliberator) Deliberate(in DeliberateInput) DeliberationResult {
 	switch chosenAction {
 	case decision.ActionAct:
 		res.ChosenInitiative = top
-		res.Justification = fmt.Sprintf("Acting on %q (%s, EV=%.2f): positive net utility outweighs execution cost and risk.", top.DetectedOpportunity, top.DiscoveryType, opts[bestIdx].NetUtility)
+		res.Justification = fmt.Sprintf("Acting on %q (%s, EV=%.2f): positive net utility outweighs execution cost and risk.%s", top.DetectedOpportunity, top.DiscoveryType, opts[bestIdx].NetUtility, learningNote)
 		if len(in.Candidates) > 1 {
 			res.DeferredInitiatives = in.Candidates[1:]
 		}
 
 	case decision.ActionAskHuman:
 		res.ChosenInitiative = top
-		res.Justification = fmt.Sprintf("Escalating %q to human owner (ASK_HUMAN, EV=%.2f): unresolved conflict or unverified high-impact ambiguity requires human judgment.", top.DetectedOpportunity, opts[bestIdx].NetUtility)
+		res.Justification = fmt.Sprintf("Escalating %q to human owner (ASK_HUMAN, EV=%.2f): unresolved conflict or unverified high-impact ambiguity requires human judgment.%s", top.DetectedOpportunity, opts[bestIdx].NetUtility, learningNote)
 		if len(in.Candidates) > 1 {
 			res.DeferredInitiatives = in.Candidates[1:]
 		}
@@ -240,22 +262,89 @@ func (d *Deliberator) Deliberate(in DeliberateInput) DeliberationResult {
 				reason = fmt.Sprintf("active task queue at capacity (%d/%d)", in.ActiveTaskCount, maxConcurrent)
 			}
 		}
-		res.Justification = fmt.Sprintf("Deferring %q (DEFER, EV=%.2f): %s.", top.DetectedOpportunity, opts[bestIdx].NetUtility, reason)
+		res.Justification = fmt.Sprintf("Deferring %q (DEFER, EV=%.2f): %s.%s", top.DetectedOpportunity, opts[bestIdx].NetUtility, reason, learningNote)
 		res.DeferredInitiatives = in.Candidates
 
 	case decision.ActionMonitor:
 		res.ChosenInitiative = top
-		res.Justification = fmt.Sprintf("Monitoring %q (MONITOR, EV=%.2f): signal confidence is %s; continued observation beats premature intervention.", top.DetectedOpportunity, opts[bestIdx].NetUtility, top.ConfidenceLevel)
+		res.Justification = fmt.Sprintf("Monitoring %q (MONITOR, EV=%.2f): signal confidence is %s; continued observation beats premature intervention.%s", top.DetectedOpportunity, opts[bestIdx].NetUtility, top.ConfidenceLevel, learningNote)
 		if len(in.Candidates) > 1 {
 			res.DeferredInitiatives = in.Candidates[1:]
 		}
 
 	default: // decision.ActionNoAction
-		res.Justification = fmt.Sprintf("Rational NO_ACTION: candidate %q yielded negative net utility (EV=%.2f < 0.00); discarded as non-cost-effective.", top.DetectedOpportunity, actUtility)
+		res.Justification = fmt.Sprintf("Rational NO_ACTION: candidate %q yielded negative net utility (EV=%.2f < 0.00); discarded as non-cost-effective.%s", top.DetectedOpportunity, actUtility, learningNote)
 		res.DiscardedInitiatives = in.Candidates
 	}
 
 	return res
+}
+
+func findMatchingLearning(top *domainAutonomy.CandidateInitiative, meta map[string]any, records []*domainLearning.LearningRecord) *domainLearning.LearningRecord {
+	if top == nil || len(records) == 0 {
+		return nil
+	}
+	candKeys := []string{
+		strFromMeta(meta, "learning_record_id"),
+		strFromMeta(meta, "anti_pattern_key"),
+		strFromMeta(meta, "pattern_key"),
+		strFromMeta(meta, "target_entity_ref"),
+		strFromMeta(meta, "learning_key"),
+	}
+	oppLower := strings.ToLower(top.DetectedOpportunity + " " + top.Rationale + " " + top.TriggerSource)
+
+	for _, rec := range records {
+		if rec == nil {
+			continue
+		}
+		for _, k := range candKeys {
+			if k != "" && k == rec.ID {
+				return rec
+			}
+		}
+		interv := parseMetadata(rec.InterventionJSON)
+		hyp := parseMetadata(rec.HypothesisJSON)
+		recKeys := []string{
+			strFromMeta(interv, "anti_pattern_key"),
+			strFromMeta(interv, "pattern_key"),
+			strFromMeta(interv, "target_entity_ref"),
+			strFromMeta(hyp, "pattern_key"),
+		}
+		if ps, ok := interv["proposed_state"].(map[string]any); ok {
+			recKeys = append(recKeys,
+				strFromMeta(ps, "anti_pattern_key"),
+				strFromMeta(ps, "pattern_key"),
+			)
+		}
+		if as, ok := interv["applied_state"].(map[string]any); ok {
+			recKeys = append(recKeys,
+				strFromMeta(as, "anti_pattern_key"),
+				strFromMeta(as, "pattern_key"),
+			)
+		}
+		if asRaw := strFromMeta(interv, "applied_state_json"); asRaw != "" {
+			asMap := parseMetadata(asRaw)
+			recKeys = append(recKeys,
+				strFromMeta(asMap, "anti_pattern_key"),
+				strFromMeta(asMap, "pattern_key"),
+			)
+		}
+		for _, rk := range recKeys {
+			rk = strings.TrimSpace(rk)
+			if rk == "" {
+				continue
+			}
+			for _, ck := range candKeys {
+				if ck != "" && strings.EqualFold(ck, rk) {
+					return rec
+				}
+			}
+			if len(rk) >= 4 && strings.Contains(oppLower, strings.ToLower(rk)) {
+				return rec
+			}
+		}
+	}
+	return nil
 }
 
 func confidenceProbability(c domainAutonomy.DiscoveryConfidence) float64 {

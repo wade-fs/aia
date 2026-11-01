@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/wade/aia/internal/autonomy/clock"
 	"github.com/wade/aia/internal/autonomy/deliberation"
 	"github.com/wade/aia/internal/autonomy/initiative"
 	"github.com/wade/aia/internal/autonomy/observation"
@@ -44,6 +45,8 @@ type RunInput struct {
 	GoalID                   *string
 	Summary                  string
 	MaxConcurrentActiveTasks int
+	AsOf                     *time.Time
+	ReplayMode               bool
 }
 
 type CoordinatorDeps struct {
@@ -54,6 +57,7 @@ type CoordinatorDeps struct {
 	AutonomyRepo     *repository.AutonomyRepository
 	DecisionRepo     *repository.DecisionRepository
 	ContinuityRepo   *repository.ContinuityRepository
+	ExecutionRepo    *repository.ExecutionRepository
 	GoalRepo         *repository.GoalRepository
 	EventHistoryRepo *repository.EventHistoryRepository
 	KnowledgeRepo    *repository.KnowledgeRepository
@@ -85,6 +89,10 @@ func (c *Coordinator) RegisterPilot(p DomainPilotExecutor) {
 }
 
 func (c *Coordinator) RunCycle(ctx context.Context, in RunInput) (*domainAutonomy.CycleOutcome, error) {
+	if in.AsOf != nil && !in.AsOf.IsZero() {
+		ctx = clock.WithAsOf(ctx, *in.AsOf, in.ReplayMode)
+	}
+
 	// Pre-flight Independent Governance Gate: Global Emergency Stop
 	if c.deps.GovernanceRepo != nil {
 		if ctrl, err := c.deps.GovernanceRepo.GetControl(ctx); err == nil && ctrl != nil && ctrl.IsEmergencyStopped() {
@@ -92,7 +100,7 @@ func (c *Coordinator) RunCycle(ctx context.Context, in RunInput) (*domainAutonom
 		}
 	}
 
-	now := time.Now().UTC()
+	now := clock.Now(ctx)
 	cycleID := uuid.New().String()
 	projectID := strings.TrimSpace(in.ProjectID)
 	if projectID == "" {
@@ -122,6 +130,24 @@ func (c *Coordinator) RunCycle(ctx context.Context, in RunInput) (*domainAutonom
 		triggerType = continuity.TriggerScheduled
 	}
 
+	// Pre-flight Hard Resource Budget Gate (Daily Tokens & Daily Autonomy Cycles — AIA-08, AIA-17, AIA-19)
+	var budgetDecision *policy.PolicyDecision
+	if c.deps.Evaluator != nil {
+		dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		var dailyTokens int64
+		if c.deps.ExecutionRepo != nil {
+			dailyTokens, _ = c.deps.ExecutionRepo.SumTokensSince(ctx, dayStart)
+		}
+		var dailyCycles int
+		if c.deps.ContinuityRepo != nil {
+			dailyCycles, _ = c.deps.ContinuityRepo.CountCyclesSince(ctx, dayStart, &now)
+		}
+		bDec := c.deps.Evaluator.EvaluateResourceBudget(ctx, "autonomy-coordinator", dailyTokens, dailyCycles)
+		if !bDec.Allowed {
+			budgetDecision = &bDec
+		}
+	}
+
 	var cycleNumber int64 = 1
 	if c.deps.ContinuityRepo != nil {
 		if nextNum, err := c.deps.ContinuityRepo.NextCycleNumber(ctx); err == nil && nextNum > 0 {
@@ -145,6 +171,44 @@ func (c *Coordinator) RunCycle(ctx context.Context, in RunInput) (*domainAutonom
 		if err := c.deps.ContinuityRepo.CreateCycle(ctx, cycleRecord); err != nil {
 			return nil, fmt.Errorf("failed to create autonomy cycle: %w", err)
 		}
+	}
+
+	if budgetDecision != nil {
+		deferDec := &decision.Decision{
+			ID:               uuid.New().String(),
+			CycleID:          &cycleID,
+			ProjectID:        persistedProjectPtr,
+			ActionType:       decision.ActionDefer,
+			IntentSummary:    fmt.Sprintf("Autonomy Cycle #%d Deferred by Budget Gate", cycleNumber),
+			Justification:    budgetDecision.Reason,
+			GovernanceResult: decision.GovernanceBlocked,
+			CreatedAt:        now,
+		}
+		if c.deps.DecisionRepo != nil {
+			_ = c.deps.DecisionRepo.Create(ctx, deferDec, nil)
+		}
+		finalSummary := fmt.Sprintf("Cycle #%d deferred by hard resource budget gate: %s", cycleNumber, budgetDecision.Reason)
+		if c.deps.ContinuityRepo != nil {
+			_ = c.deps.ContinuityRepo.UpdateCycleStatus(ctx, cycleID, continuity.CycleStatusCompleted, finalSummary, &now)
+		}
+		c.appendCycleEvent(ctx, cycleID, "CYCLE_BUDGET_DEFERRED", map[string]any{
+			"cycle_number": cycleNumber,
+			"rule_name":    budgetDecision.RuleName,
+			"reason":       budgetDecision.Reason,
+		})
+		return &domainAutonomy.CycleOutcome{
+			CycleID:          cycleID,
+			CycleNumber:      cycleNumber,
+			Decision:         deferDec,
+			GovernanceResult: governance.GovernanceActionBlocked,
+			Verification: &domainAutonomy.VerificationSummary{
+				Passed:        true,
+				ActualSummary: "Budget gate short-circuited cycle with zero downstream task/LLM spend",
+				VerifiedAt:    now,
+			},
+			Summary:     finalSummary,
+			CompletedAt: now,
+		}, nil
 	}
 
 	c.appendCycleEvent(ctx, cycleID, "CYCLE_STARTED", map[string]any{
@@ -272,6 +336,8 @@ func (c *Coordinator) RunCycle(ctx context.Context, in RunInput) (*domainAutonom
 		CalmObservations:         calmObservations,
 		ActiveTaskCount:          len(recalled.ActiveTasks),
 		MaxConcurrentActiveTasks: in.MaxConcurrentActiveTasks,
+		VerifiedLearnings:        recalled.VerifiedLearnings,
+		NegativeConstraints:      recalled.NegativeConstraints,
 	})
 
 	delibRecord := &domainAutonomy.DeliberationRecord{
@@ -281,7 +347,7 @@ func (c *Coordinator) RunCycle(ctx context.Context, in RunInput) (*domainAutonom
 		CostBenefitAnalysis:  delibRes.CostBenefitAnalysis,
 		RiskAssessment:       delibRes.RiskAssessment,
 		RecommendedAction:    delibRes.RecommendedAction,
-		CreatedAt:            time.Now().UTC(),
+		CreatedAt:            clock.Now(ctx),
 	}
 	if delibRes.ChosenInitiative != nil {
 		delibRecord.CandidateInitiativeID = &delibRes.ChosenInitiative.ID
@@ -311,7 +377,7 @@ func (c *Coordinator) RunCycle(ctx context.Context, in RunInput) (*domainAutonom
 		Justification:              delibRes.Justification,
 		ConsideredAlternativesJSON: delibRes.OptionsEvaluatedJSON,
 		GovernanceResult:           decision.GovernanceAllowed,
-		CreatedAt:                  time.Now().UTC(),
+		CreatedAt:                  clock.Now(ctx),
 	}
 	if recalled.LatestSnapshot != nil {
 		dec.ContextSnapshotID = &recalled.LatestSnapshot.ID
@@ -613,7 +679,7 @@ func (c *Coordinator) RunCycle(ctx context.Context, in RunInput) (*domainAutonom
 	// =========================================================================
 	t11 := time.Now()
 	var postSnapID *string
-	completedAt := time.Now().UTC()
+	completedAt := clock.Now(ctx)
 
 	nextPendingIssues := buildNextPendingIssues(recalled.PendingIssues, chosenAction, chosenInitiative, spawnedTaskID != nil)
 	if c.deps.ContinuityRepo != nil {
@@ -709,7 +775,7 @@ func (c *Coordinator) appendAggregateEvent(ctx context.Context, aggType, aggID, 
 		CausationID:   evtID,
 		ActorID:       "SYSTEM:autonomy_coordinator",
 		PayloadJSON:   string(b),
-		OccurredAt:    time.Now().UTC(),
+		OccurredAt:    clock.Now(ctx),
 	})
 }
 

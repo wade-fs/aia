@@ -283,6 +283,108 @@ func (r *GoalRepository) UpdateMetrics(ctx context.Context, id string, currentMe
 	})
 }
 
+// ReviseDefinition updates a goal's definition/target metrics atomically while recording a full immutable revision diff (AIA-09 §2.4).
+func (r *GoalRepository) ReviseDefinition(
+	ctx context.Context,
+	id string,
+	newName string,
+	newDesc string,
+	newTargetMetricJSON string,
+	newPriority int,
+	reason string,
+	decisionID string,
+) (*goal.GoalRevision, error) {
+	var createdRev *goal.GoalRevision
+	err := r.db.WithTx(ctx, func(tx *sql.Tx) error {
+		var oldName, oldDesc, statusStr string
+		var oldTarget sql.NullString
+		var oldPrio int
+		err := tx.QueryRowContext(ctx,
+			"SELECT name, description, status, target_metric_json, priority FROM goals WHERE id = ?",
+			id,
+		).Scan(&oldName, &oldDesc, &statusStr, &oldTarget, &oldPrio)
+		if err != nil {
+			return fmt.Errorf("failed to load goal before definition revision: %w", err)
+		}
+		if statusStr == string(goal.StatusSuperseded) || statusStr == string(goal.StatusAbandoned) {
+			return fmt.Errorf("cannot revise terminal goal in status %s", statusStr)
+		}
+
+		finalName := oldName
+		if newName != "" {
+			finalName = newName
+		}
+		finalDesc := oldDesc
+		if newDesc != "" {
+			finalDesc = newDesc
+		}
+		finalTarget := oldTarget.String
+		if newTargetMetricJSON != "" {
+			finalTarget = newTargetMetricJSON
+		}
+		finalPrio := oldPrio
+		if newPriority > 0 {
+			finalPrio = newPriority
+		}
+
+		var maxRev sql.NullInt64
+		if err := tx.QueryRowContext(ctx, "SELECT MAX(revision_number) FROM goal_revisions WHERE goal_id = ?", id).Scan(&maxRev); err != nil {
+			return err
+		}
+		nextRev := int(maxRev.Int64) + 1
+		now := time.Now().UTC()
+		nowStr := now.Format(time.RFC3339)
+
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE goals
+			SET name = ?, description = ?, target_metric_json = ?, priority = ?, updated_at = ?
+			WHERE id = ?
+		`, finalName, finalDesc, finalTarget, finalPrio, nowStr, id); err != nil {
+			return err
+		}
+
+		revID := fmt.Sprintf("%s-rev-%d", id, nextRev)
+		prevState := fmt.Sprintf(`{"name":%q,"description":%q,"target_metric":%s,"priority":%d}`,
+			oldName, oldDesc, jsonOrEmptyObj(oldTarget.String), oldPrio)
+		newState := fmt.Sprintf(`{"name":%q,"description":%q,"target_metric":%s,"priority":%d}`,
+			finalName, finalDesc, jsonOrEmptyObj(finalTarget), finalPrio)
+
+		var decID *string
+		if decisionID != "" {
+			decID = &decisionID
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO goal_revisions (id, goal_id, revision_number, previous_state_json, new_state_json, reason, decision_id, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, revID, id, nextRev, prevState, newState, reason, decID, nowStr); err != nil {
+			return err
+		}
+
+		createdRev = &goal.GoalRevision{
+			ID:                revID,
+			GoalID:            id,
+			RevisionNumber:    nextRev,
+			PreviousStateJSON: prevState,
+			NewStateJSON:      newState,
+			Reason:            reason,
+			DecisionID:        decisionID,
+			CreatedAt:         now,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return createdRev, nil
+}
+
+func jsonOrEmptyObj(raw string) string {
+	if raw == "" {
+		return "{}"
+	}
+	return raw
+}
+
 // ListAll returns goals optionally filtered by status.
 func (r *GoalRepository) ListAll(ctx context.Context, status goal.GoalStatus, limit int) ([]*goal.Goal, error) {
 	if limit <= 0 {

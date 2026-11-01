@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/wade/aia/internal/autonomy/clock"
 	"github.com/wade/aia/internal/domain"
 	"github.com/wade/aia/internal/domain/investment"
 	"github.com/wade/aia/internal/eventbus"
@@ -143,7 +144,7 @@ func (s *Service) ProcessAgyDecision(ctx context.Context, input investment.AgyDe
 	}
 
 	rawInputJSON, _ := json.Marshal(input)
-	now := time.Now().UTC()
+	now := clock.Now(ctx)
 
 	// 1. Validate Instrument Symbol
 	symbol := strings.TrimSpace(input.Symbol)
@@ -428,6 +429,9 @@ func (s *Service) ListDataSources(ctx context.Context) ([]investment.DataSource,
 
 // SyncMarketData fetches the latest quotes/bars from TWSE and persists it.
 func (s *Service) SyncMarketData(ctx context.Context, symbol string) (*investment.MarketData, error) {
+	if clock.IsReplay(ctx) {
+		return nil, fmt.Errorf("live market data fetch is prohibited during Point-in-Time replay (AIA-13 §21.2)")
+	}
 	_ = s.EnsureDataSources(ctx)
 	inst, err := s.repo.GetInstrumentBySymbol(ctx, "", symbol)
 	if err != nil {
@@ -470,6 +474,9 @@ func (s *Service) SyncMarketData(ctx context.Context, symbol string) (*investmen
 
 // SyncAnnouncements fetches and persists recent MOPS / financial news for a symbol.
 func (s *Service) SyncAnnouncements(ctx context.Context, symbol string) ([]investment.RawDocument, error) {
+	if clock.IsReplay(ctx) {
+		return nil, fmt.Errorf("live announcement fetch is prohibited during Point-in-Time replay (AIA-13 §21.2)")
+	}
 	_ = s.EnsureDataSources(ctx)
 	inst, err := s.repo.GetInstrumentBySymbol(ctx, "", symbol)
 	if err != nil {
@@ -527,7 +534,7 @@ func (s *Service) CreatePrediction(ctx context.Context, p *investment.Prediction
 		p.Status = investment.PredictionPending
 	}
 	if p.CreatedAt.IsZero() {
-		p.CreatedAt = time.Now().UTC()
+		p.CreatedAt = clock.Now(ctx)
 	}
 	if p.DueAt.IsZero() {
 		p.DueAt = p.CreatedAt.Add(5 * 24 * time.Hour) // default 5-day horizon
@@ -547,14 +554,25 @@ func (s *Service) EvaluatePredictions(ctx context.Context) ([]investment.Predict
 		return nil, nil, err
 	}
 
-	now := time.Now().UTC()
+	now := clock.Now(ctx)
+	isReplay := clock.IsReplay(ctx)
 	var evaluatedOutcomes []investment.PredictionOutcome
 
 	for _, pred := range pending {
-		// If due date has arrived (or for testing, if evaluated)
-		if now.After(pred.DueAt) || now.Equal(pred.DueAt) || pred.DueAt.Sub(pred.CreatedAt) <= 10*time.Minute {
-			// Get latest price for instrument
-			md, err := s.repo.GetLatestMarketData(ctx, pred.InstrumentID)
+		if pred.CreatedAt.After(now) {
+			continue // Never evaluate future-created predictions in PiT replay
+		}
+		isDue := now.After(pred.DueAt) || now.Equal(pred.DueAt)
+		if !isDue && !isReplay && pred.DueAt.Sub(pred.CreatedAt) <= 10*time.Minute {
+			isDue = true
+		}
+		if isDue {
+			settleCtx := ctx
+			if isReplay && pred.DueAt.Before(now) {
+				settleCtx = clock.WithAsOf(ctx, pred.DueAt, true)
+			}
+			// Get settlement price for instrument strictly <= DueAt / AsOf
+			md, err := s.repo.GetLatestMarketData(settleCtx, pred.InstrumentID)
 			currentPrice := pred.BasePrice
 			if err == nil && md != nil {
 				var bar investment.MarketBarValue
@@ -564,6 +582,7 @@ func (s *Service) EvaluatePredictions(ctx context.Context) ([]investment.Predict
 			}
 
 			outcome := investment.EvaluateSinglePrediction(pred, currentPrice, "TWSE_SETTLEMENT")
+			outcome.EvaluatedAt = now
 			if err := s.repo.SavePredictionOutcome(ctx, outcome); err == nil {
 				evaluatedOutcomes = append(evaluatedOutcomes, *outcome)
 			}

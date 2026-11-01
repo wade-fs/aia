@@ -467,14 +467,21 @@ CREATE INDEX IF NOT EXISTS idx_audit_approval ON audit_logs(approval_id);
 
 ### 3.8 成效評估、根因分析與自我修正 (Learning, RCA & Correction)
 
-徹底分離**修正類型 (What to correct)** 與**授權等級 (Authorization level C0~C5)**：
+徹底分離**修改範圍 (`Scope A/B/C`)**、**修正類型 (`Correction Type`)**、**授權等級 (`C0~C5`)** 與**驗證深度 (`V1~V6`)**，並強制納入可證偽假設、Baseline 對照、退化檢查與 `L0~L3` 學習成熟度分級：
 
 ```sql
+-- 補充執行層 Token 消耗統計欄位（供每日預算硬閘門即時聚合）
+ALTER TABLE executions ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE executions ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE executions ADD COLUMN total_tokens INTEGER NOT NULL DEFAULT 0;
+
 CREATE TABLE outcome_evaluations (
     id TEXT PRIMARY KEY,
     cycle_id TEXT REFERENCES autonomy_cycles(id),
     decision_id TEXT REFERENCES decisions(id),
     task_id TEXT REFERENCES tasks(id),
+    project_id TEXT REFERENCES projects(id),
+    domain TEXT NOT NULL DEFAULT 'general',
     expected_outcome_json TEXT NOT NULL,    -- 決策時設定之預期成果
     actual_outcome_json TEXT NOT NULL,      -- 實際觀測成果
     discrepancy_score REAL NOT NULL,        -- 落差量化指標 (0.0 表示無落差)
@@ -487,7 +494,11 @@ CREATE TABLE root_cause_analyses (
     id TEXT PRIMARY KEY,
     outcome_evaluation_id TEXT NOT NULL REFERENCES outcome_evaluations(id),
     root_cause_category TEXT NOT NULL CHECK (root_cause_category IN ('INCORRECT_FACT', 'BIASED_JUDGMENT', 'FLAWED_STRATEGY', 'AMBIGUOUS_PROMPT', 'WORKFLOW_DEFECT', 'EXTERNAL_UNEXPECTED')),
-    analysis_narrative TEXT NOT NULL,       -- 根因分析報告
+    analysis_narrative TEXT NOT NULL,               -- 根因分析說明
+    falsifiable_hypothesis TEXT NOT NULL,           -- 可檢驗假設（若此根因為真，修正後應觀測到何種可證偽結果）
+    causal_evidence_refs_json TEXT NOT NULL,        -- 因果證據錨點 ID 清單（禁止無證據事後編故事）
+    competing_factors_json TEXT NOT NULL DEFAULT '[]', -- 外部順風/偶然因素等競爭解釋
+    rca_validity_status TEXT NOT NULL DEFAULT 'PROPOSED' CHECK (rca_validity_status IN ('PROPOSED', 'SUPPORTED', 'FALSIFIED', 'INTERVENTION_MISMATCH', 'UNCERTAIN')),
     confidence REAL NOT NULL CHECK (confidence BETWEEN 0.0 AND 1.0),
     created_at TIMESTAMP NOT NULL
 );
@@ -495,19 +506,69 @@ CREATE TABLE root_cause_analyses (
 CREATE TABLE correction_actions (
     id TEXT PRIMARY KEY,
     rca_id TEXT NOT NULL REFERENCES root_cause_analyses(id),
+    scope_level TEXT NOT NULL DEFAULT 'A' CHECK (scope_level IN ('A', 'B', 'C')),
     correction_type TEXT NOT NULL CHECK (correction_type IN ('FACT', 'JUDGMENT', 'STRATEGY', 'PROMPT', 'WORKFLOW', 'CODE')),
     authorization_level TEXT NOT NULL CHECK (authorization_level IN ('C0', 'C1', 'C2', 'C3', 'C4', 'C5')),
-    target_entity_ref TEXT NOT NULL,        -- 欲修正之目標參照 (如 strategy:001 或 prompt:analyst)
-    before_state_json TEXT NOT NULL,        -- 修正前狀態
+    validation_level TEXT NOT NULL DEFAULT 'V2' CHECK (validation_level IN ('V1', 'V2', 'V3', 'V4', 'V5', 'V6')),
+    tier_profile TEXT NOT NULL DEFAULT 'TIER1_AUTO' CHECK (tier_profile IN ('TIER1_AUTO', 'TIER2_APPROVAL', 'TIER3_BLOCKED')),
+    target_entity_ref TEXT NOT NULL,        -- 欲修正之目標參照 (如 claim:001 或 strategy:inv-materiality)
+    before_state_json TEXT NOT NULL,        -- 修正前狀態（供退化時自動回滾）
     proposed_state_json TEXT NOT NULL,      -- 提案修正狀態
     applied_state_json TEXT,                -- 實際套用狀態
-    approval_id TEXT REFERENCES approvals(id), -- 若需審批則關聯
-    verification_status TEXT NOT NULL CHECK (verification_status IN ('PENDING', 'APPLIED', 'VERIFIED_EFFECTIVE', 'VERIFIED_INEFFECTIVE', 'ROLLED_BACK')),
-    created_at TIMESTAMP NOT NULL
+    approval_id TEXT REFERENCES approvals(id), -- 若屬 Tier 2 則強制關聯人類審批
+    regression_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (regression_status IN ('PENDING', 'PASSED', 'FAILED')),
+    verification_status TEXT NOT NULL CHECK (verification_status IN ('PENDING', 'APPLIED', 'VERIFIED_EFFECTIVE', 'VERIFIED_INEFFECTIVE', 'INCONCLUSIVE', 'REGRESSED', 'ROLLED_BACK', 'BLOCKED')),
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE learning_records (
+    id TEXT PRIMARY KEY,
+    project_id TEXT REFERENCES projects(id),
+    domain TEXT NOT NULL DEFAULT 'general',
+    source_cycle_id TEXT REFERENCES autonomy_cycles(id),
+    outcome_evaluation_id TEXT NOT NULL REFERENCES outcome_evaluations(id),
+    rca_id TEXT REFERENCES root_cause_analyses(id),
+    correction_action_id TEXT REFERENCES correction_actions(id),
+    title TEXT NOT NULL,
+    learning_level TEXT NOT NULL CHECK (learning_level IN ('L0_RECORDED', 'L1_APPLIED', 'L2_VERIFIED', 'L3_GENERALIZED')),
+    effectiveness_verdict TEXT NOT NULL CHECK (effectiveness_verdict IN ('PENDING', 'EFFECTIVE', 'INEFFECTIVE', 'REGRESSED', 'INCONCLUSIVE')),
+    comparison_method TEXT NOT NULL CHECK (comparison_method IN ('CONTROL_BENCHMARK', 'PIT_REPLAY', 'SIMILAR_COHORT', 'PRE_POST_ONLY')),
+    baseline_json TEXT NOT NULL,            -- 1. 修正前表現基準
+    hypothesis_json TEXT NOT NULL,          -- 2. 預期修正改善假設
+    intervention_json TEXT NOT NULL,        -- 3. 實際採取之修正
+    verification_json TEXT NOT NULL DEFAULT '{}', -- 4. 對照驗證結果（含超額改善幅度與樣本數）
+    regression_json TEXT NOT NULL DEFAULT '{}',   -- 5. 是否造成其他能力退化
+    followup_json TEXT NOT NULL DEFAULT '{}',     -- 6. 後續跨情境追蹤表現
+    epistemic_confidence REAL NOT NULL CHECK (epistemic_confidence BETWEEN 0.0 AND 1.0), -- 7. 認識論信心（PRE_POST_ONLY 硬鎖 <= 0.45）
+    generalized_cycle_ids_json TEXT NOT NULL DEFAULT '[]', -- 跨情境獨立驗證通過之 Cycle IDs（L3 硬門檻）
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE goal_evolution_proposals (
+    id TEXT PRIMARY KEY,
+    goal_id TEXT NOT NULL REFERENCES goals(id),
+    cycle_id TEXT REFERENCES autonomy_cycles(id),
+    evolution_mode TEXT NOT NULL CHECK (evolution_mode IN ('PERSISTENCE', 'OPTIMIZATION', 'REVISION')),
+    actor_type TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    previous_target_metric_json TEXT NOT NULL DEFAULT '{}',
+    proposed_target_metric_json TEXT NOT NULL DEFAULT '{}',
+    invalidated_claim_ids_json TEXT NOT NULL DEFAULT '[]', -- 修訂頂層目標必填之前提失效證據鏈
+    resource_constraint_note TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK (status IN ('APPLIED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED_GOALPOST_MOVING', 'REJECTED')),
+    approval_id TEXT REFERENCES approvals(id),
+    resulting_revision_id TEXT REFERENCES goal_revisions(id),
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
 );
 
 CREATE INDEX idx_eval_discrepancy ON outcome_evaluations(discrepancy_score);
 CREATE INDEX idx_corrections_rca ON correction_actions(rca_id);
+CREATE INDEX idx_learning_level_domain ON learning_records(domain, learning_level, effectiveness_verdict);
+CREATE INDEX idx_goal_evolution_goal ON goal_evolution_proposals(goal_id, status);
 ```
 
 ---

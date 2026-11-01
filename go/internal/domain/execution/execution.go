@@ -36,6 +36,9 @@ type Execution struct {
 	ResultStatus   string          `json:"result_status"`
 	ErrorCode      string          `json:"error_code"`
 	ErrorMessage   string          `json:"error_message"`
+	InputTokens    int64           `json:"input_tokens"`
+	OutputTokens   int64           `json:"output_tokens"`
+	TotalTokens    int64           `json:"total_tokens"`
 	StartedAt      *time.Time      `json:"started_at"`
 	EndedAt        *time.Time      `json:"ended_at"`
 	CreatedAt      time.Time       `json:"created_at"`

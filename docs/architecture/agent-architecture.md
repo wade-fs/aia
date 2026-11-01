@@ -75,7 +75,7 @@ In typical market conditions, price movements may be normal noise (e.g. fluctuat
 └──────────────────────────────┘           └─────────────────────────────┘
 ```
 
-### Implementation Details ([`investment/service.go`](file:///home/wade/src/github/aia/go/internal/investment/service.go))
+### Implementation Details ([`service/investment/service.go`](file:///home/wade/src/github/aia/go/internal/service/investment/service.go))
 
 1. **Threshold Check:** Default price threshold is $3\%$. If $|\frac{P_{today} - P_{prev}}{P_{prev}}| < 0.03$ and zero material disclosures were filed, the gate is closed.
 2. **`PreserveExistingDecision`:** Automatically carries forward the active thesis, updates the verification baseline, notes the reason (`"Price change within normal bounds; no material disclosures"`), and skips LLM dispatch.

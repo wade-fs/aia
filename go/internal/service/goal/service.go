@@ -58,6 +58,7 @@ type Service struct {
 	autonomyRepo *repository.AutonomyRepository
 	eventRepo    *repository.EventHistoryRepository
 	taskSvc      *taskService.Service
+	evoDeps      EvolutionDeps
 }
 
 func NewService(

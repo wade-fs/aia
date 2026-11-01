@@ -28,9 +28,9 @@ AIA executes a **Dual-Track Evolution Model**:
 │ & Alignment       │ Knowledge Integ.  │ Operational Control            │
 │    [COMPLETED]    │    [COMPLETED]    │          [COMPLETED]           │
 ├───────────────────┼───────────────────┼────────────────────────────────┤
-│ Phase 3: Autonomy │ Phase 4: Self-    │ Phase 5: Domain Experiments &  │
-│ Core & Initiative │ Correction & Goal │ Cross-Domain Collaboration     │
-│    [COMPLETED]    │   [NEXT TARGET]   │           [PLANNED]            │
+│ Phase 3 & 3.5:    │ Phase 4: Verif.   │ Phase 5: Domain Experiments &  │
+│ Autonomy & Harden │ Learning & Goal   │ Longitudinal L3 Validation     │
+│    [COMPLETED]    │    [COMPLETED]    │         [NEXT TARGET]          │
 ├───────────────────┴───────────────────┴────────────────────────────────┤
 │ Phase 6: Safe Self-Modification & Autonomous System Evolution [PLANNED]│
 └────────────────────────────────────────────────────────────────────────┘
@@ -40,58 +40,58 @@ AIA executes a **Dual-Track Evolution Model**:
 
 ## 3. Autonomy Milestones (M0 ～ M8)
 
-Progress is evaluated by verifiable autonomous behavior rather than package or table count:
+Progress is evaluated by verifiable, computable autonomous behavior rather than package or table count (see [AIA-13](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md) for M3–M7 quantitative acceptance thresholds):
 
-- **M0: Persistent Runtime** ── Crash-free runtime daemon, concurrent workers, SQLite persistence. *(Baseline Ready at commit `7597902`)*
-- **M1: Temporal Continuity** ── Restoration of Project state, goals, and pending issues from Event history across process termination. *(Phase 1)*
-- **M2: Trustworthy Decision** ── Provenance verification linking every assertion and decision to original evidence and sources. *(Phase 1)*
-- **M3: Initiative & Rationality** ── Proactive discovery of valuable work; explicit and auditable `NO_ACTION` decisions when inaction is optimal. *(Phase 3)*
-- **M4: Autonomous Closed Loop** ── Execution of the 11-step loop (`Observe` to `Reassess`) with preliminary outcome verification. *(Phase 3)*
-- **M5: Self-Correction & RCA** ── Identification of outcome discrepancies, automated Root Cause Analysis, and application of lessons to future choices. *(Phase 4)*
-- **M6: Goal Evolution** ── Dynamic goal optimization, decomposition, and revision proposals based on longitudinal empirical outcomes. *(Phase 4)*
-- **M7: Domain Experiments** ── Autonomous management of live virtual capital (NT$100,000) by Investment Agent, monthly self-review, and cross-domain tool delegation. *(Phase 5)*
-- **M8: Safe Self-Modification** ── Isolated sandbox code modification, automated multi-level test verification, human approval gate, and automatic rollback. *(Phase 6)*
+- **M0: Persistent Runtime** ── Crash-free runtime daemon, concurrent workers, SQLite persistence. *(Completed at Baseline `7597902`)*
+- **M1: Temporal Continuity** ── Restoration of Project state, goals, and pending issues from Event history across process termination. *(Completed — Phase 1)*
+- **M2: Trustworthy Decision** ── Provenance verification linking every assertion and decision to original evidence and sources. *(Completed — Phase 1)*
+- **M3: Initiative & Rationality** ── Proactive discovery of valuable work; explicit, auditable `NO_ACTION` decisions with counterfactual calibration (`>= 70%` post-hoc accuracy over `N >= 10`). *(Completed — Phase 3 / 3.5)*
+- **M4: Autonomous Closed Loop** ── Execution of the 11-step loop (`Observe` to `Reassess`) under hard daily token/cycle budget gates and Point-in-Time (`AsOf` Clock) zero-look-ahead replay. *(Completed — Phase 3 / 3.5)*
+- **M5: Verifiable Self-Correction & Learning Mechanism** ── Discrepancy detection, testable RCA hypotheses, table-driven 3-tier runtime profile (`TIER1_AUTO`, `TIER2_APPROVAL`, `TIER3_BLOCKED`), 4 learning maturity levels (`L0_RECORDED` ～ `L3_GENERALIZED`), 7 epistemic comparison fields, regression rollback, and `INCONCLUSIVE` / `<= 0.45` confidence caps. *(Completed — Phase 4)*
+- **M6: Governed Goal Evolution** ── 3-way goal evolution taxonomy (`PERSISTENCE`, `OPTIMIZATION`, `REVISION`) with Anti-Goalpost-Moving guard preventing unapproved metric weakening on `STRATEGIC` goals. *(Completed — Phase 4)*
+- **M7: Domain Experiments & Longitudinal Validation** ── Longitudinal validation of `L3_GENERALIZED` learning across Investment (NT$100,000 virtual capital + historical PiT replay), Coding, and Writing experiments, plus cross-domain `DelegationRequest`. *(Next Target — Phase 5)*
+- **M8: Safe Self-Modification** ── OS-isolated sandbox code modification, automated multi-level test verification, human approval gate, and automatic rollback. *(Planned — Phase 6)*
 
 ---
 
 ## 4. Phase Breakdown & Deliverables
 
-### Phase 0: Baseline & Alignment *(Current)*
+### Phase 0: Baseline & Alignment *(Completed)*
 - Audit codebase at commit [`7597902`](file:///home/wade/src/github/aia).
 - Cross-specification consistency audit ([AIA-SPEC-AUDIT-01](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)).
 - Architecture-to-code mapping ([AIA-ARCH-MAP-01](file:///home/wade/src/github/aia/docs/architecture/architecture-to-code-mapping.md)).
 - Unified Data Model & lifecycle specification ([AIA-ARCH-DATA-01](file:///home/wade/src/github/aia/docs/architecture/data-model.md)).
 - Sequential migration roadmap ([AIA-DEV-MIG-01](file:///home/wade/src/github/aia/docs/development/migration-plan.md)).
 
-### Phase 1: Persistent State & Knowledge Integrity
+### Phase 1: Persistent State & Knowledge Integrity *(Completed)*
 - Append-only `event_history` table as primary source of historical truth.
 - `sources`, `evidence`, `claims`, and `claim_evidence_links` implementation.
 - Flexible `memories` provenance tagging (`provenance_type`, confidence, claim reference).
 - `ContextReconstructor` restoring project state, goals, and pending issues after process restart.
 
-### Phase 2: Governance & Operational Control
+### Phase 2: Governance & Operational Control *(Completed)*
 - Separation of Policy (rule evaluation), Approval (human review), and Permission (environment boundary).
 - Controlled Emergency Stop: 1-second freeze on new task dispatch, graceful cancellation with state protection.
 - Web Console & CLI pending approval interface with one-click decision.
 
-### Phase 3: Autonomy Core & Initiative
+### Phase 3 & 3.5: Autonomy Core, Initiative & Platform Hardening *(Completed)*
 - Shared `internal/autonomy/` package coordinating the complete 11-step autonomous cycle.
 - Diverse decision outcomes: `ACT`, `DEFER`, `MONITOR`, `ASK_HUMAN`, `NO_ACTION`.
-- Goal management entity and task-to-goal alignment.
-- Investment Agent autonomous pilot loop.
+- Goal management entity, task-to-goal alignment, and Investment Agent autonomous pilot loop.
+- **Phase 3.5 Hardening**: Pre-flight daily token & cycle budget gates, subprocess secret scrubbing & OS mount-namespace isolation (`bwrap` / `systemd-run --user`), harness output/artifact validator hardening (never trusting exit code 0 alone), and Point-in-Time (`AsOf` Clock) zero-look-ahead historical replay.
 
-### Phase 4: Self-Correction & Goal Evolution
-- Automated outcome discrepancy detection and Root Cause Analysis (RCA).
-- Six levels of self-correction (Fact, Judgment, Strategy, Prompt, Workflow, Code).
-- Goal progress evaluation, priority adjustment, and revision proposals.
-- [AIA-13](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md) baseline metrics tracking.
+### Phase 4: Verifiable Self-Correction, Learning Mechanism & Governed Goal Evolution *(Completed)*
+- Repositioned as **establishing a verifiable self-correction and learning mechanism** (rather than claiming open-ended self-learning completion in isolation).
+- Automated outcome discrepancy detection, testable Root Cause Analysis (`root_cause_analyses`), and table-driven 3-Tier Runtime Profile (`TIER1_AUTO`, `TIER2_APPROVAL`, `TIER3_BLOCKED`).
+- Four Learning Maturity Levels (`L0_RECORDED`, `L1_APPLIED`, `L2_VERIFIED`, `L3_GENERALIZED`), 7 mandatory comparison fields (`Baseline`, `Hypothesis`, `Intervention`, `Verification`, `Regression`, `Follow-up`, `Confidence`), `PRE_POST_ONLY` confidence cap (`<= 0.45`), automatic regression rollback, and negative constraint suppression.
+- Governed Goal Evolution (`PERSISTENCE`, `OPTIMIZATION`, `REVISION`) with deterministic Anti-Goalpost-Moving enforcement.
+- Computable [AIA-13](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md) M3–M7 thresholds and Learning Effectiveness Acceptance Suite (`Scenarios A–E`).
 
-### Phase 5: Domain Experiments & Cross-Domain Collaboration
-- Investment Agent complete autonomous experiment lifecycle ([AIA-05](file:///home/wade/src/github/aia/docs/specifications/AIA-05-Investment-Agent-Specification.md)).
-- Coding Agent and Writing Agent specialized integrations.
+### Phase 5: Domain Experiments & Cross-Domain Collaboration *(Next Target)*
+- Longitudinal validation of `L3_GENERALIZED` learning across Investment ([AIA-05](file:///home/wade/src/github/aia/docs/specifications/AIA-05-Investment-Agent-Specification.md)), Coding, and Writing domain experiments.
 - Cross-domain delegation protocol (`DelegationRequest`).
 - Longitudinal experiment tracking ([AIA-15](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md)).
 
-### Phase 6: Safe Self-Modification & Autonomous System Evolution
-- Scope isolation: Level A (Domain), Level B (AIA Core - Human Approval Required), Level C (Governance - Locked).
+### Phase 6: Safe Self-Modification & Autonomous System Evolution *(Planned)*
+- Scope isolation: Level A (Domain), Level B (AIA Core - Human Approval Required), Level C (Governance - Locked via OS namespace & immutable storage protections).
 - Automated self-modification pipeline: Proposal ➔ Sandbox ➔ Multi-level Tests ➔ Diff Review ➔ Approval ➔ Deployment ➔ Verification ➔ Rollback.

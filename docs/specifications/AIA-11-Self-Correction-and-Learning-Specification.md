@@ -1212,3 +1212,32 @@ AIA 不應只知道自己曾經犯錯。
 
 **Learning 使 AIA 累積經驗；Self-Correction 使 AIA 改變行為；Self-Improvement 則證明這些改變確實帶來進步。**
 
+---
+
+# 21. 學習成熟度分級 (`L0~L3`) 與科學對照規範 (v2.1 Normative Addendum)
+
+為防止系統將「產生一份看似合理的檢討報告」誤認為有效學習，AIA 將學習效果嚴格劃分為四個由系統驗收器（Verifier）判定的層級：
+
+1. **`L0_RECORDED` (Experience Recorded)**：已記錄預期與實際結果落差及當時環境快照，尚未套用修正。
+2. **`L1_APPLIED` (Correction Applied)**：已根據具證據錨點的可證偽根因假設套用修正，尚未經對照驗證。
+3. **`L2_VERIFIED` (Correction Verified)**：修正後通過目標驗證、具備 Baseline/對照比較，且通過退化檢查（`Regression == PASSED`）。
+4. **`L3_GENERALIZED` (Learning Generalized)**：後續在**不同循環（`cycle_id != source_cycle_id`）且不同情境/子模組/標的**中自動召回運用該經驗，並再次驗證正向無退化。**唯有達到 `L3` 方可視為泛化有效學習。**
+
+## 21.1 七大強制對照欄位與因果歸因原則
+
+每一筆 `learning_records` 必須結構化保存：
+- **`Baseline`**：修正前的量化基準表現。
+- **`Hypothesis`**：可證偽假設（預期修正會改善何項指標、在何種條件下若未發生則假設不成立）。
+- **`Intervention`**：實際採取的修正內容與修正前狀態快照（供退化回滾）。
+- **`Verification`**：修正後的驗證結果與對照方式（`CONTROL_BENCHMARK` / `PIT_REPLAY` / `SIMILAR_COHORT` / `PRE_POST_ONLY`）。
+- **`Regression`**：是否造成既有能力或回歸測試退化。
+- **`Follow-up`**：後續跨循環實際表現追蹤。
+- **`Confidence`**：認識論信心值（`0.0 ~ 1.0`）。
+
+## 21.2 三大因果防呆與四態結論 (`EFFECTIVE | INEFFECTIVE | REGRESSED | INCONCLUSIVE`)
+
+1. **修正後變好，不一定是修正造成的（外部順風防呆）**：若有對照基準（如大盤指數或未修改基準組），必須檢驗「超額改善幅度 (`excess_delta`)」；若帳面變好完全來自外部環境順風，嚴禁標記為 `EFFECTIVE`。
+2. **修正後沒變好，不代表根因分析完全錯誤**：系統分開記錄 `rca_validity_status` 與 `effectiveness_verdict`，區分「根因假設被推翻 (`FALSIFIED`)」與「根因可能成立但介入手段不當 (`INTERVENTION_MISMATCH`)」。
+3. **無對照組信心上限（Confidence Cap）**：若無法建立對照組或歷史回放比較（`comparison_method == 'PRE_POST_ONLY'`）或樣本數不足，系統在程式碼層強制將 `epistemic_confidence` 上限鎖死於 `<= 0.45`，且結論最高僅能標為 `INCONCLUSIVE`（證據不足）。
+4. **Recall 防污染規則**：`L0/L1` 與 `INCONCLUSIVE` 不得提升決策權重；`REGRESSED` 與 `INEFFECTIVE` 必須作為反面約束（Anti-Pattern）召回，防止重複提交已證實失敗的修法。
+

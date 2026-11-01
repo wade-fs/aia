@@ -165,6 +165,25 @@ func (r *KnowledgeRepository) CreateClaim(ctx context.Context, c *knowledge.Clai
 	return err
 }
 
+// GetClaim retrieves a claim by ID.
+func (r *KnowledgeRepository) GetClaim(ctx context.Context, claimID string) (*knowledge.Claim, error) {
+	row := r.db.RawDB().QueryRowContext(ctx, `
+		SELECT id, statement, assertion_status, is_knowledge, current_version, created_at, updated_at
+		FROM claims WHERE id = ?
+	`, claimID)
+	c := &knowledge.Claim{}
+	var statusStr, createdStr, updatedStr string
+	var isKnow int
+	if err := row.Scan(&c.ID, &c.Statement, &statusStr, &isKnow, &c.CurrentVersion, &createdStr, &updatedStr); err != nil {
+		return nil, err
+	}
+	c.AssertionStatus = knowledge.AssertionStatus(statusStr)
+	c.IsKnowledge = isKnow == 1
+	c.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
+	c.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
+	return c, nil
+}
+
 // ReviseClaim updates a claim statement atomically and appends to claim_revisions.
 func (r *KnowledgeRepository) ReviseClaim(ctx context.Context, claimID, newStatement, reason, decisionID string) error {
 	return r.db.WithTx(ctx, func(tx *sql.Tx) error {

@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/wade/aia/internal/autonomy/clock"
 	domainAutonomy "github.com/wade/aia/internal/domain/autonomy"
 	"github.com/wade/aia/internal/domain/continuity"
 	"github.com/wade/aia/internal/domain/decision"
 	"github.com/wade/aia/internal/domain/goal"
 	"github.com/wade/aia/internal/domain/knowledge"
+	domainLearning "github.com/wade/aia/internal/domain/learning"
 	"github.com/wade/aia/internal/domain/memory"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
@@ -51,6 +53,10 @@ type RecalledBundle struct {
 	RecentDecisions []*decision.Decision        `json:"recent_decisions,omitempty"`
 	PendingIssues   []string                    `json:"pending_issues,omitempty"`
 	ActiveTasks     []task.Task                 `json:"active_tasks,omitempty"`
+	// Phase 4 L0–L3 Epistemic Learning Partitions (AIA-11 §21.2)
+	VerifiedLearnings   []*domainLearning.LearningRecord `json:"verified_learnings,omitempty"`   // L2/L3 EFFECTIVE
+	NegativeConstraints []*domainLearning.LearningRecord `json:"negative_constraints,omitempty"` // REGRESSED / INEFFECTIVE anti-patterns
+	PendingHypotheses   []*domainLearning.LearningRecord `json:"pending_hypotheses,omitempty"`   // L0/L1/INCONCLUSIVE (zero weight boost)
 	// L5: Bounded Active Context Digest
 	ActiveDigest string `json:"active_digest"`
 }
@@ -72,6 +78,7 @@ type Engine struct {
 	decisionRepo   *repository.DecisionRepository
 	projectRepo    *repository.ProjectRepository
 	taskRepo       *repository.TaskRepository
+	learningRepo   *repository.LearningRepository
 }
 
 func NewEngine(
@@ -96,9 +103,14 @@ func NewEngine(
 	}
 }
 
+func (e *Engine) SetLearningRepository(repo *repository.LearningRepository) {
+	e.learningRepo = repo
+}
+
 // Recall reconstructs L1–L5 context associatively using project state, goals, observations, and provenance weights.
 func (e *Engine) Recall(ctx context.Context, in RecallInput) (*RecalledBundle, error) {
-	now := time.Now().UTC()
+	now := clock.Now(ctx)
+	asOf, hasAsOf := clock.AsOf(ctx)
 	bundle := &RecalledBundle{
 		Sources: make(map[string]*knowledge.Source),
 	}
@@ -154,13 +166,21 @@ func (e *Engine) Recall(ctx context.Context, in RecallInput) (*RecalledBundle, e
 
 	if e.decisionRepo != nil && in.ProjectID != "" {
 		if decs, err := e.decisionRepo.ListByProject(ctx, in.ProjectID, 10); err == nil {
-			bundle.RecentDecisions = decs
+			for _, d := range decs {
+				if hasAsOf && d.CreatedAt.After(asOf) {
+					continue // Zero look-ahead filter
+				}
+				bundle.RecentDecisions = append(bundle.RecentDecisions, d)
+			}
 		}
 	}
 
 	if e.taskRepo != nil && in.ProjectID != "" {
 		if tasks, err := e.taskRepo.List(ctx, repository.TaskFilter{ProjectID: in.ProjectID, Limit: 50}); err == nil {
 			for _, tk := range tasks {
+				if hasAsOf && tk.CreatedAt.After(asOf) {
+					continue
+				}
 				if !tk.IsTerminal() {
 					bundle.ActiveTasks = append(bundle.ActiveTasks, tk)
 				}
@@ -171,10 +191,17 @@ func (e *Engine) Recall(ctx context.Context, in RecallInput) (*RecalledBundle, e
 	// --- L1: Event History for Project ---
 	if e.eventRepo != nil && in.ProjectID != "" {
 		if evts, err := e.eventRepo.ListByAggregate(ctx, "PROJECT", in.ProjectID); err == nil {
-			if len(evts) > 10 {
-				evts = evts[len(evts)-10:]
+			var filtered []*continuity.EventHistory
+			for _, ev := range evts {
+				if hasAsOf && ev.OccurredAt.After(asOf) {
+					continue
+				}
+				filtered = append(filtered, ev)
 			}
-			bundle.RecentEvents = evts
+			if len(filtered) > 10 {
+				filtered = filtered[len(filtered)-10:]
+			}
+			bundle.RecentEvents = filtered
 		}
 	}
 
@@ -244,6 +271,9 @@ func (e *Engine) Recall(ctx context.Context, in RecallInput) (*RecalledBundle, e
 			byTitle := map[string][]memory.Memory{}
 
 			for _, m := range candidates {
+				if hasAsOf && m.CreatedAt.After(asOf) {
+					continue // Zero look-ahead filter
+				}
 				// Temporal validity filter: skip expired memories
 				if m.ExpiresAt != nil && now.After(*m.ExpiresAt) {
 					continue
@@ -281,6 +311,25 @@ func (e *Engine) Recall(ctx context.Context, in RecallInput) (*RecalledBundle, e
 			for _, rm := range ranked {
 				bundle.Memories = append(bundle.Memories, rm.mem)
 				_ = e.memoryRepo.TouchLastUsed(ctx, rm.mem.ID)
+			}
+		}
+	}
+
+	// --- Phase 4 Learning Records Partition (L2/L3 Positive vs REGRESSED/INEFFECTIVE Anti-Patterns vs L0/L1 Pending) ---
+	if e.learningRepo != nil {
+		if records, err := e.learningRepo.ListLearningRecords(ctx, in.ProjectID, "", 30); err == nil {
+			for _, rec := range records {
+				switch {
+				case rec.EffectivenessVerdict == domainLearning.VerdictEffective &&
+					(rec.LearningLevel == domainLearning.LevelL2Verified || rec.LearningLevel == domainLearning.LevelL3Generalized):
+					bundle.VerifiedLearnings = append(bundle.VerifiedLearnings, rec)
+				case rec.EffectivenessVerdict == domainLearning.VerdictRegressed ||
+					rec.EffectivenessVerdict == domainLearning.VerdictIneffective:
+					bundle.NegativeConstraints = append(bundle.NegativeConstraints, rec)
+				default:
+					// L0_RECORDED, L1_APPLIED, INCONCLUSIVE: never elevate decision weight
+					bundle.PendingHypotheses = append(bundle.PendingHypotheses, rec)
+				}
 			}
 		}
 	}
@@ -467,6 +516,9 @@ func buildActiveDigest(b *RecalledBundle) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Goals=%d, ActiveTasks=%d, RecentDecisions=%d, Memories=%d, Evidence=%d, Conflicts=%d",
 		len(b.ActiveGoals), len(b.ActiveTasks), len(b.RecentDecisions), len(b.Memories), len(b.GroundedEvidence), len(b.Conflicts)))
+	if len(b.VerifiedLearnings) > 0 || len(b.NegativeConstraints) > 0 {
+		sb.WriteString(fmt.Sprintf(", VerifiedLearnings=%d, AntiPatterns=%d", len(b.VerifiedLearnings), len(b.NegativeConstraints)))
+	}
 	if len(b.PendingIssues) > 0 {
 		sb.WriteString(fmt.Sprintf(", PendingIssues=%d", len(b.PendingIssues)))
 	}

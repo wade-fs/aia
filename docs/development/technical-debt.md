@@ -25,10 +25,10 @@ This document catalogues current architectural trade-offs, known technical debts
 
 ## 2. Technical Debt Items
 
-### Debt Item 1: Test Suite Mock Executor vs. Headless agy E2E Harness
-- **Severity:** Medium
-- **Description:** Unit and integration tests rely on `MockExecutor` to simulate Antigravity CLI execution responses. While fast and deterministic, end-to-end integration with live `agy` requires an external Google account and CLI installation.
-- **Remediation:** Build an automated end-to-end smoke test suite that executes `agy` in headless mode when `AIA_INTEGRATION_TESTS=1` is provided.
+### Debt Item 1: Test Suite Mock Executor vs. Headless agy E2E Harness *(Resolved in Phase 3.5)*
+- **Status:** **Resolved** (with graceful skip on unauthenticated CI runners)
+- **Description:** Unit and deterministic integration tests use `MockExecutor`, while [`go/tests/integration/antigravity_real_test.go`](file:///home/wade/src/github/aia/go/tests/integration/antigravity_real_test.go) now exercises the real `agy` CLI over headless `stream-json` inside [`sandbox.go`](file:///home/wade/src/github/aia/go/internal/provider/antigravity/sandbox.go) environment scrubbing, paired with [`validator.go`](file:///home/wade/src/github/aia/go/internal/validation/validator.go) enforcing output/artifact/fatal-marker checks rather than trusting exit code `0` alone.
+- **Residual Constraint:** Automated CI runners without a pre-authenticated `agy` Google OAuth session skip live LLM invocation tests automatically; local release sign-off must run on an authenticated workstation.
 
 ### Debt Item 2: Dynamic Prediction Horizon Resolution
 - **Severity:** Low

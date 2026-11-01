@@ -77,6 +77,7 @@ type App struct {
 	GovernanceSvc    *govService.Service
 	PolicyEvaluator  *policy.Evaluator
 	AutonomyRepo     *repository.AutonomyRepository
+	LearningRepo     *repository.LearningRepository
 	AutonomyEngine   *autonomy.Engine
 }
 
@@ -112,6 +113,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	approvalRepo := repository.NewApprovalRepository(db)
 	govRepo := repository.NewGovernanceRepository(db)
 	autonomyRepo := repository.NewAutonomyRepository(db)
+	learningRepo := repository.NewLearningRepository(db)
 
 	taskRepo.SetChangeHook(func(ctx context.Context, taskID domain.ID, status task.TaskStatus, created bool) {
 		if bus != nil {
@@ -159,6 +161,13 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	knowledgeSvc := knowledgeService.NewService(knowledgeRepo, decisionRepo, continuityRepo)
 	approvalSvc := approvalService.NewService(approvalRepo, taskSvc, auditRepo, bus)
 	goalSvc := goalService.NewService(goalRepo, autonomyRepo, eventHistoryRepo, taskSvc)
+	goalSvc.SetEvolutionDeps(goalService.EvolutionDeps{
+		LearningRepo:  learningRepo,
+		KnowledgeRepo: knowledgeRepo,
+		DecisionRepo:  decisionRepo,
+		AuditRepo:     auditRepo,
+		ApprovalSvc:   approvalSvc,
+	})
 
 	// 6. Recovery
 	recMgr := recovery.NewManager(taskRepo, execRepo, auditRepo)
@@ -168,14 +177,23 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 
 	// 7. Orchestrator, Policy Evaluator, Governance Service & Memory Retrieval
 	retriever := retrieval.NewRetriever(memRepo, cfg.Memory)
-	evaluator := policy.NewEvaluatorWithOptions(auditRepo, nil, 0)
+	evaluator := policy.NewEvaluatorWithOptions(auditRepo, nil, cfg.Budget.MaxDailySpend)
+	evaluator.SetBudgetLimits(policy.BudgetLimits{
+		MaxDailyTokens:           cfg.Budget.MaxDailyTokens,
+		MaxDailyCycles:           cfg.Budget.MaxDailyCycles,
+		MaxSingleExecutionTokens: cfg.Budget.MaxSingleExecutionTokens,
+		MaxDailySpend:            cfg.Budget.MaxDailySpend,
+	})
+	execSvc.SetPolicyEvaluator(evaluator)
 	govSvc := govService.NewService(govRepo, auditRepo, evaluator, bus)
 
-	// 8. Autonomy Core Engine (Observation + Recall + Initiative + Deliberation + 11-Step Coordinator)
+	// 8. Autonomy Core Engine (Observation + Recall + Initiative + Deliberation + Learning + 11-Step Coordinator)
 	autonomyEng := autonomy.NewEngineWithDeps(autonomy.Dependencies{
 		AutonomyRepo:     autonomyRepo,
 		DecisionRepo:     decisionRepo,
 		ContinuityRepo:   continuityRepo,
+		ExecutionRepo:    execRepo,
+		LearningRepo:     learningRepo,
 		GoalRepo:         goalRepo,
 		EventHistoryRepo: eventHistoryRepo,
 		KnowledgeRepo:    knowledgeRepo,
@@ -246,6 +264,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		GovernanceSvc:    govSvc,
 		PolicyEvaluator:  evaluator,
 		AutonomyRepo:     autonomyRepo,
+		LearningRepo:     learningRepo,
 		AutonomyEngine:   autonomyEng,
 	}
 
@@ -308,6 +327,7 @@ func (a *App) CreateWebHost() (*host.Host, string, error) {
 		AutonomyEngine: a.AutonomyEngine,
 		AutonomyRepo:   a.AutonomyRepo,
 		ContinuityRepo: a.ContinuityRepo,
+		LearningRepo:   a.LearningRepo,
 	})
 
 	// 2. Register Agent Modules with isolated dedicated muxes

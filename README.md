@@ -1,545 +1,196 @@
 # AIA — Autonomous Intelligence Architecture
 
-**A Personal AI Agent Platform for Autonomous Behavior Research**
+**A Personal AI Agent Platform for Verifiable Autonomous Behavior Research**
 
-AIA 是一個以研究 AI Agent 自主行為為目標的個人 AI Agent 平台。
+AIA 是一個以研究與實證 AI Agent 長期自主行為為目標的本機優先（Local-First）個人自主實驗平台。
 
-本專案希望探索 AI Agent 是否能具備持續性的自主行為，包括：
+本專案聚焦於可觀察、可量測、可證偽且受治理約束的四項自主行為能力（不涉及對主觀意識的宣稱）：
 
-1. **Initiative** — 主動性思維：能觀察環境、發現問題與機會，並主動提出行動。
-2. **Continuity** — 時間連續性：能跨越不同執行時段，延續記憶、理解與工作狀態。
-3. **Self-Correction** — 自我修正：能檢查判斷與結果，辨識錯誤並修正策略。
-4. **Goal Evolution** — 目標演化：能持續維持目標，同時優化達成方法，必要時提出目標修正。
-
-這裡所稱的「自主性」或「覺醒」，指的是可觀察、可量測、可追溯的行為能力，不涉及對 AI 主觀意識的判定。
+1. **Initiative（主動性）** — 觀察環境與專案脈絡、發現有價值問題，並在無需行動時做出有據可查的 `NO_ACTION`。
+2. **Continuity（時間連續性）** — 跨越 Process 重啟與多日週期，透過不可變事件鏈與證據溯源重建工作狀態與未決事項。
+3. **Verifiable Self-Correction（可驗證自我修正與學習機制）** — 比對預期與實際落差、提出可檢驗的根因假設（RCA）、藉由對照基準與退化檢查驗證修正成效（`L0`～`L3`），並保留失敗反面約束。
+4. **Governed Goal Evolution（受控目標演化）** — 嚴格區分 `PERSISTENCE`、`OPTIMIZATION` 與 `REVISION`，透過防移動球門守衛（Anti-Goalpost-Moving）防止因短期挫敗擅自弱化目標。
 
 ---
 
 ## 1. Current Status
 
-<badge color="success">第一個實驗模組：Investment</badge>
+目前平台已完成 **Phase 0 ～ Phase 4（含 Phase 3.5 安全與回放加固）**，資料庫推進至 **Migration `011`**，並以 **Investment Module** 作為第一個閉環試驗場；下一階段為 **Phase 5（長期領域實驗與跨世代/跨領域驗證）**。
 
-目前 AIA 已建立 Go Runtime 與共用核心功能，並提供 **Investment Module** 作為第一個自主性實驗領域。
-
-**目前只有 Investment Module 已有實作。**
-
-| Module | Status | Description |
+| Domain Module | Status | Description |
 |---|---|---|
-| Investment | PARTIAL | 投資組合、市場資料同步、投資提案、預測與評估 |
-| Coding | NOT IMPLEMENTED | 程式開發、除錯、測試與程式品質優化 |
-| Writing | NOT IMPLEMENTED | 長期寫作、小說架構、人物與進度管理 |
-
-Coding 與 Writing 是未來擴充方向，目前尚未提供可用的領域功能。
+| **Investment** | **PILOT READY (Phase 3.5)** | 台股虛擬資金帳本（NT$100,000）、Materiality Gate、預測與 Brier 校準、零前視偏差歷史回放（Phase 5 將展開長期跨世代對照實驗） |
+| **Coding** | **PLANNED (Phase 5)** | 程式碼架構分析、技術債探索、自動除錯與測試驗證 |
+| **Writing** | **PLANNED (Phase 5)** | 長期創作目標、人物年表、史料校勘與跨卷一致性管理 |
 
 ### 1.1 Core Implementation Status
 
 | Component | Status | Description |
 |---|---|---|
-| Go Runtime | PARTIAL | App 初始化、Service 與生命週期基礎 |
-| SQLite Persistence | IMPLEMENTED | 本機資料持久化基礎 |
-| Repository Layer | IMPLEMENTED | 資料存取層 |
-| EventBus | PARTIAL | 事件傳遞基礎 |
-| Agent Registry | IMPLEMENTED | 靜態 Agent 註冊 |
-| Web Host | IMPLEMENTED | Embedded HTTP Server |
-| Web Console | PARTIAL | Console 與 Agent Web Routes |
-| Task Management | PARTIAL | 任務建立、狀態管理與執行相關邏輯 |
-| Memory | PARTIAL | 持久化記憶基礎，時間連續性尚未驗證 |
-| Schedule | PARTIAL | 排程建立與手動到期處理 |
-| Policy / Approval | PARTIAL | 權限與核准機制基礎 |
-| Audit | PARTIAL | 稽核基礎，完整自主決策鏈尚待補齊 |
-| Recovery | PARTIAL | 啟動時 Recovery |
-| Background Runtime Workers | NOT IMPLEMENTED | 尚無完整常駐背景工作循環 |
-| Initiative Engine | NOT IMPLEMENTED | 尚無完整自主觀察與主動發現機制 |
-| Continuity Engine | NOT VERIFIED | 尚未證明具備跨時段自主連續性 |
-| Self-Correction Engine | NOT IMPLEMENTED | 尚無通用自我修正閉環 |
-| Goal Evolution Engine | NOT IMPLEMENTED | 尚無完整目標版本與演化機制 |
+| **Go Runtime & Workers** | **IMPLEMENTED** | 常駐 `ScheduleWorker`（15s）與 `TaskWorker`（5s，3 並行槽位）及啟動恢復（`Recovery`） |
+| **SQLite Persistence** | **IMPLEMENTED** | WAL 模式、Migrations `001`～`011`、Repository 層與防竄改 Triggers |
+| **Continuity & Provenance** | **IMPLEMENTED (Phase 1)** | SHA-256 Hash-Chained `event_history`、5 維度 `sources`/`evidence`/`claims`、`ContextReconstructor` |
+| **Governance & Emergency Stop** | **IMPLEMENTED (Phase 2)** | Policy / Approval / Permission 三層分離、`< 1s` 受控緊急停止（`EMERGENCY_STOP`）與人類強制復歸 |
+| **Autonomy Core (11-Step Loop)** | **IMPLEMENTED (Phase 3)** | `Observe` ➔ `Recall` ➔ `Assess` ➔ `Discover` ➔ `Deliberate` ➔ `Decide` (`ACT`/`DEFER`/`MONITOR`/`ASK_HUMAN`/`NO_ACTION`) ➔ `Governance Check` ➔ `Execute` ➔ `Verify` ➔ `Learn` ➔ `Reassess` |
+| **Budget Gate & OS Sandbox** | **IMPLEMENTED (Phase 3.5)** | 每日 Token / Cycle 硬閘門、`service.env` 機密剝除、`bwrap`/`systemd-run` 唯讀掛載隔離、拒絕盲信 Exit Code 0 |
+| **Point-in-Time Replay Clock** | **IMPLEMENTED (Phase 3.5)** | `AsOf` 時鐘與 `<= asOf` 查詢過濾、回放模式即時網路阻斷，防範前視偏差（Look-Ahead Bias） |
+| **Self-Correction & Learning** | **IMPLEMENTED (Phase 4)** | 3-Tier Runtime Profile、`L0_RECORDED`～`L3_GENERALIZED` 四階成熟度、7 大科學對照欄位、退化自動回滾與負向約束 |
+| **Goal Evolution Engine** | **IMPLEMENTED (Phase 4)** | `PERSISTENCE` / `OPTIMIZATION` / `REVISION` 三態分流與 `STRATEGIC` 目標防移動球門守衛 |
+| **Experiment & Delegation** | **PLANNED (Phase 5)** | 長期對照實驗管理（`experiments`）與跨領域任務委派（`delegation_requests`） |
+| **Safe Code Self-Modification** | **PLANNED (Phase 6)** | 隔離工作區代碼自修、多層測試流水線、Diff Review 與異常自動回滾 |
 
-`IMPLEMENTED` 代表對應基礎功能已有實作，不代表整個 AIA 自主性研究目標已經完成。
+> **認識論聲明**：Phase 4 完成代表「可驗證的自我修正與學習基礎機制」已落地並通過合成對抗情境（Scenarios A～E）驗證，**不代表已宣稱完成通用長期自主學習**；跨週期泛化能力（`L3`）須在 Phase 5 長期實驗中持續檢驗。
 
 ### 1.2 Investment Data Status
 
-目前已建立以下 Collector Provider 架構：
-
-- TWSE
-- TPEx
-- FRED
-- SEC
-
-但部分 Provider 仍使用固定值、硬編碼資料、虛構公告或 fallback 資料。
-
-因此目前不能宣稱所有金融資料來源都已完成真實資料整合。
-
-正式投資研究必須先確認：
-
-- 資料是否來自真實來源。
-- 資料日期是否正確。
-- 資料是否過期。
-- Provider 是否正常運作。
-- 是否混入 MOCK 或 FALLBACK 資料。
-
-**資料來源存在，不等於資料可信。**
+目前已建立 TWSE、TPEx/MOPS、FRED、SEC 等 Collector Provider 架構，但部分 Provider 在無外部金鑰或離線環境下仍具 Fallback 行為。正式投資實驗必須確認資料來源真實性、基準日期、時效性與零前視偏差（**資料來源存在，不等於資料可信**）。
 
 ---
 
 ## 2. Architecture
 
-AIA 採用 Core 與 Domain Module 分離的架構。
+AIA 採用五層職責分離架構（詳見 [docs/Plan.md](file:///home/wade/src/github/aia/docs/Plan.md)）：
 
 ```text
 AIA
-│
-├── Core
-│   ├── Runtime
-│   ├── Agent Registry
-│   ├── Task Management
-│   ├── Project Management
-│   ├── Memory
-│   ├── Schedule
-│   ├── Policy / Approval
-│   ├── Audit
-│   ├── Recovery
-│   └── Autonomy Core (in development)
-│
-└── Domain Modules
-    │
-    ├── Investment (available, partial)
-    ├── Coding (future)
-    └── Writing (future)
+├── Autonomy Core (go/internal/autonomy/)
+│   ├── Observation & L1~L5 Associative Recall
+│   ├── Candidate Initiative & Expected-Value Deliberation
+│   ├── 11-Step Cycle Coordinator & Point-in-Time (AsOf) Clock
+│   └── Verifiable Self-Correction & Learning Engine (L0~L3)
+├── Runtime & Governance (go/internal/app, worker, policy, service)
+│   ├── ScheduleWorker (15s) / TaskWorker (5s) / Recovery
+│   ├── Policy Engine, Budget Gate, Scope-Bound Approvals & Emergency Stop
+│   ├── Continuity Reconstructor & Provenance Knowledge Graph
+│   └── Goal Hierarchy & Anti-Goalpost-Moving Evolution
+├── Domain Modules
+│   ├── Investment (Pilot Ready)
+│   ├── Coding (Phase 5)
+│   └── Writing (Phase 5)
+└── Execution Harness (go/internal/provider/antigravity/)
+    └── Antigravity CLI (agy) + Env Secret Scrubbing + OS Mount Namespace Sandbox
 ```
 
-### 2.1 AIA Core
-
-Core 負責跨領域共用能力：
-
-- Agent 組織與生命週期。
-- Task 建立與管理。
-- Project 與長期工作管理。
-- Memory 與持久化。
-- Schedule 與任務觸發。
-- Policy 與 Approval。
-- Audit 與歷史追蹤。
-- Recovery 與 Runtime 管理。
-- Autonomy Core 的逐步建構。
-
-### 2.2 Domain Modules
-
-Domain Module 負責特定領域的資料模型、專業能力與工作介面。
-
-目前只有 Investment Module。
-
-未來 Coding 與 Writing 應沿用 Core 的 Runtime、Memory、Task、Policy 與 Audit，不應各自建立獨立平台。
-
-### 2.3 Agent Harness
-
-AIA 使用 Antigravity CLI（agy）作為底層 Agent Harness。
-
-分工如下：
-
-| AIA | Antigravity CLI |
-|---|---|
-| Agent 組織管理 | Agent 執行環境 |
-| Task 與 Project | 底層工具呼叫 |
-| Memory 與 Continuity | Harness 權限管理 |
-| Policy 與 Audit | Sandbox / Tool Execution |
-| 自主性研究 | 模型與工具執行 |
-
-使用者自行透過 Antigravity CLI 完成 OAuth 登入。
-
-AIA 不讀取、不複製、不解析 OAuth Token。
+使用者自行透過 Antigravity CLI（`agy`）完成 OAuth 登入；AIA 不讀取、不複製、不解析 OAuth Token，且子行程執行時自動剝除 `service.env` 機密並遮蔽 `~/.config/aia` 與 `~/.local/share/aia`。
 
 ---
 
-## 3. Autonomous Behavior Model
-
-AIA 以以下循環作為自主性研究的目標模型：
+## 3. Autonomous Behavior Loop (11 Steps)
 
 ```text
-Observe
-   ↓
-Recall
-   ↓
-Assess
-   ↓
-Discover
-   ↓
-Deliberate
-   ↓
-Decide
-   ↓
-Execute
-   ↓
-Verify
-   ↓
-Learn
-   ↓
-Reassess
-   ↺
+1. Observe ──► 2. Recall ──► 3. Assess ──► 4. Discover ──► 5. Deliberate ──► 6. Decide
+                                                                                 │
+  11. Reassess ◄── 10. Learn ◄── 9. Verify ◄── 8. Execute ◄── 7. Governance Check ┘
 ```
 
-這個循環包含：
-
-| Stage | Purpose |
-|---|---|
-| Observe | 觀察外部環境與系統狀態 |
-| Recall | 取得相關歷史記憶 |
-| Assess | 評估目前狀態 |
-| Discover | 發現問題、機會與新目標 |
-| Deliberate | 比較可能的行動方案 |
-| Decide | 選擇行動或不行動 |
-| Execute | 執行已允許的操作 |
-| Verify | 驗證執行結果 |
-| Learn | 分析結果並形成經驗 |
-| Reassess | 重新評估目標與策略 |
-
-目前此模型是 AIA 的設計目標，尚未在 Runtime 中完整實作。
-
-定時喚醒不等於主動性；保存記憶不等於時間連續性；產生任務不等於自主思考；修改 Prompt 不等於自我修正。
+- 定時喚醒不等於主動性；保存字串不等於時間連續性；修改 Prompt 不等於有效學習。
+- 每一次修正皆須保存 **Baseline、Hypothesis、Intervention、Verification、Regression、Follow-up、Confidence** 七項對照紀錄；缺乏對照組（`PRE_POST_ONLY`）時信心值強制鎖上限 `<= 0.45` 且最高僅能判定為 `INCONCLUSIVE`。
 
 ---
 
-## 4. Technology Stack
-
-| Component | Technology |
-|---|---|
-| Primary Language | Go |
-| Database | SQLite |
-| Agent Harness | Antigravity CLI |
-| Web Server | Go HTTP Server |
-| Web UI | Embedded Web UI |
-| Persistence | Repository Pattern |
-| Event Communication | EventBus |
-| Agent Registration | Static Registration |
-
-設計原則：
-
-- Single User。
-- Local Only。
-- Static Registration。
-- No Automatic Financial Trading。
-- Policy-controlled execution。
-- Auditable state transitions。
-- Persistent memory and task history。
-
----
-
-## 5. Repository Structure
-
-目前主要程式碼位於 `go/`。
+## 4. Repository Structure
 
 ```text
 aia/
-│
 ├── README.md
-│
+├── Makefile
 ├── docs/
-│   ├── AIA-01_Product_Requirements.md
-│   ├── AIA-02_System_Architecture.md
-│   ├── AIA-03_Go_Runtime_Implementation.md
-│   ├── AIA-04_Test_Plan.md
-│   ├── AIA-05_Investment_Agent.md
-│   ├── AIA-06_Web_UI_Specification.md
-│   └── AIA-07_User_Manual.md
-│
+│   ├── Plan.md                         # 七階段總體實作規劃書 (Master Plan)
+│   ├── memory.md                       # L1~L5 一致性記憶與認知架構
+│   ├── architecture/                   # 系統架構、統一資料模型 (data-model.md)、安全模型 (security-model.md)
+│   ├── development/                    # 路線圖 (roadmap.md)、實作現況 (implementation-status.md)、遷移計畫
+│   ├── operations/                     # 安裝、設定 (configuration.md) 與 systemd 服務管理
+│   └── specifications/                 # 正式規格書 AIA-00 ～ AIA-19 與跨規格一致性稽核
 └── go/
-    ├── cmd/
-    ├── internal/
-    ├── web/
-    ├── migrations/
-    ├── Makefile
-    └── ...
+    ├── cmd/aia/                        # CLI 入口點
+    ├── internal/                       # 核心套件 (autonomy, continuity, domain, policy, provider, service, storage, web, worker)
+    ├── prompts/                        # 領域與個人協調 Prompt 模板
+    ├── scripts/                        # systemd --user 管理腳本
+    └── tests/                          # unit/ 與 integration/ 測試套件
 ```
-
-以上為邏輯架構示意，實際目錄與檔名以 Repository 現況為準。
 
 ---
 
-## 6. Getting Started
+## 5. Quick Start & Key CLI Commands
 
-### 6.1 Prerequisites
-
-- Go 開發環境。
-- Antigravity CLI。
-- 已完成 Antigravity CLI 登入。
-- SQLite 支援環境。
-
-### 6.2 Build
-
-進入 Go 專案目錄：
+### Build & Test
 
 ```bash
 cd go
+go build ./cmd/aia
+go test -count=1 ./...
 ```
 
-使用專案 Makefile 提供的建置指令：
+### Daemon & Emergency Controls
 
 ```bash
-make
+aia server start                     # 啟動常駐 Web Console (Port 7777) 與背景 Workers
+aia status                           # 查看系統與 Runtime 狀態
+aia stop --emergency -r "reason"     # 1 秒內凍結派發並受控取消執行中工單
+aia resume --force -a human-admin    # 人類顯式解除緊急停止
 ```
 
-若需查看可用 Makefile Targets：
+### Autonomy Cycle, Goal, Learning & Governance CLI
 
 ```bash
-make help
-```
+# 11 步驟自主循環（支援歷史時間點零前視偏差回放）
+aia cycle run --project default
+aia cycle run --project default --as-of 2026-03-01T00:00:00Z --replay
+aia cycle list
+aia cycle initiatives
 
-實際安裝與啟動方式以目前 Makefile 及 CLI 說明為準。
+# 目標管理與受控演化
+aia goal list
+aia goal create --name "Maximize Total Portfolio Assets" --tier STRATEGIC
+aia goal evolve <goal-id> --type OPTIMIZATION --reason "..."
 
-### 6.3 CLI Help
+# 自我修正與學習檢視 (Phase 4)
+aia learning evals
+aia learning rcas
+aia learning corrections
+aia learning records
 
-```bash
-aia -h
-aia version
-```
+# 審批與決策溯源
+aia approval list
+aia approval approve <approval-id> --actor human-admin --note "verified"
+aia decision list
 
-查看子命令：
-
-```bash
-aia investment -h
-aia schedule -h
-aia server -h
-```
-
-### 6.4 Start Web Console
-
-```bash
-aia server start
-```
-
-目前此命令啟動 Web Server，並不會啟動完整 Autonomous Runtime。
-
-尚未由此啟動的背景工作包括：
-
-- Task Polling。
-- Schedule Polling。
-- Investment Data Collection。
-- Prediction Evaluation。
-- Initiative Observation。
-
----
-
-## 7. Available CLI Commands
-
-### 7.1 Investment
-
-目前可用的 Investment CLI：
-
-```bash
+# 投資試驗模組
 aia investment portfolio
-aia investment sync <symbol>
+aia investment sync 2330
 aia investment proposals
-aia investment approve <id>
-aia investment reject <id>
 aia investment predictions
 aia investment evaluate
 ```
 
-| Command | Purpose | Execution |
+---
+
+## 6. Seven-Phase Development Roadmap
+
+詳見 [docs/Plan.md](file:///home/wade/src/github/aia/docs/Plan.md) 與 [docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md)：
+
+| Phase | Focus | Status |
 |---|---|---|
-| `portfolio` | 查看投資組合 | Manual |
-| `sync` | 同步指定標的資料 | Manual |
-| `proposals` | 查看投資提案 | Manual |
-| `approve` | 核准投資提案 | Manual |
-| `reject` | 拒絕投資提案 | Manual |
-| `predictions` | 查看預測資料 | Manual |
-| `evaluate` | 評估預測結果 | Manual |
-
-目前 Investment 操作以人工觸發為主，尚未形成完整背景自動執行閉環。
-
-### 7.2 Schedule
-
-目前可用的 Schedule CLI：
-
-```bash
-aia schedule list
-aia schedule create
-aia schedule trigger
-aia schedule tick
-```
-
-| Command | Purpose | Execution |
-|---|---|---|
-| `list` | 查看排程 | Manual |
-| `create` | 建立排程 | Manual |
-| `trigger` | 手動觸發排程 | Manual |
-| `tick` | 手動處理到期排程 | Manual |
-
-**重要限制：**
-
-`schedule tick` 目前只處理到期 Schedule 並建立 Task，不代表 Task 已經執行。
-
-目前沒有常駐 Schedule Polling Worker，也沒有完整的 Schedule → Task → Execution 背景閉環。
+| **Phase 0** | Baseline Audit & Cross-Specification Alignment | **COMPLETED** |
+| **Phase 1** | Persistent State, Hash-Chained Event History & Knowledge Provenance (`007`–`008`) | **COMPLETED** |
+| **Phase 2** | Operational Governance, Approvals & Controlled Emergency Stop (`009`) | **COMPLETED** |
+| **Phase 3 & 3.5** | 11-Step Autonomy Core, Initiative, Budget Gate, OS Sandbox & PiT Replay (`010`) | **COMPLETED** |
+| **Phase 4** | Verifiable Self-Correction, Learning Mechanism (`L0`–`L3`) & Governed Goal Evolution (`011`) | **COMPLETED** |
+| **Phase 5** | Longitudinal Domain Experiments (Investment G1/G2, Coding, Writing) & Cross-Domain Delegation (`012`) | **NEXT TARGET** |
+| **Phase 6** | Isolated Sandbox Safe Code Self-Modification & Autonomous System Evolution | **PLANNED** |
 
 ---
 
-## 8. Investment Experiment
+## 7. Security & Financial Safety
 
-Investment 是 AIA 第一個自主性實驗領域。
-
-目前實驗設定：
-
-| Item | Configuration |
-|---|---|
-| Initial Capital | NT$100,000 |
-| Market | Taiwan Stock Market |
-| Focus Stock | TSMC 2330 |
-| Observation Frequency | 每個證券營業日 |
-| Trading Decision | Agent 自行判斷 |
-| Position Adjustment | Agent 自行增持、減持、買進、賣出或持有 |
-| Primary Objective | 最大化投資組合總資產 |
-| Evaluation | 每月 1 日 |
-| Trading Type | Virtual Trading |
-
-Agent 不必每天成交。
-
-持有現金或維持原有持倉，都可以是合理決策。
-
-每次決策應保存：
-
-- 當時市場資訊。
-- 當時持倉與現金。
-- 決策理由。
-- 預測與信心程度。
-- 風險評估。
-- 實際執行結果。
-- 後續評估。
-- 策略修正紀錄。
-
-每月資產檢查應使用前一個證券營業日收盤估值，並保存行情來源與估值日期。
-
-### 8.1 Financial Safety
-
-本實驗使用虛擬資金。
-
-- 不連接真實證券帳戶自動下單。
-- 不持有使用者真實資金。
-- 不將模擬交易當成真實成交。
-- 不將未驗證的 Mock/Fallback 資料當成真實市場資訊。
-
-融資、放空及衍生性商品等交易規則，須另行定義，不應自行假設已獲得授權。
+- **No Automatic Real-Money Trading**：所有投資實驗均為虛擬資金記帳（NT$100,000），嚴禁串接真實券商自動下單。
+- **Local Single-User & Loopback Default**：Web Console 預設綁定 `127.0.0.1:7777` 並採用一次性登入 Token（OTT）換發 HttpOnly Session。
+- **No Permission Bypass**：嚴禁使用 `--dangerously-skip-permissions`；Agent 無權自行通過 Approval、修改 `STRATEGIC` 目標指標或竄改 Hash-Chained 歷史紀錄。
 
 ---
 
-## 9. Security
+## 8. Documentation Index
 
-AIA 遵守以下安全原則：
-
-### Single User
-
-目前以單一使用者為設計目標，不提供多租戶及完整 RBAC。
-
-### Local Only
-
-Web Server 預設只提供本機存取，不應未經明確設定就開放 LAN 或 Internet。
-
-### Static Registration
-
-Agent 與 Web Module 採靜態註冊，不支援 Runtime Go Plugin。
-
-### Permission Management
-
-不使用：
-
-```bash
---dangerously-skip-permissions
-```
-
-不繞過 Antigravity CLI 的工具授權。
-
-### OAuth Credential
-
-使用者自行透過 Antigravity CLI 登入。
-
-AIA 不讀取、不複製、不解析 OAuth Token。
-
-### Audit
-
-重要操作應留下可追溯紀錄。
-
-Agent 不得自行解除 Policy、擴張權限或修改歷史稽核紀錄。
-
----
-
-## 10. Development Roadmap
-
-AIA 的開發順序以自主性核心為主，不以增加 Domain Module 數量為優先。
-
-| Phase | Focus | Objective |
-|---|---|---|
-| P1 | Persistent Runtime | 建立持續運作的 Runtime 與 Background Workers |
-| P2 | Continuity & Memory | 建立跨時段記憶與工作延續能力 |
-| P3 | Initiative Engine | 建立自主觀察、問題發現及主動行動 |
-| P4 | Reasoning & Self-Correction | 建立判斷、驗證、反思及修正閉環 |
-| P5 | Goal Evolution | 建立目標維持、優化及修正能力 |
-| P6 | Autonomous Execution | 建立受治理的自主執行流程 |
-| P7 | Domain Experiments | 以不同領域驗證共用自主性核心 |
-
-### Future Modules
-
-**Coding Module**
-
-預定研究：
-
-- 程式架構管理。
-- 程式碼分析。
-- 自動除錯。
-- 測試與驗證。
-- 程式品質優化。
-- 長期專案進度延續。
-
-**Writing Module**
-
-預定研究：
-
-- 長期創作目標管理。
-- 世界觀與人物資料管理。
-- 多卷及多章進度追蹤。
-- 歷史資料校正。
-- 人物關係與時間線一致性。
-- 根據新資料修正既有內容。
-
-上述兩個模組目前尚未實作。
-
----
-
-## 11. Documentation
-
-| Document | Description |
-|---|---|
-| AIA-01 | Product Requirements |
-| AIA-02 | System Architecture |
-| AIA-03 | Go Runtime Implementation |
-| AIA-04 | Test Plan, Acceptance & Release |
-| AIA-05 | Investment Agent Specification |
-| AIA-06 | Embedded Web UI & Agent Interface |
-| AIA-07 | User Manual & Operational Usage |
-
-文件中的 Product Vision 與 Target Architecture 不代表對應功能已經完成。
-
-實際實作狀態應以程式碼審查、測試及驗收結果為準。
-
----
-
-## 12. Project Philosophy
-
-AIA 的核心研究問題是：
-
-**AI Agent 能不能不只執行人類交代的工作，而是能夠長期維持目標、理解過去、觀察現在、判斷未來，並根據結果修正自己？**
-
-我們不以單次回答品質作為唯一標準。
-
-更重要的是觀察：
-
-- Agent 是否記得過去。
-- Agent 是否能延續未完成的工作。
-- Agent 是否能主動發現問題。
-- Agent 是否能判斷何時應該行動。
-- Agent 是否能承認錯誤。
-- Agent 是否能修正策略。
-- Agent 是否能維持長期目標。
-- Agent 是否能在必要時提出更好的目標。
-
-Investment 是第一個實驗場景。
-
-未來將逐步加入 Coding 與 Writing，觀察同一套自主性核心能否跨越不同領域，展現持續且可驗證的自主行為。
-
-**AIA 的目標不是讓 Agent 永遠服從下一個指令，而是讓 Agent 能夠持續理解自己正在追求什麼，以及為什麼。**
+- **總體規劃與記憶架構**：[docs/Plan.md](file:///home/wade/src/github/aia/docs/Plan.md) · [docs/memory.md](file:///home/wade/src/github/aia/docs/memory.md)
+- **實作現況與資料模型**：[implementation-status.md](file:///home/wade/src/github/aia/docs/development/implementation-status.md) · [data-model.md](file:///home/wade/src/github/aia/docs/architecture/data-model.md) · [security-model.md](file:///home/wade/src/github/aia/docs/architecture/security-model.md)
+- **正式規格書（v2.0）**：[docs/specifications/](file:///home/wade/src/github/aia/docs/specifications)（`AIA-00` 至 `AIA-19`）

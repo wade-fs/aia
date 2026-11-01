@@ -19,16 +19,16 @@
 2. **向前演進為主 (Forward-Only Migrations)**：
    - SQLite 缺乏完整的 ALTER TABLE 支援，部分修改涉及暫存表重建。因此遷移以「向前相容擴充」與「自動冷備份」為主要安全防線，不強求撰寫脆弱的 Down Migration。
 3. **交易完整性與 PRAGMA 邊界分明**：
-   - DDL（`CREATE TABLE`、`ALTER TABLE`）及初始化 DML 必須包裝在單一 `BEGIN IMMEDIATE TRANSACTION` 內，任一失敗即全量回滾。
+   - DDL（`CREATE TABLE`、`ALTER TABLE`、`CREATE TRIGGER`）及初始化 DML 必須包裝在單一 `BEGIN IMMEDIATE TRANSACTION` 內，任一失敗即全量回滾。
    - `PRAGMA foreign_keys`、`PRAGMA journal_mode` 等為**連線層級設定**，不可包含於同一 DDL 交易；WAL 模式為**資料庫層級設定**，在啟動時於交易外設定。
 4. **預遷移快照備份 (SQLite Backup API)**：
    - 在執行任何新 Migration 前，Go 驅動必須使用 **SQLite Backup API**（`sqlite3_backup_*`）建立帶有時間戳的完整備份副本。直接複製 `.db` 檔案在 WAL 模式下可能產生不一致；Backup API 能確保備份時資料庫完整性。備份完成後應執行完整性檢查（`PRAGMA integrity_check`），失敗備份需保留供事後鑑識。
 5. **資料結構職責三劃分 (三事件軌分離原則)**：
    - **`execution_events`** (已存在於 001)：專責記錄單次 Task/Execution 的微觀執行過程（呼叫 tool, step progress, heartbeat）。生命週期綁定 `execution_id`。
-   - **`event_history`** (新增於 007)：專責記錄 AIA 長期存在的業務與自主性宏觀事件（市場異常、目標修訂、專案狀態變更）。不可竄改，為時間連續性 (Continuity) 的第一事實來源。
+   - **`event_history`** (新增於 007)：專責記錄 AIA 長期存在的業務與自主性宏觀事件（市場異常、目標修訂、專案狀態變更）。具備 Hash Chain 與 Trigger 防竄改，為時間連續性 (Continuity) 的第一事實來源。
    - **`audit_logs`** (已存在於 001/002，擴充於 009)：專責記錄受治理的高風險操作與審批軌跡（誰在何時執行/申請何項受控動作）。不開闢重複的 `policy_audit_logs` 表，統一匯流至此。
 6. **通用知識層 vs 領域 Evidence 分層**：
-   - 通用知識層（`sources`, `evidence`, `claims`, `claim_evidence_links`）作為系統跨領域的客觀事實底座。
+   - 通用知識層（`sources`, `evidence`, `claims`, `claim_revisions`, `claim_evidence_links`）作為系統跨領域的客觀事實底座。
    - 投資專業層（現有 `investment_decision_evidence`, `investment_raw_documents`）保留金融專屬欄位，透過外鍵或關聯引用共用 Evidence，兩者互補而非競爭。
 
 ---
@@ -46,31 +46,33 @@
                                           │
                                           ▼
  Phase 1: 007_event_history_and_provenance.sql (基礎事實與知識溯源層)
-   │      • 建立 event_history (不可竄改業務事件流)
-   │      • 建立 sources, evidence, claims, claim_evidence_links (通用知識層)
-   │      • 擴充 memories (多型 provenance: ref_type + ref_id)
+   │      • 建立 event_history (完整 Hash Chain、occurred_at vs recorded_at、防竄改 Triggers)
+   │      • 建立 sources (五維度評估), evidence (發布/擷取時間戳), claims, claim_revisions
+   │      • 擴充 memories (多型 provenance: ref_type + ref_id + provenance_status)
    ▼
  Phase 1: 008_goals_decisions_and_continuity.sql (目標、脈絡與決策骨幹層)
-   │      • 建立 goals, goal_revisions, goal_project_links (M:N)
-   │      • 擴充 projects (primary_goal_id, status, pending_issues)
-   │      • 建立 context_snapshots (跨 Session 重建基礎)
-   │      • 建立 decisions (支援 NO_ACTION) 與 decision_evidence_links
+   │      • 建立 autonomy_cycles (自主循環核心樞紐)
+   │      • 建立 goals (含 DRAFT), goal_revisions (UNIQUE 遞增), goal_project_links (M:N)
+   │      • 擴充 projects (primary_goal_id, latest_snapshot_id 外鍵, status, pending_issues)
+   │      • 建立 context_snapshots (GLOBAL/PROJECT 兩層級，工作區敏感資訊安全過濾)
+   │      • 建立 decisions (支援 NO_ACTION，關聯 cycle/task/execution) 與 decision_evidence_links
    ▼
  Phase 2: 009_governance_and_approvals.sql (運作治理與審批層)
-   │      • 建立 approvals (關聯 tasks, decisions)
-   │      • 擴充 audit_logs (新增 policy_rule, risk_tier, decision_id 治理欄位，不重複建表)
+   │      • 建立 approvals (關聯 tasks 或 decisions 至少一項)
+   │      • 擴充 audit_logs (新增 policy_rule, risk_tier, decision_id, approval_id，不重複建表)
    ▼
  Phase 3: 010_initiatives_and_deliberation.sql (主動性候選與推演層)
    │      • 建立 candidate_initiatives (主動探索發現之候選工作)
-   │      • 建立 deliberation_records (深思過程、替代方案評估)
+   │      • 建立 deliberation_records (關聯 cycle_id 與 decision_id，推演替代方案與矩陣)
    ▼
  Phase 4: 011_learning_and_correction.sql (自我修正、RCA 與經驗層)
-   │      • 建立 outcome_evaluations (預期 vs 實際結果落差)
-   │      • 建立 root_cause_analyses (根因分析歸類)
-   │      • 建立 correction_actions (C1～C5 修正動作紀錄)
+   │      • 建立 outcome_evaluations (預期 vs 實際結果落差量測)
+   │      • 建立 root_cause_analyses (外鍵關聯 outcome_evaluations)
+   │      • 建立 correction_actions (徹底分離 correction_type 與 C0～C5 authorization_level)
    ▼
  Phase 5: 012_experiments_and_collaboration.sql (長週期實驗與跨領域協作層)
-          • 建立 experiments (科研假設、基準線、對照組)
+          • 建立 experiments (嚴格遵循 AIA-15 完整 11 個生命週期狀態)、experiment_goal_links
+          • 擴充 tasks 表新增 experiment_id 外鍵欄位
           • 建立 delegation_requests (跨 Agent 委派契約與驗收狀態)
 ```
 
@@ -82,28 +84,35 @@
 
 #### **`007_event_history_and_provenance.sql`**
 *依賴：無新增外鍵依賴，直接擴充現有庫。*
-- 建立 `event_history`：全域不可竄改事件流（`aggregate_type`, `aggregate_id`, `actor_id`, `payload_json`, `occurred_at`），提供跨 Session 脈絡重建之第一事實來源。
-- 建立通用知識溯源表：
-  - `sources`：資料來源（URI、來源類型、先驗信賴分數）。
-  - `evidence`：客觀證據（`source_id`, `content_snippet`, `content_hash`, `valid_until`）。
-  - `claims`：可檢驗命題陳述（`statement`, `assertion_status`, `is_knowledge`）。
-  - `claim_evidence_links`：支持/反駁多對多關聯（`claim_id`, `evidence_id`, `support_type`）。
-- 擴充 `memories`：
+- **`event_history` (不可竄改業務事實與自主性事件流)**：
+  - 欄位：`id`, `event_id` (UUID), `event_type`, `event_version`, `aggregate_type`, `aggregate_id`, `aggregate_version`, `correlation_id`, `causation_id`, `actor_id`, `payload_json`, `payload_hash`, `previous_hash`, `occurred_at`, `recorded_at`。
+  - 建立唯一約束：`UNIQUE(aggregate_type, aggregate_id, aggregate_version)`。
+  - 建立應用層防竄改 Triggers：`trg_event_history_no_update` 與 `trg_event_history_no_delete`。
+- **通用知識溯源表**：
+  - `sources`：五維度來源信賴評估（`authority_score`, `directness_score`, `timeliness_score`, `independence_score`, `reproducibility_score`）。
+  - `evidence`：客觀證據（`source_id`, `content_snippet`, `content_hash`, `capture_method`, `data_version`, `published_at`, `captured_at`, `valid_until`）。
+  - `claims`：可檢驗命題陳述（`statement`, `assertion_status`, `is_knowledge`, `current_version`）。
+  - `claim_revisions`：主張版本修訂歷史（`claim_id`, `revision_number`, `previous_statement`, `new_statement`, `reason`, `revised_decision_id`）。
+  - `claim_evidence_links`：支持/反駁多對多關聯（`claim_id`, `evidence_id`, `support_type`, `confidence_weight`）。
+- **擴充 `memories` 表**：
   - 新增 `provenance_type`（`FACT_BASED | INFERENCE | HYPOTHESIS | USER_PREFERENCE | AGENT_DECISION`）。
   - 新增 `provenance_ref_type`（`EVIDENCE | SOURCE | MEMORY | CONTEXT_SNAPSHOT | DECISION | NONE`）。
-  - 新增 `provenance_ref_id`（多型引用，不設單一強制外鍵，強調溯源完整性）。
-  - 新增 `confidence`。
+  - 新增 `provenance_ref_id`（多型引用，不設單一強制外鍵）。
+  - 新增 `provenance_status`（`VERIFIED | PARTIAL | UNVERIFIED`），消除預設值與來源錨點的邏輯矛盾。
 
 #### **`008_goals_decisions_and_continuity.sql`**
 *依賴：依賴 `007` 的 `evidence`、`event_history` 以及現有 `projects`。*
-- 建立目標實體：
-  - `goals`（父子目標樹、目標層級、指標 JSON、優先級、狀態機）。
-  - `goal_revisions`（目標變更歷史、修訂理由、修訂前/後狀態）。
+- **`autonomy_cycles` (自主循環核心樞紐)**：
+  - 欄位：`id`, `cycle_number`, `trigger_type`, `trigger_ref_id`, `status`, `context_snapshot_id`, `summary`, `started_at`, `completed_at`, `created_at`。
+- **目標實體**：
+  - `goals`（status CHECK 含 `DRAFT`, `ACTIVE`, `PAUSED`, `ACHIEVED`, `SUPERSEDED`, `ABANDONED`）。
+  - `goal_revisions`（`UNIQUE(goal_id, revision_number)` 嚴格遞增）。
   - `goal_project_links`（Goal ↔ Project 多對多關聯表，附帶 `link_type`）。
-- 擴充 `projects`：新增 `primary_goal_id`（便利查詢外鍵）、`status`、`latest_snapshot_id`、`pending_issues_json`。
-- 建立 `context_snapshots`：捕捉工作區狀態、未完成 Task ID 列表、近期決策摘要、Pending Issues。
-- 建立決策骨幹實體（**在 Phase 1 即行落地，作為跨 Session 決策脈絡的核心載體**）：
-  - `decisions`（記錄 `action_type: ACT | DEFER | MONITOR | ASK_HUMAN | NO_ACTION`、意圖摘要、深思理由、替代方案、關聯之 `context_snapshot_id` 與治理狀態）。
+- **擴充 `projects`**：新增 `primary_goal_id REFERENCES goals(id)`、`latest_snapshot_id REFERENCES context_snapshots(id)`、`status`、`pending_issues_json`。
+- **`context_snapshots`**：
+  - 欄位：`id`, `scope` (`GLOBAL | PROJECT`), `project_id`, `snapshot_type`, `workspace_state_json`（安全過濾，禁止密鑰）, `active_tasks_json`, `recent_decisions_json`, `pending_issues_json`。
+- **決策骨幹實體 (在 Phase 1 即行落地)**：
+  - `decisions`（關聯 `cycle_id REFERENCES autonomy_cycles(id)`、`project_id`、`experiment_id`、`action_task_id REFERENCES tasks(id)`、`action_execution_id REFERENCES executions(id)`，支援 `NO_ACTION`）。
   - `decision_evidence_links`（決策與共用 `evidence` 之間的多對多關聯）。
 
 ---
@@ -113,35 +122,41 @@
 #### **`009_governance_and_approvals.sql`**
 *依賴：依賴現有 `tasks`、`008` 的 `decisions`、現有 `audit_logs`。*
 - 建立 `approvals`：
-  - 欄位：`id`, `task_id`, `decision_id`, `operation_type`, `risk_tier`, `requested_by_agent_id`, `status` (`PENDING`, `APPROVED`, `REJECTED`, `EXPIRED`, `CANCELLED`), `human_comment`, `requested_at`, `responded_at`, `expires_at`。
+  - 欄位：`id`, `task_id`, `decision_id`, `operation_type`, `risk_tier`, `requested_by_agent_id`, `status`, `human_comment`, `requested_at`, `responded_at`, `expires_at`。
+  - 加入一致性約束：`CHECK (task_id IS NOT NULL OR decision_id IS NOT NULL)`。
 - 擴充既有 `audit_logs`（**不新建 `policy_audit_logs`，避免稽核歷史分散**）：
   - `ALTER TABLE audit_logs ADD COLUMN policy_id TEXT DEFAULT '';`
   - `ALTER TABLE audit_logs ADD COLUMN decision_id TEXT DEFAULT '';`
   - `ALTER TABLE audit_logs ADD COLUMN approval_id TEXT DEFAULT '';`
   - `ALTER TABLE audit_logs ADD COLUMN risk_tier TEXT DEFAULT 'LOW';`
   - `ALTER TABLE audit_logs ADD COLUMN governance_action TEXT DEFAULT '';`
-  - 新增索引提升治理審計查詢效能。
+  - 建立 `decision_id` 與 `approval_id` 之索引。
 
 ---
 
 ### Phase 3 交付：自主核心與主動性 (Migration 010)
 
 #### **`010_initiatives_and_deliberation.sql`**
-*依賴：依賴 `008` 的 `goals`、`projects`、`decisions`。*
+*依賴：依賴 `008` 的 `autonomy_cycles`、`goals`、`projects`、`decisions`。*
 - 建立 `candidate_initiatives`：
-  - 記錄 Agent 主動觀察發現的候選問題/機會（`trigger_source`, `detected_opportunity`, `priority_score`, `status: CANDIDATE | ADOPTED | DISCARDED`）。
+  - 記錄 Agent 主動觀察發現的候選問題/機會（`cycle_id`, `trigger_source`, `detected_opportunity`, `priority_score`, `status: CANDIDATE | ADOPTED | DISCARDED`）。
 - 建立 `deliberation_records`：
-  - 記錄深思推演細節（成本效益比估算、風險權衡矩陣、捨棄方案理由），可一對一或一對多鏈結至已存在的 `decisions` 實體。
+  - 關聯 `cycle_id REFERENCES autonomy_cycles(id)` 與 `decision_id REFERENCES decisions(id)`。
+  - 記錄深思推演細節（選項評估矩陣、成本效益比推演、風險評估與捨棄方案理由）。
 
 ---
 
 ### Phase 4 交付：自我修正與持續學習 (Migration 011)
 
 #### **`011_learning_and_correction.sql`**
-*依賴：依賴 `008` 的 `decisions`、現有 `tasks`。*
-- 建立 `outcome_evaluations`：預期成果 vs 實際成果落差量測（`expected_json`, `actual_json`, `discrepancy_score`, `evaluation_status`）。
-- 建立 `root_cause_analyses`：根因歸類與分析結論（`discrepancy_id`, `root_cause_category`, `analysis_summary`）。
-- 建立 `correction_actions`：C1～C5 自我修正動作記錄（`rca_id`, `correction_type: C1_FACT | C2_JUDGMENT | C3_STRATEGY | C4_PROMPT | C5_WORKFLOW`, `target_entity_ref`, `before_state`, `after_state`, `verification_status`）。
+*依賴：依賴 `008` 的 `autonomy_cycles`、`decisions`、現有 `tasks`。*
+- 建立 `outcome_evaluations`：預期成果 vs 實際成果落差量測（`cycle_id`, `decision_id`, `task_id`, `expected_outcome_json`, `actual_outcome_json`, `discrepancy_score`, `is_anomaly`, `evaluation_status`）。
+- 建立 `root_cause_analyses`：根因歸類與分析結論（**外鍵明確關聯至 `outcome_evaluation_id REFERENCES outcome_evaluations(id)`**，`root_cause_category`, `analysis_narrative`, `confidence`）。
+- 建立 `correction_actions`：
+  - **徹底分離修正類型與授權等級**：
+    - `correction_type TEXT CHECK (correction_type IN ('FACT', 'JUDGMENT', 'STRATEGY', 'PROMPT', 'WORKFLOW', 'CODE'))`
+    - `authorization_level TEXT CHECK (authorization_level IN ('C0', 'C1', 'C2', 'C3', 'C4', 'C5'))`
+  - 欄位：`rca_id REFERENCES root_cause_analyses(id)`, `target_entity_ref`, `before_state_json`, `proposed_state_json`, `applied_state_json`, `approval_id REFERENCES approvals(id)`, `verification_status`。
 
 ---
 
@@ -149,6 +164,11 @@
 
 #### **`012_experiments_and_collaboration.sql`**
 *依賴：依賴 `008` 的 `goals`、`projects`、現有 `tasks`。*
-- 建立 `experiments`：科研假設驗證單元（`project_id`, `goal_id`, `hypothesis`, `experiment_type`, `status`, `baseline_metrics_json`, `current_metrics_json`）。
+- 建立 `experiments`：
+  - 嚴格遵循 [AIA-15](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md) 完整的 11 個生命週期狀態：
+    `CHECK (status IN ('PROPOSED', 'PENDING_APPROVAL', 'READY', 'RUNNING', 'PAUSED', 'EVALUATING', 'NEEDS_REVISION', 'COMPLETED', 'STOPPED', 'FAILED', 'ARCHIVED'))`
+  - 欄位：`project_id`, `primary_goal_id REFERENCES goals(id)`, `name`, `hypothesis`, `experiment_type`, `baseline_metrics_json`, `current_metrics_json`, `iteration_count`。
+- 建立 `experiment_goal_links`：支援 Experiment ↔ Goal 多對多驗證關聯。
+- **擴充現有 `tasks` 表**：
+  - `ALTER TABLE tasks ADD COLUMN experiment_id TEXT REFERENCES experiments(id);`
 - 建立 `delegation_requests`：跨 Agent 委派契約（`requester_agent_id`, `target_agent_id`, `source_project_id`, `goal_id`, `task_spec`, `acceptance_gate`, `status`）。
-

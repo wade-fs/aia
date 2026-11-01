@@ -167,23 +167,27 @@ flowchart TD
 [AIA-00](file:///home/wade/src/github/aia/docs/specifications/AIA-00-Overall-Architecture-and-Evolution-Roadmap-of-Specification.md), [AIA-01](file:///home/wade/src/github/aia/docs/specifications/AIA-01-product-requirements.md), [AIA-02](file:///home/wade/src/github/aia/docs/specifications/AIA-02-System-Architecture.md), [AIA-03](file:///home/wade/src/github/aia/docs/specifications/AIA-03-Go-Runtime-Implementation-Specification.md), [AIA-07](file:///home/wade/src/github/aia/docs/specifications/AIA-07-User-Manual-and-Operational-Usage-Specification.md), [AIA-19](file:///home/wade/src/github/aia/docs/specifications/AIA-19-Deployment-Operations-and-Observability-Specification.md)
 
 #### 3. 核心工作項目
-1. **程式碼現況審計**：深度分析 commit `7597902` 之原始碼，盤點各 Package 責任、現行 Migration (001~003)、Worker Concurrency、Investment 分析邏輯、Activity Monitor 遙測結構。
-2. **周邊文件一致性校準**：
+1. **程式碼現況審計**：深度分析 commit `7597902` 之原始碼，盤點各 Package 責任、現行 Migration (001~006)、Worker Concurrency、Investment 分析邏輯、Activity Monitor 遙測結構。
+2. **提前建立可觀測性與評估基準 (AIA-13 & AIA-19 from Day 1)**：
+   - 盤點並整合既有 Activity Monitor 即時快照遙測，確立跨階段除錯與審計基礎。
+   - 建立 commit `7597902` 的初始行為基準 (Baseline)，包含目前 PersonalAgent 的執行成功率、重啟恢復正確率與資源消耗基準。
+3. **周邊文件一致性校準**：
    - 修正 `docs/development/roadmap.md`（替換為本計畫七階段路線）。
    - 修正 `docs/development/implementation-status.md`（嚴格對齊目前程式碼實際能力與 v2.0 規格差距）。
-   - 校準 `docs/architecture/`（引入 Autonomy Core、連續性、知識溯源與治理分層架構）。
+   - 校準 `docs/architecture/`（引入 Autonomy Cycle、連續性、多維知識溯源與治理分層架構）。
    - 校準 `docs/operations/`、`go/configs/` 與 `go/prompts/`。
-3. **跨規格資料模型與關聯分析**：
-   - 明確釐清 Goal、Project、Experiment、Task、Decision、Memory、Evidence 之間的關聯與邊界。
+4. **跨規格資料模型與關聯分析**：
+   - 確立以 **Autonomy Cycle (自主循環)** 為核心樞紐，串接 Goal、Project、Experiment、Task、Decision、Memory、Evidence。
    - 產出詳細的資料生命週期圖與狀態機轉移圖。
-4. **設計向下相容之 Migration Plan**：規劃後續 Phase 1~3 的資料表增量 Migration 路線與備份策略。
+5. **設計向下相容之 Migration Plan**：規劃從 Version 7 開始的資料庫增量路線（007～012）與 SQLite Backup API 備份策略。
 
 #### 4. 交付文件與產出
 - [docs/development/implementation-status.md](file:///home/wade/src/github/aia/docs/development/implementation-status.md) (更新版)
 - [docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md) (更新版)
-- `docs/architecture/architecture-to-code-mapping.md` (規格條款至 Go 代碼映射表)
-- `docs/architecture/data-model.md` (AIA 統一資料模型與生命週期規格書)
-- `docs/development/migration-plan.md` (循序資料庫演進計畫)
+- [docs/architecture/architecture-to-code-mapping.md](file:///home/wade/src/github/aia/docs/architecture/architecture-to-code-mapping.md) (規格條款至 Go 代碼映射表)
+- [docs/architecture/data-model.md](file:///home/wade/src/github/aia/docs/architecture/data-model.md) (AIA 統一資料模型與生命週期規格書)
+- [docs/development/migration-plan.md](file:///home/wade/src/github/aia/docs/development/migration-plan.md) (循序資料庫演進計畫)
+- [docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md) (跨規格一致性決議登記冊)
 
 #### 5. 行為驗收標準 (Milestone M0)
 
@@ -196,6 +200,7 @@ flowchart TD
 - [ ] 系統可啟動、CLI 與 Web Console 指令正常運作，無 Regression。
 - [ ] 刻意以 `kill -9` 終止後重啟，Worker 狀態與 Task 紀錄能正確還原（不崩潰、不丟失）。
 - [ ] `docs/` 所有子目錄與 [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) 的術語、角色與藍圖達成 100% 一致。
+- [ ] 完成 **Phase 1 開工前 7 大確認事項**（Event History 防竄改、Memory Provenance 邏輯、Source 多維評估、Goal/Experiment 狀態機、C0~C5 授權分離、Autonomy Cycle 樞紐、Migration 007~012 欄位對齊）。
 - [ ] 清楚界定現有程式碼與目標架構的具體差距，並通過代碼映射表確認無模糊地帶。
 
 ---
@@ -210,36 +215,43 @@ flowchart TD
 
 #### 3. 核心資料鏈模型
 ```text
-Project (專案總體脈絡)
-  ├── Goal (長期追求目標)
-  ├── Experiment (假設驗證單元)
-  ├── Task (具體執行工單)
-  ├── Decision Record (決策歷程)
-  │     ├── Evidence (支持證據)
-  │     ├── Context Snapshot (決策時環境快照)
-  │     └── Outcome (後續追蹤成效)
-  ├── Event History (Append-only 歷史事件流 ── 第一真實來源)
-  └── Memory / Knowledge (具備 Provenance 來源標註的知識網)
+Autonomy Cycle (自主循環核心樞紐)
+  ├── Context Snapshot (循環啟動時工作區/全域環境快照)
+  ├── Observation (環境觀察事件流，寫入 Event History)
+  ├── Deliberation Record (深思選項評估矩陣、成本效益比)
+  ├── Decision Record (決策歷程 ── 支援 NO_ACTION)
+  │     ├── Evidence (支持/反駁之多維來源證據)
+  │     ├── Task (若為 ACT 則衍生之具體執行工單)
+  │     │     └── Execution (Worker 執行歷程與 execution_events)
+  │     └── Approval (若屬受控操作則掛起等待人類核准)
+  ├── Outcome Evaluation (成效比對與落差量測)
+  │     └── Root Cause Analysis (根因分析歸類)
+  │           └── Correction Action (C0～C5 自我修正動作)
+  ├── Event History (Append-only 雜湊鏈歷史事件流 ── 第一真實來源)
+  └── Memory / Knowledge (具備 Provenance 來源標註與驗證狀態的知識網)
 ```
 
 #### 4. 關鍵實作項目
 1. **資料模型落地 (Migration `007` + `008`)**：
    - `007` (基礎事實與知識溯源層)：
-     - 新增 `event_history` (Append-only 全域歷史事件表，為 Continuity 重建之第一事實來源)。
-     - 新增 `sources`、`evidence`、`claims`、`claim_evidence_links` (共用客觀事實底座，與投資領域 Evidence 垂直分層)。
-     - 擴充 `memories` (多型 provenance: `provenance_type` + `provenance_ref_type` + `provenance_ref_id`，不強制外鍵)。
-   - `008` (目標、脈絡與決策骨幹層)：
-     - 新增 `goals`、`goal_revisions`、`goal_project_links` (M:N)。
-     - 擴充 `projects` (新增 `primary_goal_id`、`status`、`pending_issues_json`)。
-     - 新增 `context_snapshots` (快照工作區、進行中 Task、近期決策與 Pending Issues)。
-     - **在 Phase 1 即行落地 `decisions` (支援 NO_ACTION) 與 `decision_evidence_links` 表**：確保跨 Session 脈絡重建與後續治理審批皆有結構化決策實體可依循；Phase 3 則專注於實作自主決策推演引擎。
+     - 新增 `event_history`：完整具備 `event_id`, `event_version`, `aggregate_version`, `correlation_id`, `causation_id`, `payload_hash`, `previous_hash`, `occurred_at` (實際業務發生) vs `recorded_at` (寫入時間)；建立應用層防竄改觸發器 (`trg_event_history_no_update`, `trg_event_history_no_delete`)。
+     - 新增 `sources` (五維信賴度評估：權威性、第一手直達性、時效性、獨立性、可重現性)。
+     - 新增 `evidence` (擷取方式、資料版本、發布/擷取時間戳)。
+     - 新增 `claims` 與 `claim_revisions` (主張版本修訂歷史，禁止覆寫)。
+     - 擴充 `memories`：徹底分離知識性質 (`provenance_type`)、來源錨點 (`provenance_ref_type`)、錨點 ID (`provenance_ref_id`) 與驗證狀態 (`provenance_status: VERIFIED | PARTIAL | UNVERIFIED`)，消除預設值矛盾。
+   - `008` (自主循環、目標與決策骨幹層)：
+     - 新增 `autonomy_cycles` (全域循環計數、觸發類型、狀態機)。
+     - 新增 `goals` (status CHECK 補齊 `DRAFT`, `ACTIVE`, `PAUSED`, `ACHIEVED`, `SUPERSEDED`, `ABANDONED`)、`goal_revisions` (嚴格遞增 `UNIQUE(goal_id, revision_number)`)、`goal_project_links` (M:N)。
+     - 擴充 `projects` (新增 `primary_goal_id`、`latest_snapshot_id REFERENCES context_snapshots(id)`、`status`、`pending_issues_json`)。
+     - 新增 `context_snapshots` (支援 `GLOBAL` 與 `PROJECT` 兩層次，嚴格過濾敏感環境資訊)。
+     - **在 Phase 1 即行落地 `decisions` 表** (關聯 `cycle_id REFERENCES autonomy_cycles(id)`、支援 `NO_ACTION`、關聯 `action_task_id`, `action_execution_id`) 與 `decision_evidence_links` 表。
 2. **三軌事件職責徹底分離**：
    - `execution_events` (既有表)：單次工單 micro-level 執行歷程。
    - `event_history` (007)：全系統 macro-level 業務與自主性事件流。
    - `audit_logs` (既有表)：受治理的高風險操作日誌。
 3. **Context Reconstruction (脈絡重建引擎)**：
    - 實作 [`internal/continuity/reconstructor.go`](file:///home/wade/src/github/aia/go/internal)。
-   - 遭遇程序重啟時，自 SQLite `event_history`、`decisions` 與快照還原 Project 進行狀態、近期重要決策與未決問題 (Pending Issues)。
+   - 遭遇程序重啟時，自 SQLite `event_history`、`autonomy_cycles`、`decisions` 與快照還原 Project 進行狀態、近期重要決策與未決問題 (Pending Issues)。
 4. **Provenance & Knowledge Service**：
    - 實作資料來源檢驗邏輯，嚴禁模型生成內容自動標記為 Verified Knowledge。
 
@@ -370,25 +382,18 @@ Expected Outcome (預期成效) vs Actual Outcome (實際成效)
 ```
 
 #### 4. 關鍵實作項目
-1. **嚴格區分三個維度的自修分類體系**：
+1. **徹底分離自修的四個正交維度 (AIA-11 & AIA-14)**：
 
-   AIA 的自修能力採用三個獨立命名空間，避免歧義：
+   AIA 嚴格避免將「修正類型」與「授權等級」混淆，採用四個獨立命名空間：
 
-   | 維度 | 命名 | 用途說明 |
-   |---|---|---|
-   | 修改對象範圍 | **Scope A / B / C** | A=領域工具/Prompt；B=Runtime/Core；C=治理程式碼（Agent 不得修改） |
-   | 修正類型 | **Correction Type C1 ～ C6** | 說明「修正的是什麼」 |
-   | 驗證深度 | **Validation Level V1 ～ V6** | 說明「須經過哪些驗證」 |
+   | 維度 | 命名規範 | 語意範疇 | 規範定義 |
+   |---|---|---|---|
+   | **修改範圍** | **Scope A / B / C** | 影響之程式碼邊界 | A=領域工具/Prompt；B=Runtime/Core；C=治理核心（Agent 禁止自修） |
+   | **修正類型** | **Correction Type** | 「修正的是什麼對象」 | `FACT` (事實), `JUDGMENT` (判斷), `STRATEGY` (策略), `PROMPT` (提示詞), `WORKFLOW` (工作流), `CODE` (程式碼) |
+   | **授權等級** | **Authorization Level C0～C5** | 「需要何種層級授權」 | C0 (自主安全), C1 (低風險通知), C2 (專案核准), C3 (策略核准), C4 (系統行為), C5 (核心代碼最高審批) |
+   | **驗證深度** | **Validation Level V1～V6** | 「須經過哪些驗證關卡」 | V1 (Static) → V2 (Unit) → V3 (Integration) → V4 (Regression) → V5 (Behavioral) → V6 (Benchmark) |
 
-   **Correction Type 分類（C1～C6）**：
-   - **C1 (事實修正)**：更新知識網中的陳舊資料與事實 Claim。
-   - **C2 (判斷修正)**：修正對特定變因的權重假設與信心指標。
-   - **C3 (策略修正)**：調校決策啟發式規則（如調整投資倉位停損線）。
-   - **C4 (提示詞調優)**：在受控範圍內微調 Agent 領域 Prompt。
-   - **C5 (工作流程改善)**：調整任務拆解步驟或排程頻率。
-   - **C6 (程式碼修正)**：委派給 Phase 6 之代碼自修機制處理。
-
-   **Validation Level（V1～V6）**：Static Analysis → Unit Test → Integration Test → Regression Test → Behavioral Evaluation → Benchmark。C1～C3 通常只需 V1～V3；C6 須全程 V1～V6。
+   - **RCA 與 Evaluation 外鍵綁定**：`root_cause_analyses` 嚴格透過 `outcome_evaluation_id` 外鍵關聯至 `outcome_evaluations`，杜絕孤兒根因記錄。
 2. **Goal Evolution 深化模組**：
    - 實作目標進度追蹤評估、目標優先級動態調整、目標拆解 (Decomposition)、目標合併 (Merge) 與目標修訂提案 (Revision Proposal)。
    - 重大目標修訂強制產出版本比對並呈報人類審批。
@@ -396,7 +401,7 @@ Expected Outcome (預期成效) vs Actual Outcome (實際成效)
    - 自動化計算「預測校準誤差 (Brier Score)」、「決策修正收斂率」與「目標推進達成率」。
 
 #### 5. 行為驗收標準 (Milestone M5 & M6)
-- [ ] **主動故障修正驗證**：模擬任務產出與預期指標產生顯著落差時，系統能自動觸發 RCA，產出根因歸類並提出 C1～C3 修正方案（Correction Type：事實修正、判斷修正、策略修正）。
+- [ ] **主動故障修正驗證**：模擬任務產出與預期指標產生顯著落差時，系統能自動觸發 RCA，產出根因歸類並提出對應授權等級 (C0～C3) 的修正方案。
 - [ ] **學習有效性驗證**：修正紀錄寫入記憶後，在後續相同的模擬情境中，系統能引用該學習成果做出更優決策。
 - [ ] **目標演化紀錄**：目標調整過程具備完整版本差異與修訂動機紀錄，禁止覆蓋歷史目標。
 
@@ -530,26 +535,28 @@ Expected Outcome (預期成效) vs Actual Outcome (實際成效)
 ## 6. 立即執行指南 (Pre-Implementation Action Checklist)
 
 > [!IMPORTANT]
-> **遵照指導方針：暫不啟動任何 Phase 0 的資料庫 Migration 或程式碼撰寫任務。**  
-> 必須嚴格完成以下三項前置準備工作後，方可召開 Phase 0 開發評審會議：
+> **遵照指導方針：暫不啟動任何 Phase 1 的資料庫 Migration 或功能程式碼撰寫任務。**  
+> 必須嚴格完成以下 **Phase 1 開工前 7 大確認事項** 後，方可進入 Migration 007 開發：
 
 ```text
- 步驟一：20 份規格交叉一致性深度檢查 (Cross-Spec Consistency Audit)
-   │     • 檢查 AIA-03/08/09/10/11/14/16/17/18/19 之間的責任邊界與型別定義
-   ▼
- 步驟二：正式核定新版實作規劃書 (Adopt Master Implementation Plan v2.0)
-   │     • 確立七階段路線、M0~M8 成熟度里程碑與雙軌演進模型為專案基線
-   ▼
- 步驟三：產出現況代碼盤點與統一資料模型 (Deliver Mapping & Data Model Docs)
-         • 產出 architecture-to-code-mapping.md (代碼對照表)
-         • 產出 data-model.md (Goal/Project/Experiment/Task/Evidence 統一模型)
-         • 產出 migration-plan.md 與更新 roadmap.md / implementation-status.md
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │                   Phase 1 開工前 7 大確認檢查表 (7/7 100% 完成)        │
+  ├────────────────────────────────────────────────────────────────────────┤
+  │ [x] 1. Event History 完整性與重建規則 (UUID, aggregate_version, Hash   │
+  │        Chain, occurred_at vs recorded_at, 防竄改 Triggers, 交易一致性) │
+  │ [x] 2. Memory Provenance 邏輯解構 (分離性質/錨點/驗證狀態, 消除矛盾)   │
+  │ [x] 3. Source / Evidence / Claim 模型 (五維信賴評估, Claim 版本歷史)   │
+  │ [x] 4. Goal / Experiment 狀態機 (補齊 DRAFT, 對齊 AIA-15 11 狀態)       │
+  │ [x] 5. Correction Type / Authorization Level (分離類型與 C0~C5 等級)   │
+  │ [x] 6. Autonomy Cycle 資料關係 (Cycle 核心樞紐串聯 Decision 與 Outcome)│
+  │ [x] 7. Migration 007～012 欄位與外鍵 (外鍵補齊, audit_logs 擴充, 交易邊界)│
+  └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 具體待辦清單 (Immediate Action Items)
+### 具體已交付產出 (Delivered Architectural Artifacts)
 
-- [ ] **行動 1 (規格交叉稽核)**：全面比對 [AIA-03](file:///home/wade/src/github/aia/docs/specifications/AIA-03-Go-Runtime-Implementation-Specification.md)、[AIA-08](file:///home/wade/src/github/aia/docs/specifications/AIA-08-Autonomy-Core-Specification.md)、[AIA-10](file:///home/wade/src/github/aia/docs/specifications/AIA-10-Continuity-and-Long-Term-Project-Management-Specification.md)、[AIA-16](file:///home/wade/src/github/aia/docs/specifications/AIA-16-Data-Provenance-Evidence-and-Knowledge-Integrity-Specification.md) 與 [AIA-17](file:///home/wade/src/github/aia/docs/specifications/AIA-17-Operational-Governance-and-Human-Oversight-Specification.md) 的實體責任邊界，消除名詞歧異。
-- [ ] **行動 2 (代碼映射表產出)**：針對 commit `7597902` 產出 `docs/architecture/architecture-to-code-mapping.md`，清楚標示每個規格章節在目前程式碼中的真實落腳點或缺口。
-- [ ] **行動 3 (統一資料模型定義)**：產出 `docs/architecture/data-model.md`，完整定義 Goal、Project、Experiment、Task、Decision、Evidence 的關係與狀態轉移，杜絕日後 Schema 衝突。
-- [ ] **行動 4 (周邊文檔同步)**：全面更新 `docs/development/roadmap.md` 與 `docs/development/implementation-status.md`，反映真實代碼基準與本七階段路線。
-- [ ] **行動 5 (遷移策略評估)**：產出 `docs/development/migration-plan.md`，確立後續 Phase 1~3 的資料庫平滑擴充計畫。
+- [x] **產出 1 (跨規格決議登記冊)**：[docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)（AIA-SPEC-AUDIT-01，消除 10 大名詞歧異與模型衝突）。
+- [x] **產出 2 (代碼映射表)**：[docs/architecture/architecture-to-code-mapping.md](file:///home/wade/src/github/aia/docs/architecture/architecture-to-code-mapping.md)（以 commit `7597902` 為凍結基準，標示規格在既有代碼中的落腳點）。
+- [x] **產出 3 (統一資料模型規格)**：[docs/architecture/data-model.md](file:///home/wade/src/github/aia/docs/architecture/data-model.md)（AIA-ARCH-DATA-01，包含 Autonomy Cycle、Hash Chain Event Store、多維 Provenance、完整 DDL 與 Triggers）。
+- [x] **產出 4 (資料庫遷移計畫)**：[docs/development/migration-plan.md](file:///home/wade/src/github/aia/docs/development/migration-plan.md)（AIA-DEV-MIG-01，校準 001～006，以依賴拓撲排定 007～012，納入 SQLite Backup API）。
+- [x] **產出 5 (周邊文檔同步)**：[docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md) 與 [docs/development/implementation-status.md](file:///home/wade/src/github/aia/docs/development/implementation-status.md)。

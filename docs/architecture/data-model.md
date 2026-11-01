@@ -3,6 +3,7 @@
 **文件代號：** AIA-ARCH-DATA-01  
 **適用架構：** AIA v2.0 系列規範 (以 [AIA-SPEC-AUDIT-01](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md) 為基準)  
 **底層儲存：** SQLite (WAL 模式)  
+**現有代碼基準：** Git commit `7597902` (已內建 Migration Version 1 ～ 6)  
 **文件狀態：** Normative Architectural Baseline  
 **最後更新：** 2026-11-01  
 
@@ -10,20 +11,20 @@
 
 ## 1. 資料模型核心設計哲學 (Data Architecture Philosophy)
 
-依據 [AIA-08](file:///home/wade/src/github/aia/docs/specifications/AIA-08-Autonomy-Core-Specification.md)、[AIA-10](file:///home/wade/src/github/aia/docs/specifications/AIA-10-Continuity-and-Long-Term-Project-Management-Specification.md)、[AIA-16](file:///home/wade/src/github/aia/docs/specifications/AIA-16-Data-Provenance-Evidence-and-Knowledge-Integrity-Specification.md) 與 [AIA-18](file:///home/wade/src/github/aia/docs/specifications/AIA-18-Autonomy-Core-Integration-and-End-to-End-Reference-Architecture.md)，AIA 採用「雙層狀態持久化模型」：
+依據 [AIA-08](file:///home/wade/src/github/aia/docs/specifications/AIA-08-Autonomy-Core-Specification.md)、[AIA-10](file:///home/wade/src/github/aia/docs/specifications/AIA-10-Continuity-and-Long-Term-Project-Management-Specification.md)、[AIA-15](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md)、[AIA-16](file:///home/wade/src/github/aia/docs/specifications/AIA-16-Data-Provenance-Evidence-and-Knowledge-Integrity-Specification.md) 與 [AIA-18](file:///home/wade/src/github/aia/docs/specifications/AIA-18-Autonomy-Core-Integration-and-End-to-End-Reference-Architecture.md)，AIA 採用「雙層狀態持久化模型」，並以「自主循環 (Autonomy Cycle)」為核心樞紐：
 
 ```text
- ┌────────────────────────────────────────────────────────┐
- │ 1. 歷史事實層 (Append-only Event History - 第一真實來源)│
- │    記錄所有客觀發生的事件、狀態流轉與決策動作，不可竄改。│
- └───────────────────────────┬────────────────────────────┘
-                             │
-                             ▼ 透過 Context Reconstruction 還原
- ┌────────────────────────────────────────────────────────┐
- │ 2. 當前狀態層 (Reconstructible State Snapshots)        │
- │    包含 Goal, Project, Experiment, Task, Memory 等     │
- │    即使資料庫快照毀損，皆可自 Event 流完整重建。       │
- └────────────────────────────────────────────────────────┘
+ ┌────────────────────────────────────────────────────────────────────────┐
+ │ 1. 歷史事實層 (Append-only Event History - 第一真實來源)                │
+ │    記錄所有客觀發生的業務與自主性事件，具備 Hash Chain 與 Trigger 防竄改。│
+ └───────────────────────────────────┬────────────────────────────────────┘
+                                     │
+                                     ▼ 透過 Context Reconstruction 還原
+ ┌────────────────────────────────────────────────────────────────────────┐
+ │ 2. 當前狀態層 (Reconstructible State Snapshots)                        │
+ │    由 Autonomy Cycle 串接 Goal, Project, Experiment, Decision, Task,   │
+ │    Evidence, Claim 與 Memory，即使狀態快照毀損亦可自 Event 流完整重建。  │
+ └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -32,29 +33,96 @@
 
 ```mermaid
 erDiagram
+    AUTONOMY_CYCLE ||--o{ DECISION : "deliberates and decides"
+    AUTONOMY_CYCLE ||--o| CONTEXT_SNAPSHOT : "captures start context"
+    AUTONOMY_CYCLE ||--o{ OUTCOME_EVALUATION : "evaluates cycle outcomes"
+
     GOAL ||--o{ GOAL_REVISION : "has revisions"
-    GOAL }o--o{ PROJECT : "pursued by (M:N)"
+    GOAL }o--o{ PROJECT : "pursued by (M:N via goal_project_links)"
     GOAL_PROJECT_LINKS }o--|| GOAL : "links"
     GOAL_PROJECT_LINKS }o--|| PROJECT : "links"
-    PROJECT ||--o{ EXPERIMENT : "contains"
+
+    PROJECT ||--o{ EXPERIMENT : "hosts"
     PROJECT ||--o{ TASK : "manages"
-    EXPERIMENT ||--o{ TASK : "generates"
-    TASK ||--o{ EXECUTION : "executes via"
-    
     PROJECT ||--o{ CONTEXT_SNAPSHOT : "captures"
-    DECISION }o--o{ EVIDENCE : "supported by"
-    
+
+    EXPERIMENT ||--o{ TASK : "generates"
+    EXPERIMENT }o--o{ GOAL : "validates (M:N)"
+
+    TASK ||--o{ EXECUTION : "executes via"
+    TASK ||--o| APPROVAL : "may require"
+    DECISION ||--o| APPROVAL : "may require"
+    DECISION ||--o| TASK : "may spawn"
+    DECISION }o--o{ EVIDENCE : "supported by (decision_evidence_links)"
+
     SOURCE ||--o{ EVIDENCE : "provides"
-    EVIDENCE ||--o{ CLAIM : "substantiates"
-    MEMORY }o--o| PROVENANCE_REF : "anchored by (polymorphic)"
-    
-    EVENT_HISTORY ||--|| SYSTEM : "immutable log"
-    TASK ||--o| APPROVAL : "requires"
+    EVIDENCE ||--o{ CLAIM_EVIDENCE_LINKS : "links"
+    CLAIM ||--o{ CLAIM_EVIDENCE_LINKS : "substantiated by"
+    CLAIM ||--o{ CLAIM_REVISION : "has history"
+    MEMORY }o--o| PROVENANCE_ANCHOR : "polymorphic ref (EVIDENCE/SOURCE/MEMORY/etc)"
+
+    OUTCOME_EVALUATION ||--o{ ROOT_CAUSE_ANALYSIS : "diagnosed by"
+    ROOT_CAUSE_ANALYSIS ||--o{ CORRECTION_ACTION : "triggers"
+
+    EVENT_HISTORY ||--|| SYSTEM : "immutable hash-chained log"
+    AUDIT_LOGS ||--|| SYSTEM : "governance audit trail"
 ```
 
 ---
 
 ## 3. 核心實體結構與生命週期定義 (Core Entities)
+
+### 3.0 不可竄改事件存儲 (Event History & Hash Chain)
+
+作為時間連續性 (Continuity) 的第一事實來源，`event_history` 記錄所有宏觀業務與自主性事件。
+
+```sql
+CREATE TABLE event_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,          -- 全域唯一事件 UUID / ULID
+    event_type TEXT NOT NULL,               -- GOAL_REVISED, CYCLE_STARTED, DECISION_COMMITTED...
+    event_version INTEGER NOT NULL DEFAULT 1,-- 事件 Payload Schema 版本
+    aggregate_type TEXT NOT NULL,           -- GOAL, PROJECT, EXPERIMENT, CYCLE, DECISION, GOVERNANCE
+    aggregate_id TEXT NOT NULL,             -- 聚合根實體 ID
+    aggregate_version INTEGER NOT NULL,     -- 該聚合根內嚴格遞增之事件序號 (1, 2, 3...)
+    correlation_id TEXT NOT NULL,           -- 關聯整個自主循環或端到端工作流之 Trace ID
+    causation_id TEXT NOT NULL,             -- 引發本事件之直接父事件 ID (首事件則為自身)
+    actor_id TEXT NOT NULL,                 -- AGENT:xxx, USER, SYSTEM
+    payload_json TEXT NOT NULL,             -- 事件本體 JSON
+    payload_hash TEXT NOT NULL,             -- SHA256(payload_json) 內容完整性驗證
+    previous_hash TEXT NOT NULL,            -- 指向前一筆記錄之 Hash，構成防竄改 Hash Chain
+    occurred_at TIMESTAMP NOT NULL,         -- 業務實際發生時間點
+    recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, -- 系統資料庫持久化時間點
+    UNIQUE(aggregate_type, aggregate_id, aggregate_version)
+);
+
+CREATE INDEX idx_event_history_aggregate ON event_history(aggregate_type, aggregate_id);
+CREATE INDEX idx_event_history_correlation ON event_history(correlation_id);
+CREATE INDEX idx_event_history_recorded ON event_history(recorded_at);
+```
+
+#### 不可竄改性與防竄改邊界規範
+1. **SQLite 應用層防竄改觸發器 (Triggers)**：
+   ```sql
+   CREATE TRIGGER trg_event_history_no_update
+   BEFORE UPDATE ON event_history
+   BEGIN
+       SELECT RAISE(ABORT, 'SECURITY ERROR: event_history is immutable and cannot be updated.');
+   END;
+
+   CREATE TRIGGER trg_event_history_no_delete
+   BEFORE DELETE ON event_history
+   BEGIN
+       SELECT RAISE(ABORT, 'SECURITY ERROR: event_history is immutable and cannot be deleted.');
+   END;
+   ```
+2. **防竄改邊界宣告**：
+   > [!IMPORTANT]
+   > 觸發器 (Trigger) 與雜湊鏈 (Hash Chain) 提供**應用層的防竄改保證與事後竄改偵測能力**。若攻擊者直接取得本機 SQLite 資料庫檔案之作業系統讀寫權限，理論上仍可藉由重算雜湊重構檔案。因此，AIA 規範本機檔案存取權限由作業系統 ACL (G0 治理) 與定時備份簽章共同防護。
+3. **交易一致性要求**：
+   業務狀態更新（如 Goal 狀態變更、Decision 寫入）與對應的 `event_history` 寫入，**必須包裹在同一 `BEGIN IMMEDIATE TRANSACTION` 交易內**，確保狀態與事件絕對一致。
+
+---
 
 ### 3.1 目標實體 (Goal & GoalRevision)
 
@@ -66,11 +134,11 @@ CREATE TABLE goals (
     parent_goal_id TEXT,                    -- 支援層級樹 (NULL 為頂層目標)
     name TEXT NOT NULL,
     description TEXT NOT NULL,
-    level TEXT NOT NULL,                    -- STRATEGIC (戰略), TACTICAL (戰術), OPERATIONAL (運作)
-    status TEXT NOT NULL,                   -- ACTIVE, PAUSED, ACHIEVED, SUPERSEDED, ABANDONED
+    level TEXT NOT NULL CHECK (level IN ('STRATEGIC', 'TACTICAL', 'OPERATIONAL')),
+    status TEXT NOT NULL CHECK (status IN ('DRAFT', 'ACTIVE', 'PAUSED', 'ACHIEVED', 'SUPERSEDED', 'ABANDONED')),
     target_metric_json TEXT,                -- 目標達成度量標的 (如 {"total_asset": 150000})
     current_metric_json TEXT,               -- 當前度量進展
-    priority INTEGER NOT NULL DEFAULT 5,    -- 1 (最低) ~ 10 (最高)
+    priority INTEGER NOT NULL DEFAULT 5 CHECK (priority BETWEEN 1 AND 10),
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     FOREIGN KEY (parent_goal_id) REFERENCES goals(id)
@@ -79,55 +147,60 @@ CREATE TABLE goals (
 CREATE TABLE goal_revisions (
     id TEXT PRIMARY KEY,
     goal_id TEXT NOT NULL,
-    revision_number INTEGER NOT NULL,
+    revision_number INTEGER NOT NULL,       -- 嚴格遞增版本號 (1, 2, 3...)
     previous_state_json TEXT NOT NULL,
     new_state_json TEXT NOT NULL,
-    reason TEXT NOT NULL,                   -- 修訂理由 (如 "基於三個月回測結果進行目標調整")
+    reason TEXT NOT NULL,                   -- 修訂理由
     decision_id TEXT,                       -- 關聯之決策 ID
     created_at TIMESTAMP NOT NULL,
+    UNIQUE(goal_id, revision_number),
     FOREIGN KEY (goal_id) REFERENCES goals(id)
 );
+
+CREATE INDEX idx_goals_status ON goals(status);
 ```
 
-**狀態轉移機 (Goal Lifecycle)**：
+#### Goal 狀態機規則 (AIA-09)
 $$\text{DRAFT} \longrightarrow \text{ACTIVE} \longleftrightarrow \text{PAUSED} \longrightarrow \begin{cases} \text{ACHIEVED} \\ \text{SUPERSEDED} \\ \text{ABANDONED} \end{cases}$$
+
+- **重啟規則**：`PAUSED` 狀態之目標允許隨時恢復為 `ACTIVE`。
+- **終態規則**：`SUPERSEDED` 與 `ABANDONED` 為終態，不可再直接恢復為 `ACTIVE`；若欲追求類似目標，須建立新 Goal 並在 revision 記錄傳承關係。
+- **防止循環**：Goal Service 於建立/更新 `parent_goal_id` 時，必須在記憶體中走訪父節點鏈，**嚴禁形成循環參照**。
+- **版本強制性**：每次 Goal 的狀態變更、指標調整或描述修改，必須原子性寫入 `goal_revisions` 並記錄一筆 `GOAL_REVISED` 至 `event_history`。
 
 ---
 
 ### 3.1b Goal ↔ Project 多對多關聯表 (goal_project_links)
 
-Goal 與 Project 之間是 **M:N 關係**：一個 Goal 可由多個 Project 共同追求；一個 Project 可同時服務多個 Goal（例如一個 Coding Project 同時服務「AIA 自主能力研究 Goal」與「Investment Agent 工具改善 Goal」）。
-
 ```sql
 CREATE TABLE goal_project_links (
     goal_id    TEXT NOT NULL REFERENCES goals(id),
     project_id TEXT NOT NULL REFERENCES projects(id),
-    link_type  TEXT NOT NULL DEFAULT 'CONTRIBUTES_TO', -- CONTRIBUTES_TO, VALIDATES, DERIVED_FROM
+    link_type  TEXT NOT NULL DEFAULT 'CONTRIBUTES_TO' CHECK (link_type IN ('CONTRIBUTES_TO', 'VALIDATES', 'DERIVED_FROM')),
     created_at TIMESTAMP NOT NULL,
     PRIMARY KEY (goal_id, project_id)
 );
 ```
 
-`projects.primary_goal_id` 是便利欄位，指向最主要的 Goal，供快速查詢使用；完整的多目標關聯必須透過 `goal_project_links` 查詢。
-
 ---
 
-### 3.2 專案實體 (Project & Context Snapshot)
+### 3.2 專案與快照實體 (Project & Context Snapshot)
 
 Project 是長期工作成果與工作區的實體載體。
 
 ```sql
--- 擴充現有 projects 表
-ALTER TABLE projects ADD COLUMN status TEXT DEFAULT 'ACTIVE';               -- ACTIVE, ARCHIVED, SUSPENDED
+-- 擴充現有 projects 表 (相容於 001)
+ALTER TABLE projects ADD COLUMN status TEXT DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'ARCHIVED', 'SUSPENDED'));
 ALTER TABLE projects ADD COLUMN primary_goal_id TEXT REFERENCES goals(id);
-ALTER TABLE projects ADD COLUMN latest_snapshot_id TEXT;
-ALTER TABLE projects ADD COLUMN pending_issues_json TEXT;                    -- 待決事項列表 (JSON Array)
+ALTER TABLE projects ADD COLUMN latest_snapshot_id TEXT REFERENCES context_snapshots(id);
+ALTER TABLE projects ADD COLUMN pending_issues_json TEXT DEFAULT '[]';
 
 CREATE TABLE context_snapshots (
     id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL,
-    snapshot_type TEXT NOT NULL,            -- MANUAL, PRE_RESTART, POST_CYCLE
-    workspace_state_json TEXT NOT NULL,     -- 檔案清單、Git HEAD、環境變數摘要
+    scope TEXT NOT NULL CHECK (scope IN ('GLOBAL', 'PROJECT')), -- 快照層級
+    project_id TEXT,                        -- 若為 PROJECT 則必填
+    snapshot_type TEXT NOT NULL CHECK (snapshot_type IN ('MANUAL', 'PRE_RESTART', 'POST_CYCLE', 'EMERGENCY_STOP')),
+    workspace_state_json TEXT NOT NULL,     -- 安全工作區摘要 (僅限檔案列表、Git HEAD、Hash，嚴禁敏感資料)
     active_tasks_json TEXT NOT NULL,        -- 當時未完成的 Task ID 列表
     recent_decisions_json TEXT NOT NULL,    -- 最近關鍵 Decision ID 列表
     pending_issues_json TEXT NOT NULL,      -- 未決問題
@@ -136,9 +209,13 @@ CREATE TABLE context_snapshots (
 );
 ```
 
+> [!CAUTION]
+> **環境變數與敏感資訊過濾規範**：
+> `workspace_state_json` 僅記錄檔案名稱、大小、Git Commit SHA 與安全配置；**嚴格禁止**序列化任何包含 API Key、Secret、Cookie、Token 或密碼的環境變數或檔案內容。
+
 ---
 
-### 3.3 實驗實體 (Experiment)
+### 3.3 實驗實體 (Experiment - AIA-15 完整生命週期)
 
 Experiment 用於驗證具備不確定性的策略、演算法或長週期科研假設。
 
@@ -146,45 +223,101 @@ Experiment 用於驗證具備不確定性的策略、演算法或長週期科研
 CREATE TABLE experiments (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
-    goal_id TEXT NOT NULL,
+    primary_goal_id TEXT NOT NULL,          -- 主要服務之目標
     name TEXT NOT NULL,
-    hypothesis TEXT NOT NULL,               -- 實驗核心假設 (如 "加入重大性檢驗閘道能降低 40% Token 消耗")
-    experiment_type TEXT NOT NULL,          -- CAPABILITY, STRATEGY, SYSTEM, CROSS_DOMAIN
-    status TEXT NOT NULL,                   -- DRAFT, RUNNING, EVALUATING, CONCLUDED, ABORTED
-    baseline_metrics_json TEXT NOT NULL,    -- 基準線度量
-    current_metrics_json TEXT,              -- 實驗組度量
+    hypothesis TEXT NOT NULL,               -- 實驗核心假設
+    experiment_type TEXT NOT NULL CHECK (experiment_type IN ('CAPABILITY', 'STRATEGY', 'SYSTEM', 'CROSS_DOMAIN')),
+    status TEXT NOT NULL CHECK (status IN (
+        'PROPOSED',         -- 提案中
+        'PENDING_APPROVAL', -- 等待人類審批
+        'READY',            -- 準備就緒
+        'RUNNING',          -- 執行中
+        'PAUSED',           -- 暫停觀察
+        'EVALUATING',       -- 評估指標中
+        'NEEDS_REVISION',   -- 需要調整參數/假設
+        'COMPLETED',        -- 成功完成驗證
+        'STOPPED',          -- 受控中止
+        'FAILED',           -- 實驗失敗/假設不成立
+        'ARCHIVED'          -- 歸檔
+    )),
+    baseline_metrics_json TEXT NOT NULL,    -- 基準線度量標的
+    current_metrics_json TEXT,              -- 實驗組度量最新數據
     iteration_count INTEGER DEFAULT 0,
     created_at TIMESTAMP NOT NULL,
     concluded_at TIMESTAMP,
     FOREIGN KEY (project_id) REFERENCES projects(id),
-    FOREIGN KEY (goal_id) REFERENCES goals(id)
+    FOREIGN KEY (primary_goal_id) REFERENCES goals(id)
 );
-```
 
-**狀態轉移機 (Experiment Lifecycle)**：
-$$\text{DRAFT} \longrightarrow \text{RUNNING} \longleftrightarrow \text{EVALUATING} \longrightarrow \begin{cases} \text{CONCLUDED} \\ \text{ABORTED} \end{cases}$$
+CREATE TABLE experiment_goal_links (
+    experiment_id TEXT NOT NULL REFERENCES experiments(id),
+    goal_id       TEXT NOT NULL REFERENCES goals(id),
+    created_at    TIMESTAMP NOT NULL,
+    PRIMARY KEY (experiment_id, goal_id)
+);
+
+CREATE INDEX idx_experiments_status ON experiments(status);
+```
 
 ---
 
-### 3.4 決策歷程實體 (Decision Record)
+### 3.4 自主循環實體 (Autonomy Cycle - 核心樞紐)
 
-每一次深思決策 (Deliberate) 的客觀紀錄，確保決策動機可溯源。
+Autonomy Cycle 是 AIA 自主性的核心時間軸樞紐，貫通所有自發行為：
+
+```sql
+CREATE TABLE autonomy_cycles (
+    id TEXT PRIMARY KEY,
+    cycle_number INTEGER NOT NULL,          -- 嚴格遞增之全域循環計數
+    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('SCHEDULED', 'EVENT_TRIGGERED', 'MANUAL', 'DRIFT_DETECTED')),
+    trigger_ref_id TEXT,                    -- 觸發來源 ID (如 schedule_id 或 event_id)
+    status TEXT NOT NULL CHECK (status IN ('STARTED', 'DELIBERATING', 'EXECUTING', 'EVALUATING', 'COMPLETED', 'ABORTED')),
+    context_snapshot_id TEXT REFERENCES context_snapshots(id),
+    summary TEXT,                           -- 本循環總結
+    started_at TIMESTAMP NOT NULL,
+    completed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX idx_cycles_status ON autonomy_cycles(status);
+CREATE INDEX idx_cycles_started ON autonomy_cycles(started_at);
+```
+
+#### Cycle 解答的自主性 9 大核心問題
+```text
+autonomy_cycles
+    ├── 1. 為什麼開始？ (trigger_type, trigger_ref_id)
+    ├── 2. 當時看到了什麼？ (透過 event_history 記錄之 OBSERVATION 事件)
+    ├── 3. 回憶了哪些過去資訊？ (context_snapshot_id, memories 檢索日誌)
+    ├── 4. 發現哪些值得處理的問題？ (candidate_initiatives)
+    ├── 5. 評估過哪些選項？ (deliberation_records)
+    ├── 6. 最後為什麼採取或不採取行動？ (decisions: ACT | NO_ACTION 等)
+    ├── 7. 執行結果如何？ (關聯之 tasks, executions)
+    ├── 8. 有沒有學到什麼？ (outcome_evaluations, root_cause_analyses)
+    └── 9. 下一次應該重新檢查什麼？ (寫入 pending_issues 與下一循環 trigger)
+```
+
+---
+
+### 3.5 決策歷程與推演實體 (Decision & Deliberation Record)
+
+每一次深思決策的客觀紀錄，**在 Phase 1 (Migration 008) 即行落地**，確保全系統決策有據可循。
 
 ```sql
 CREATE TABLE decisions (
     id TEXT PRIMARY KEY,
-    project_id TEXT,
-    experiment_id TEXT,
-    cycle_id TEXT NOT NULL,                 -- 所屬自主閉環 ID
-    action_type TEXT NOT NULL,              -- ACT, DEFER, MONITOR, ASK_HUMAN, NO_ACTION
+    cycle_id TEXT REFERENCES autonomy_cycles(id), -- 關聯所屬自主循環
+    project_id TEXT REFERENCES projects(id),
+    experiment_id TEXT REFERENCES experiments(id),
+    action_type TEXT NOT NULL CHECK (action_type IN ('ACT', 'DEFER', 'MONITOR', 'ASK_HUMAN', 'NO_ACTION')),
     intent_summary TEXT NOT NULL,           -- 決策意圖摘要
     justification TEXT NOT NULL,            -- 決策理由與深思推演依據
-    considered_alternatives_json TEXT,      -- 評估過但捨棄的替代方案
-    context_snapshot_id TEXT,               -- 當時環境快照
-    governance_result TEXT NOT NULL,        -- ALLOWED, REQUIRED_APPROVAL, BLOCKED
-    created_at TIMESTAMP NOT NULL,
-    FOREIGN KEY (project_id) REFERENCES projects(id),
-    FOREIGN KEY (experiment_id) REFERENCES experiments(id)
+    considered_alternatives_json TEXT,      -- 評估過但捨棄的替代方案與捨棄原因
+    context_snapshot_id TEXT REFERENCES context_snapshots(id), -- 當時環境快照
+    governance_result TEXT NOT NULL CHECK (governance_result IN ('ALLOWED', 'REQUIRED_APPROVAL', 'BLOCKED')),
+    action_task_id TEXT REFERENCES tasks(id),                 -- 若 ACT 則關聯具體工單
+    action_execution_id TEXT REFERENCES executions(id),       -- 執行記錄
+    created_at TIMESTAMP NOT NULL
 );
 
 CREATE TABLE decision_evidence_links (
@@ -195,131 +328,186 @@ CREATE TABLE decision_evidence_links (
     FOREIGN KEY (decision_id) REFERENCES decisions(id),
     FOREIGN KEY (evidence_id) REFERENCES evidence(id)
 );
+
+CREATE TABLE deliberation_records (
+    id TEXT PRIMARY KEY,
+    cycle_id TEXT NOT NULL REFERENCES autonomy_cycles(id),
+    decision_id TEXT REFERENCES decisions(id), -- 決策定案後關聯
+    candidate_initiative_id TEXT,              -- 關聯候選提案
+    options_evaluated_json TEXT NOT NULL,      -- 各選項評估分數矩陣
+    cost_benefit_analysis TEXT NOT NULL,       -- 成本效益比推演
+    risk_assessment TEXT NOT NULL,             -- 風險評估
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX idx_decisions_cycle ON decisions(cycle_id);
+CREATE INDEX idx_decisions_action ON decisions(action_type);
 ```
 
 ---
 
-### 3.5 資料溯源與知識鏈 (Evidence, Source, Claim & Provenance)
+### 3.6 通用知識溯源鏈與記憶模型 (Source, Evidence, Claim & Memory)
 
-貫徹 [AIA-16](file:///home/wade/src/github/aia/docs/specifications/AIA-16-Data-Provenance-Evidence-and-Knowledge-Integrity-Specification.md)，分離資料、來源與主張。
-
-#### 通用知識層與領域 Evidence 分層架構
-- **通用知識層 (General Knowledge Layer)**：`sources`、`evidence`、`claims`、`claim_evidence_links` 為全系統共用的客觀事實與溯源底座，不綁定特定領域。
-- **領域特化層 (Domain Evidence Layer)**：既有 `investment_decision_evidence` 與 `investment_raw_documents` 保留金融領域的特定欄位（如 ticker、財報指標、market bar、snapshot items）。
-- **垂直關聯原則**：兩套系統互補而非競爭。領域決策引用共用 `evidence` 作為依據，亦可將清洗後的結構化事實提煉為共用 `claims` 與 `evidence`，供跨領域 Agent 查閱。
+#### A. 多維來源評估 (Source Multi-Dimensional Reliability)
+來源評估絕不簡化為單一數字，拆分為五項獨立維度：
 
 ```sql
 CREATE TABLE sources (
     id TEXT PRIMARY KEY,
-    source_type TEXT NOT NULL,              -- PRIMARY, OFFICIAL, SECONDARY, NEWS, MODEL, TOOL
+    source_type TEXT NOT NULL CHECK (source_type IN ('PRIMARY', 'OFFICIAL', 'SECONDARY', 'NEWS', 'ACADEMIC', 'COMMUNITY', 'MODEL', 'TOOL')),
     uri TEXT NOT NULL,                      -- 來源 URL 或檔案路徑
     publisher TEXT,
-    reliability_score REAL DEFAULT 0.5,     -- 0.0 ~ 1.0 來源先驗可靠度
+    authority_score REAL NOT NULL DEFAULT 0.5 CHECK (authority_score BETWEEN 0.0 AND 1.0),      -- 權威性 (官方/學術 vs 匿名)
+    directness_score REAL NOT NULL DEFAULT 0.5 CHECK (directness_score BETWEEN 0.0 AND 1.0),    -- 第一手直達性 (一手資料 vs 轉載)
+    timeliness_score REAL NOT NULL DEFAULT 0.5 CHECK (timeliness_score BETWEEN 0.0 AND 1.0),    -- 時效性
+    independence_score REAL NOT NULL DEFAULT 0.5 CHECK (independence_score BETWEEN 0.0 AND 1.0),-- 獨立性 (利益無關 vs 業配公關)
+    reproducibility_score REAL NOT NULL DEFAULT 0.5 CHECK (reproducibility_score BETWEEN 0.0 AND 1.0), -- 可重現性
+    metadata_json TEXT DEFAULT '{}',
     created_at TIMESTAMP NOT NULL
 );
 
 CREATE TABLE evidence (
     id TEXT PRIMARY KEY,
-    source_id TEXT NOT NULL,
+    source_id TEXT NOT NULL REFERENCES sources(id),
     content_snippet TEXT NOT NULL,          -- 原始內容摘錄
     content_hash TEXT NOT NULL,             -- SHA256 避免重複抓取
-    captured_at TIMESTAMP NOT NULL,
+    capture_method TEXT NOT NULL CHECK (capture_method IN ('HTTP_GET', 'HTML_PARSED', 'API_JSON', 'PDF_OCR', 'TOOL_STDOUT')),
+    data_version TEXT DEFAULT '1.0',        -- 外部資料版本號
+    published_at TIMESTAMP,                 -- 來源原始發布時間
+    captured_at TIMESTAMP NOT NULL,         -- 系統擷取時間
     valid_until TIMESTAMP,                  -- 時間有效性期限 (NULL 表示無特定期限)
-    created_at TIMESTAMP NOT NULL,
-    FOREIGN KEY (source_id) REFERENCES sources(id)
+    created_at TIMESTAMP NOT NULL
 );
 
 CREATE TABLE claims (
     id TEXT PRIMARY KEY,
     statement TEXT NOT NULL,                -- 具體命題陳述
-    assertion_status TEXT NOT NULL,         -- ACCEPTED, REJECTED, UNCERTAIN, CONFLICTED, SUPERSEDED
-    is_knowledge INTEGER DEFAULT 0,         -- 1 = 已晉升為跨 Agent 可信知識; 0 = 暫時主張
+    assertion_status TEXT NOT NULL CHECK (assertion_status IN ('ACCEPTED', 'REJECTED', 'UNCERTAIN', 'CONFLICTED', 'SUPERSEDED')),
+    is_knowledge INTEGER DEFAULT 0 CHECK (is_knowledge IN (0, 1)), -- 1 = 已晉升為跨 Agent 可信知識; 0 = 暫時主張
+    current_version INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
 
+CREATE TABLE claim_revisions (
+    id TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL REFERENCES claims(id),
+    revision_number INTEGER NOT NULL,
+    previous_statement TEXT NOT NULL,
+    new_statement TEXT NOT NULL,
+    reason TEXT NOT NULL,                   -- 修訂理由
+    revised_decision_id TEXT REFERENCES decisions(id),
+    created_at TIMESTAMP NOT NULL,
+    UNIQUE(claim_id, revision_number)
+);
+
 CREATE TABLE claim_evidence_links (
-    claim_id TEXT NOT NULL,
-    evidence_id TEXT NOT NULL,
-    support_type TEXT NOT NULL,             -- SUPPORTS, REFUTES, QUALIFIES
-    PRIMARY KEY (claim_id, evidence_id),
-    FOREIGN KEY (claim_id) REFERENCES claims(id),
-    FOREIGN KEY (evidence_id) REFERENCES evidence(id)
+    claim_id TEXT NOT NULL REFERENCES claims(id),
+    evidence_id TEXT NOT NULL REFERENCES evidence(id),
+    support_type TEXT NOT NULL CHECK (support_type IN ('SUPPORTS', 'REFUTES', 'QUALIFIES')),
+    confidence_weight REAL DEFAULT 1.0,
+    PRIMARY KEY (claim_id, evidence_id)
 );
 ```
 
-#### 記憶表架構調整 (Memories 表擴充)
-修正舊版強制綁定外鍵的問題，改以多型 Provenance 欄位追蹤記憶來源：
+#### B. 記憶表架構調整 (Memories 表擴充與 Provenance 解構)
+徹底分離「知識性質」與「來源錨點類型」，新增明確驗證狀態：
+
 ```sql
--- 擴充現有 memories 表（所有新增欄位均有預設值，100% 向下相容）
-ALTER TABLE memories ADD COLUMN provenance_type TEXT DEFAULT 'INFERENCE';
-    -- 允許值：FACT_BASED | INFERENCE | HYPOTHESIS | USER_PREFERENCE | AGENT_DECISION
-ALTER TABLE memories ADD COLUMN provenance_ref_type TEXT DEFAULT 'NONE';
-    -- 允許值：EVIDENCE | SOURCE | MEMORY | CONTEXT_SNAPSHOT | DECISION | NONE
-    -- 說明：指向哪種實體作為此記憶的 Provenance 錨點
+-- 擴充現有 memories 表 (100% 向下相容)
+ALTER TABLE memories ADD COLUMN provenance_type TEXT DEFAULT 'INFERENCE' 
+    CHECK (provenance_type IN ('FACT_BASED', 'INFERENCE', 'HYPOTHESIS', 'USER_PREFERENCE', 'AGENT_DECISION'));
+ALTER TABLE memories ADD COLUMN provenance_ref_type TEXT DEFAULT 'NONE'
+    CHECK (provenance_ref_type IN ('EVIDENCE', 'SOURCE', 'MEMORY', 'CONTEXT_SNAPSHOT', 'DECISION', 'NONE'));
 ALTER TABLE memories ADD COLUMN provenance_ref_id TEXT;
-    -- 對應 provenance_ref_type 實體的 ID（多型引用，非外鍵約束）
-ALTER TABLE memories ADD COLUMN confidence REAL DEFAULT 0.5;
-    -- 0.0 ~ 1.0 信心程度
+ALTER TABLE memories ADD COLUMN provenance_status TEXT DEFAULT 'UNVERIFIED'
+    CHECK (provenance_status IN ('VERIFIED', 'PARTIAL', 'UNVERIFIED'));
 ```
 
-> [!IMPORTANT]
-> **不採用** `claim_id NOT NULL` 或 `evidence_id NOT NULL` 的強制外鍵。強制要求的是 **Provenance 鏈的完整性**：每筆 Memory 必須能回答「這條記憶從哪裡來的？」——可接受的錨點包含 Evidence、Source、Memory（先驗推導）、Context Snapshot、或先前 Decision。若 `provenance_type ≠ NONE`，則 `provenance_ref_id` 不得為空。
+#### Provenance 完整性邏輯矩陣
+| provenance_type (性質) | 允許之 provenance_ref_type | provenance_status 規範 | 說明 |
+|---|---|---|---|
+| `FACT_BASED` | `EVIDENCE` 或 `SOURCE` | 若缺少 ref 則必須為 `UNVERIFIED`；具備有效 Evidence 經查驗後方可晉升 `VERIFIED` | 客觀事實依據 |
+| `INFERENCE` | `MEMORY` 或 `DECISION` 或 `NONE` | 預設為 `PARTIAL` 或 `UNVERIFIED`；推論鏈完整者標記 `VERIFIED` | 根據先驗記憶推導 |
+| `HYPOTHESIS` | `NONE` 或 `DECISION` | **絕對禁止**標記為 `VERIFIED`（只能是 `UNVERIFIED`） | 待驗證假設 |
+| `USER_PREFERENCE` | `SOURCE` 或 `NONE` | 使用者顯式宣告為 `VERIFIED` | 使用者偏好與設定 |
+| `AGENT_DECISION` | `DECISION` | 關聯至具體 `decision_id` 為 `VERIFIED` | Agent 自身過往決策 |
 
 ---
 
-### 3.6 治理、審批與三軌事件體系 (Governance, Approvals & Triple-Event Streams)
-
-#### A. 三軌事件責任分離原則 (The Triple-Event Architecture)
-為避免日誌職責不清與相互踩踏，AIA 嚴格劃分三種事件流的責任：
-
-| 資料結構 | 核心職責 | 生命週期與範圍 | 典型事件範例 |
-|---|---|---|---|
-| **`execution_events`**<br/>*(既有表 001)* | 記錄單次 Task/Execution 內部的**微觀執行細節** | 綁定 `execution_id`，短期工單遙測 | Agent 呼叫 Tool、命令輸出片段、Worker 心跳 |
-| **`event_history`**<br/>*(新增表 007)* | 記錄全系統長期存在的**業務事實與自主性演進事件** | 全域不可竄改，長期留存；Continuity 重建的第一事實來源 | Agent 發現市場異常、目標狀態變更、重大推論成立、自我修正生效 |
-| **`audit_logs`**<br/>*(既有表 001/002，擴充於 009)* | 記錄**誰在何時執行/申請何項受治理操作** | 全域安全審計日誌，法規與安全合規邊界 | 提交代碼修改提案、觸發高預算呼叫、審批通過/駁回、緊急停止觸發 |
-
-三者互相關聯但職責獨立：`audit_logs` 可關聯 `decision_id` 或 `task_id`；`event_history` 記錄宏觀狀態轉移；`execution_events` 封裝於單次執行內部。
+### 3.7 治理與審批實體 (Approval & Audit)
 
 ```sql
--- 1. 全域不可竄改業務事件流 (event_history)
-CREATE TABLE event_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_type TEXT NOT NULL,               -- GOAL_REVISED, TASK_QUEUED, EMERGENCY_STOPPED...
-    aggregate_type TEXT NOT NULL,           -- GOAL, PROJECT, EXPERIMENT, TASK, GOVERNANCE
-    aggregate_id TEXT NOT NULL,
-    actor_id TEXT NOT NULL,                 -- AGENT:xxx, USER, SYSTEM
-    payload_json TEXT NOT NULL,
-    occurred_at TIMESTAMP NOT NULL
-);
-CREATE INDEX idx_event_history_aggregate ON event_history(aggregate_type, aggregate_id);
-
--- 2. 治理審批實體 (approvals)
 CREATE TABLE approvals (
     id TEXT PRIMARY KEY,
-    task_id TEXT,
-    decision_id TEXT,
-    operation_type TEXT NOT NULL,           -- CODE_MODIFICATION, SYSTEM_CONFIG, LARGE_EXPENSE
-    risk_tier TEXT NOT NULL,                -- LOW, MEDIUM, HIGH, CRITICAL
+    task_id TEXT REFERENCES tasks(id),
+    decision_id TEXT REFERENCES decisions(id),
+    operation_type TEXT NOT NULL CHECK (operation_type IN ('CODE_MODIFICATION', 'SYSTEM_CONFIG', 'LARGE_EXPENSE', 'DOMAIN_TRADE')),
+    risk_tier TEXT NOT NULL CHECK (risk_tier IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
     requested_by_agent_id TEXT NOT NULL,
-    status TEXT NOT NULL,                   -- PENDING, APPROVED, REJECTED, EXPIRED, CANCELLED
+    status TEXT NOT NULL CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'EXPIRED', 'CANCELLED')),
     human_comment TEXT,
     requested_at TIMESTAMP NOT NULL,
     responded_at TIMESTAMP,
     expires_at TIMESTAMP NOT NULL,
-    FOREIGN KEY (task_id) REFERENCES tasks(id),
-    FOREIGN KEY (decision_id) REFERENCES decisions(id)
+    CHECK (task_id IS NOT NULL OR decision_id IS NOT NULL) -- 至少需關聯一項實體
 );
 
--- 3. 擴充既有 audit_logs 表 (不重複新建 policy_audit_logs 表)
--- 既有欄位: id, sequence, actor_type, actor_id, action, target_type, target_id, timestamp, request_id, source, metadata_json
+-- 擴充既有 audit_logs 表 (不重複建表)
 ALTER TABLE audit_logs ADD COLUMN policy_id TEXT DEFAULT '';
 ALTER TABLE audit_logs ADD COLUMN decision_id TEXT DEFAULT '';
 ALTER TABLE audit_logs ADD COLUMN approval_id TEXT DEFAULT '';
 ALTER TABLE audit_logs ADD COLUMN risk_tier TEXT DEFAULT 'LOW';
 ALTER TABLE audit_logs ADD COLUMN governance_action TEXT DEFAULT '';
-CREATE INDEX idx_audit_decision ON audit_logs(decision_id);
-CREATE INDEX idx_audit_approval ON audit_logs(approval_id);
+CREATE INDEX IF NOT EXISTS idx_audit_decision ON audit_logs(decision_id);
+CREATE INDEX IF NOT EXISTS idx_audit_approval ON audit_logs(approval_id);
+```
+
+---
+
+### 3.8 成效評估、根因分析與自我修正 (Learning, RCA & Correction)
+
+徹底分離**修正類型 (What to correct)** 與**授權等級 (Authorization level C0~C5)**：
+
+```sql
+CREATE TABLE outcome_evaluations (
+    id TEXT PRIMARY KEY,
+    cycle_id TEXT REFERENCES autonomy_cycles(id),
+    decision_id TEXT REFERENCES decisions(id),
+    task_id TEXT REFERENCES tasks(id),
+    expected_outcome_json TEXT NOT NULL,    -- 決策時設定之預期成果
+    actual_outcome_json TEXT NOT NULL,      -- 實際觀測成果
+    discrepancy_score REAL NOT NULL,        -- 落差量化指標 (0.0 表示無落差)
+    is_anomaly INTEGER DEFAULT 0 CHECK (is_anomaly IN (0, 1)),
+    evaluation_status TEXT NOT NULL CHECK (evaluation_status IN ('EVALUATED', 'NEEDS_RCA', 'RESOLVED')),
+    evaluated_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE root_cause_analyses (
+    id TEXT PRIMARY KEY,
+    outcome_evaluation_id TEXT NOT NULL REFERENCES outcome_evaluations(id),
+    root_cause_category TEXT NOT NULL CHECK (root_cause_category IN ('INCORRECT_FACT', 'BIASED_JUDGMENT', 'FLAWED_STRATEGY', 'AMBIGUOUS_PROMPT', 'WORKFLOW_DEFECT', 'EXTERNAL_UNEXPECTED')),
+    analysis_narrative TEXT NOT NULL,       -- 根因分析報告
+    confidence REAL NOT NULL CHECK (confidence BETWEEN 0.0 AND 1.0),
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE correction_actions (
+    id TEXT PRIMARY KEY,
+    rca_id TEXT NOT NULL REFERENCES root_cause_analyses(id),
+    correction_type TEXT NOT NULL CHECK (correction_type IN ('FACT', 'JUDGMENT', 'STRATEGY', 'PROMPT', 'WORKFLOW', 'CODE')),
+    authorization_level TEXT NOT NULL CHECK (authorization_level IN ('C0', 'C1', 'C2', 'C3', 'C4', 'C5')),
+    target_entity_ref TEXT NOT NULL,        -- 欲修正之目標參照 (如 strategy:001 或 prompt:analyst)
+    before_state_json TEXT NOT NULL,        -- 修正前狀態
+    proposed_state_json TEXT NOT NULL,      -- 提案修正狀態
+    applied_state_json TEXT,                -- 實際套用狀態
+    approval_id TEXT REFERENCES approvals(id), -- 若需審批則關聯
+    verification_status TEXT NOT NULL CHECK (verification_status IN ('PENDING', 'APPLIED', 'VERIFIED_EFFECTIVE', 'VERIFIED_INEFFECTIVE', 'ROLLED_BACK')),
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX idx_eval_discrepancy ON outcome_evaluations(discrepancy_score);
+CREATE INDEX idx_corrections_rca ON correction_actions(rca_id);
 ```
 
 ---
@@ -330,13 +518,13 @@ CREATE INDEX idx_audit_approval ON audit_logs(approval_id);
 
 | 現有資料表 / 模組 | 所屬 Migration | 處理策略 | 相容性保證 |
 |---|---|---|---|
-| `projects` | 001 | 擴充 `primary_goal_id` 與 `status`；M:N 關聯透過新增 `goal_project_links` 表 | 預設值保證相容 |
-| `agents` | 001 | 沿用並擴充 `agent_type` 與 capabilities | 完全向下相容 |
-| `tasks` | 001 | 沿用現有狀態機，新增 `experiment_id` 欄位 | 完全向下相容 |
+| `projects` | 001 | 擴充 `primary_goal_id`、`latest_snapshot_id` 與 `status`；M:N 關聯由 `goal_project_links` 表承載 | 預設值保證相容 |
+| `agents` | 001 | 沿用並擴充 capabilities | 完全向下相容 |
+| `tasks` | 001 | 沿用現有狀態機；於 Migration 012 新增 `experiment_id` 欄位 | 完全向下相容 |
 | `task_dependencies` | 001 | 沿用 | 完全向下相容 |
 | `executions` | 001 | 沿用 | 完全向下相容 |
-| `execution_events` | 001 | 專責微觀執行日誌，與全域 `event_history` 分流 | 完全向下相容 |
-| `memories` | 001 | 擴充 `provenance_type`、`provenance_ref_type`、`provenance_ref_id` 與 `confidence` | 預設值保證相容 |
+| `execution_events` | 001 | 專責單次工單微觀執行日誌，與全域 `event_history` 分流 | 完全向下相容 |
+| `memories` | 001 | 擴充 `provenance_type`、`provenance_ref_type`、`provenance_ref_id` 與 `provenance_status` | 預設值保證相容 |
 | `memory_candidates` | 001 | 沿用，作為短期記憶候選審核載體 | 完全向下相容 |
 | `artifacts` | 001 | 沿用 | 完全向下相容 |
 | `audit_logs` | 001, 002 | 擴充治理專屬欄位（`policy_id`, `decision_id`, `approval_id`, `risk_tier`） | 預設值保證相容，不重複建表 |

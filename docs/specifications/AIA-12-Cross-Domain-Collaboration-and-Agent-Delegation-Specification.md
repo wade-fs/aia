@@ -1098,3 +1098,34 @@ AIA 應能：
 **Agent 可以分工，但目標不能分裂；Agent 可以交換知識，但證據不能失去來源；Agent 可以互相協助，但責任不能消失。**
 
 Autonomy Core 的角色不是替所有 Agent 思考，而是讓不同 Agent 能在共同的長期目標與治理規則下，自主協作並持續改善整體成果。
+
+---
+
+# 21. 跨領域委派契約資料模型與狀態機 (Delegation Request Model — Migration 012 Addendum)
+
+為了落實跨 Agent 協作之契約化與可追溯性，AIA Migration 012 建立了 `delegation_requests` 資料表，支援以下完整生命週期：
+
+```text
+  [ PENDING ] ──(Target Agent 評估接收)──► [ ACCEPTED ] ──(派發工單)──► [ IN_PROGRESS ]
+       │                                                                      │
+       ▼                                                                      ▼
+  [ REJECTED ]                                                           [ DELIVERED ]
+                                                                              │
+                                                                 (驗收檢查 Acceptance Gate)
+                                                                       ├── 通過 ──► [ VERIFIED ]
+                                                                       └── 失敗 ──► [ FAILED ]
+```
+
+### 21.1 契約核心欄位
+1. `requester_agent_id`：提出委派之主委託者（如 `writing-agent`）。
+2. `target_agent_id`：承接委派之執行者（如 `coding-agent`）。
+3. `goal_id` / `source_project_id`：繼承之頂層目標與來源脈絡，避免目標分裂。
+4. `task_spec_json`：結構化工作規格（輸入參數、產出格式、資源限制）。
+5. `acceptance_gate_json`：可量測之驗收標準（如單元測試全過、輸出符合 schema）。
+6. `spawned_task_id`：於執行者端衍生之實際執行工單。
+
+### 21.2 經典實證：Writing × Coding 史料工具委派流
+- **觸發**：Writing Agent 在校核《元末明初》小說時，發現需比對 540 章中百餘位歷史人物的卒年與出場年份，人工正則易漏。
+- **委派**：Writing Agent 建立 `DelegationRequest`，指名 `coding-agent`，要求開發 `verify_timeline_anomaly` 分析程式。
+- **執行**：Coding Agent 在沙盒內實作並通過單元測試，狀態轉為 `DELIVERED`。
+- **驗收**：Writing Agent 執行交付腳本，確認能精確標出卒後登場異常，狀態更新為 `VERIFIED`，完成跨領域協作閉環。

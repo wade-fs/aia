@@ -331,3 +331,140 @@ func (r *ExperimentRepository) ListComparisons(ctx context.Context, experimentID
 	}
 	return out, rows.Err()
 }
+
+// ---------------------------------------------------------------------------
+// 4. Delegation Requests (AIA-12, Migration 012)
+// ---------------------------------------------------------------------------
+
+func (r *ExperimentRepository) CreateDelegationRequest(ctx context.Context, d *domainExp.DelegationRequest) error {
+	now := clock.Now(ctx)
+	if d.CreatedAt.IsZero() {
+		d.CreatedAt = now
+	}
+	if d.UpdatedAt.IsZero() {
+		d.UpdatedAt = d.CreatedAt
+	}
+	if d.Status == "" {
+		d.Status = "PENDING"
+	}
+	if d.AcceptanceGateJSON == "" {
+		d.AcceptanceGateJSON = "{}"
+	}
+	if d.DeliverableJSON == "" {
+		d.DeliverableJSON = "{}"
+	}
+
+	_, err := r.db.RawDB().ExecContext(ctx, `
+		INSERT INTO delegation_requests (
+			id, experiment_id, requester_agent_id, target_agent_id, source_project_id,
+			goal_id, spawned_task_id, task_spec_json, acceptance_gate_json, deliverable_json,
+			status, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, d.ID, d.ExperimentID, d.RequesterAgentID, d.TargetAgentID, d.SourceProjectID,
+		d.GoalID, d.SpawnedTaskID, d.TaskSpecJSON, d.AcceptanceGateJSON, d.DeliverableJSON,
+		d.Status, d.CreatedAt.Format(time.RFC3339), d.UpdatedAt.Format(time.RFC3339))
+	return err
+}
+
+func (r *ExperimentRepository) GetDelegationRequest(ctx context.Context, id string) (*domainExp.DelegationRequest, error) {
+	row := r.db.RawDB().QueryRowContext(ctx, `
+		SELECT id, experiment_id, requester_agent_id, target_agent_id, source_project_id,
+			goal_id, spawned_task_id, task_spec_json, acceptance_gate_json, deliverable_json,
+			status, created_at, updated_at
+		FROM delegation_requests WHERE id = ?
+	`, id)
+	return scanDelegationRequest(row)
+}
+
+func (r *ExperimentRepository) UpdateDelegationStatus(ctx context.Context, id, status, deliverableJSON string) error {
+	now := clock.Now(ctx).Format(time.RFC3339)
+	var err error
+	if deliverableJSON != "" {
+		_, err = r.db.RawDB().ExecContext(ctx, `
+			UPDATE delegation_requests
+			SET status = ?, deliverable_json = ?, updated_at = ?
+			WHERE id = ?
+		`, status, deliverableJSON, now, id)
+	} else {
+		_, err = r.db.RawDB().ExecContext(ctx, `
+			UPDATE delegation_requests
+			SET status = ?, updated_at = ?
+			WHERE id = ?
+		`, status, now, id)
+	}
+	return err
+}
+
+func (r *ExperimentRepository) ListDelegationRequests(ctx context.Context, requesterID, targetID, statusFilter string, limit int) ([]domainExp.DelegationRequest, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `
+		SELECT id, experiment_id, requester_agent_id, target_agent_id, source_project_id,
+			goal_id, spawned_task_id, task_spec_json, acceptance_gate_json, deliverable_json,
+			status, created_at, updated_at
+		FROM delegation_requests WHERE 1 = 1`
+	var args []any
+	if requesterID != "" {
+		query += " AND requester_agent_id = ?"
+		args = append(args, requesterID)
+	}
+	if targetID != "" {
+		query += " AND target_agent_id = ?"
+		args = append(args, targetID)
+	}
+	if statusFilter != "" {
+		query += " AND status = ?"
+		args = append(args, statusFilter)
+	}
+	query += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []domainExp.DelegationRequest
+	for rows.Next() {
+		d, err := scanDelegationRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, *d)
+	}
+	return list, rows.Err()
+}
+
+func scanDelegationRequest(s rowScanner) (*domainExp.DelegationRequest, error) {
+	var d domainExp.DelegationRequest
+	var expID, projID, goalID, taskID sql.NullString
+	var ca, ua string
+	if err := s.Scan(
+		&d.ID, &expID, &d.RequesterAgentID, &d.TargetAgentID, &projID,
+		&goalID, &taskID, &d.TaskSpecJSON, &d.AcceptanceGateJSON, &d.DeliverableJSON,
+		&d.Status, &ca, &ua,
+	); err != nil {
+		return nil, err
+	}
+	if expID.Valid {
+		v := expID.String
+		d.ExperimentID = &v
+	}
+	if projID.Valid {
+		v := projID.String
+		d.SourceProjectID = &v
+	}
+	if goalID.Valid {
+		v := goalID.String
+		d.GoalID = &v
+	}
+	if taskID.Valid {
+		v := taskID.String
+		d.SpawnedTaskID = &v
+	}
+	d.CreatedAt, _ = time.Parse(time.RFC3339, ca)
+	d.UpdatedAt, _ = time.Parse(time.RFC3339, ua)
+	return &d, nil
+}

@@ -15,13 +15,13 @@ AIA 是一個以研究與實證 AI Agent 長期自主行為為目標的本機優
 
 ## 1. Current Status
 
-目前平台已完成 **Phase 0 ～ Phase 4（含 Phase 3.5 安全與回放加固）** 以及 **Phase 5A（雙世代投資決策對照實驗 `G1` vs `G2 -> G2.x`）**，資料庫推進至 **Migration `012`**；下一階段為 **Phase 5B（Coding / Writing 領域深化與跨領域委派實證）**。
+目前平台已完成 **Phase 0 ～ Phase 5（含 Phase 3.5 安全加固、Phase 4 可驗證學習、Phase 5A 雙世代投資實驗與 Phase 5B 多領域 MVA & 跨領域委派）**，資料庫推進至 **Migration `012`**；下一階段為 **Phase 6（受控沙盒代碼自修與系統演化）**。
 
 | Domain Module | Status | Description |
 |---|---|---|
 | **Investment** | **GENERATIONAL EXPERIMENT READY (Phase 5A)** | 雙世代獨立 NT$100,000 帳本（`G1` 凍結規則基準組 vs `G2 -> G2.x` LLM 實驗演化組）、Brier + LogLoss 機率校準與行動信心分離、五大科學判讀矩陣與零前視偏差回放 |
-| **Coding** | **PLANNED (Phase 5B)** | 程式碼架構分析、技術債探索、自動除錯與測試驗證 |
-| **Writing** | **PLANNED (Phase 5B)** | 長期創作目標、人物年表、史料校勘與跨卷一致性管理 |
+| **Coding** | **MVA COMPLETED (Phase 5B)** | 程式碼健康掃描（`CodeHealthObserver`）、沙盒補丁執行（`CodingPilotExecutor`）、測試驅動自我修正達到 `L2_VERIFIED` |
+| **Writing** | **MVA COMPLETED (Phase 5B)** | 實證對接 `~/src/github/novel/yuan/`（6 卷 540 章）、三層知識體系（【史實骨架】、【合理推演】、【小說虛構】）、區分藝術虛構（理性 `NO_ACTION`）與年表矛盾（`L2_VERIFIED`） |
 
 ### 1.1 Core Implementation Status
 
@@ -37,7 +37,7 @@ AIA 是一個以研究與實證 AI Agent 長期自主行為為目標的本機優
 | **Self-Correction & Learning** | **IMPLEMENTED (Phase 4)** | 3-Tier Runtime Profile、`L0_RECORDED`～`L3_GENERALIZED` 四階成熟度、7 大科學對照欄位、退化自動回滾與負向約束 |
 | **Goal Evolution Engine** | **IMPLEMENTED (Phase 4)** | `PERSISTENCE` / `OPTIMIZATION` / `REVISION` 三態分流與 `STRATEGIC` 目標防移動球門守衛 |
 | **Generational Experiment Engine** | **IMPLEMENTED (Phase 5A)** | `experiments` 11 狀態機、凍結 `G1` 活體對照組、`G2 -> G2.1 -> G2.2` 譜系演化與雙重差分（DiD）驗證橋接 |
-| **Cross-Domain Delegation** | **SCHEMA READY / PLANNED (Phase 5B)** | `delegation_requests` 資料契約已於 Migration `012` 建立，跨領域執行協調推進中 |
+| **Cross-Domain Delegation** | **IMPLEMENTED (Phase 5B)** | `DelegationService` 跨領域合約狀態機（`PENDING` ➔ `IN_PROGRESS` ➔ `DELIVERED` ➔ `VERIFIED`）、自動工單派發、Web Console API (`/api/v1/delegations`) 與 CLI (`aia delegation`) |
 | **Safe Code Self-Modification** | **PLANNED (Phase 6)** | 隔離工作區代碼自修、多層測試流水線、Diff Review 與異常自動回滾 |
 
 > **認識論聲明**：Phase 4 完成代表「可驗證的自我修正與學習基礎機制」已落地並通過合成對抗情境（Scenarios A～E）驗證，**不代表已宣稱完成通用長期自主學習**；跨週期泛化能力（`L3`）須在 Phase 5 長期實驗中持續檢驗。

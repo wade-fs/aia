@@ -20,6 +20,7 @@ import (
 	"github.com/wade/aia/internal/provider"
 	agentService "github.com/wade/aia/internal/service/agent"
 	approvalService "github.com/wade/aia/internal/service/approval"
+	delegationService "github.com/wade/aia/internal/service/delegation"
 	goalService "github.com/wade/aia/internal/service/goal"
 	govService "github.com/wade/aia/internal/service/governance"
 	invService "github.com/wade/aia/internal/service/investment"
@@ -50,6 +51,7 @@ type ConsoleServices struct {
 	LearningRepo   *repository.LearningRepository
 	ExperimentRepo *repository.ExperimentRepository
 	ExperimentCtrl *experiment.Controller
+	DelegationSvc  *delegationService.Service
 }
 
 func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
@@ -99,6 +101,10 @@ func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
 	mux.HandleFunc("/api/v1/learnings/", s.handleLearningSubroutes)
 	mux.HandleFunc("/api/v1/experiments", s.handleExperiments)
 	mux.HandleFunc("/api/v1/experiments/", s.handleExperimentSubroutes)
+
+	// 9. Cross-Domain Delegations (AIA-12 §21, Phase 5)
+	mux.HandleFunc("/api/v1/delegations", s.handleDelegations)
+	mux.HandleFunc("/api/v1/delegations/", s.handleDelegationSubroutes)
 }
 
 func getReqID(r *http.Request) string {
@@ -1139,4 +1145,128 @@ func (s *ConsoleServices) handleExperimentSubroutes(w http.ResponseWriter, r *ht
 		"generations": gens,
 		"comparisons": cmps,
 	}, reqID)
+}
+
+func (s *ConsoleServices) handleDelegations(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if s.DelegationSvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Delegation service not available", reqID)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		requester := r.URL.Query().Get("requester")
+		target := r.URL.Query().Get("target")
+		status := r.URL.Query().Get("status")
+		limit := 50
+		if lStr := r.URL.Query().Get("limit"); lStr != "" {
+			if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+				limit = l
+			}
+		}
+		list, err := s.DelegationSvc.List(ctx, requester, target, status, limit)
+		if err != nil {
+			host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, list, reqID)
+
+	case http.MethodPost:
+		var in delegationService.CreateDelegationInput
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid request JSON: "+err.Error(), reqID)
+			return
+		}
+		del, err := s.DelegationSvc.RequestDelegation(ctx, in)
+		if err != nil {
+			host.WriteError(w, http.StatusBadRequest, "DELEGATION_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusCreated, del, reqID)
+
+	default:
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+	}
+}
+
+func (s *ConsoleServices) handleDelegationSubroutes(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if s.DelegationSvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Delegation service not available", reqID)
+		return
+	}
+
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/delegations/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_ID", "Delegation request ID required", reqID)
+		return
+	}
+	id := parts[0]
+
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		del, err := s.DelegationSvc.Get(ctx, id)
+		if err != nil {
+			host.WriteError(w, http.StatusNotFound, "NOT_FOUND", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, del, reqID)
+		return
+	}
+
+	action := parts[1]
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	switch action {
+	case "accept":
+		if err := s.DelegationSvc.AcceptDelegation(ctx, id); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "ACCEPT_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "IN_PROGRESS", "id": id}, reqID)
+
+	case "deliver":
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid deliverable JSON", reqID)
+			return
+		}
+		if err := s.DelegationSvc.DeliverWork(ctx, id, body); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "DELIVER_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "DELIVERED", "id": id}, reqID)
+
+	case "verify":
+		var body struct {
+			Passed  bool   `json:"passed"`
+			Comment string `json:"comment"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid verification JSON", reqID)
+			return
+		}
+		if err := s.DelegationSvc.VerifyDelivery(ctx, id, body.Passed, body.Comment); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "VERIFY_ERROR", err.Error(), reqID)
+			return
+		}
+		status := "VERIFIED"
+		if !body.Passed {
+			status = "FAILED"
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": status, "id": id}, reqID)
+
+	default:
+		host.WriteError(w, http.StatusNotFound, "UNKNOWN_ACTION", "Unknown delegation subroute action: "+action, reqID)
+	}
 }

@@ -533,14 +533,19 @@ Expected Outcome (預期成效) vs Actual Outcome (實際成效)
      - **Track B（自主能力 + 五大科學判讀矩陣）**：評估合理觀望率（`HOLD`）、失效條件觸發、世代演化深度，並自動歸類為五大情境（含辨識「報酬較高但校準極差之高風險僥倖 `G2_UNRELIABLE_RISK_TAKING`」與「`G1` 規則勝出 `G1_RULES_SUPERIOR`」）。
      - **活體對照驗證橋接**：將凍結 `G1` 直接作為 Phase 4 `LearningEngine.VerifyCorrection` 之 `CONTROL_BENCHMARK`（雙重差分 DiD），驗證通過晉升 `PROMOTED`（`L2_VERIFIED`），造成回撤或 Brier 退化則自動標記 `ROLLED_BACK`（`REGRESSED`）。
    - **不在本階段範圍**：融資融券、保證金計算、槓桿/衍生品操作——如需納入，須另立規格正式化後方可實作。
-2. **Coding Agent 落地**：
-   - 理解目標代碼庫結構、辨識測試盲區與技術債、產出修復方案。
-3. **Writing Agent 落地**：
-   - 管理小說世界觀、人物年表、章節大綱，並執行歷史資料與劇情一致性校勘。
-4. **跨領域任務委派機制 ([AIA-12](file:///home/wade/src/github/aia/docs/specifications/AIA-12-Cross-Domain-Collaboration-and-Agent-Delegation-Specification.md))**：
-   - 實作經典情境：Writing/Investment Agent 發現工具不足時，向 Coding Agent 提出委派工單；Coding Agent 完成交付後，由委託 Agent 驗收並更新既有成果（資料結構 `delegation_requests` 已於 Migration `012` 落地）。
-5. **Experiment Lifecycle 管理 ([AIA-15](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md)) [Phase 5A 已實作]**：
-   - 完整 11 狀態實驗生命週期（`experiments`）、跨世代譜系表（`experiment_generations`）、對照比較紀錄（`experiment_comparisons`）與 `ExperimentController` 已落地。
+2. **Coding Agent 最低可用版本 (MVA) [Phase 5B 進行中]**：
+   - 聚焦於**「問題發現、測試執行與零退化自我修正」**：
+   - 實作 `CodeHealthObserver`：掃描指定 Repo 狀態、執行測試套件、辨識測試失敗（`TEST_FAILURE`）與建置錯誤（`BUILD_ERROR`）。
+   - 閉環自我修正驗證：於隔離工作區產出修復方案，以單元測試回歸全綠為 `L2_VERIFIED` 判定標準；若修正導致其他測試失敗，立即自動回滾（`REGRESSED`）。
+3. **Writing Agent 最低可用版本 (MVA) [Phase 5B 進行中]**：
+   - 聚焦於**「長期記憶、多實體關係與跨卷脈絡一致性校勘」**：
+   - **實體素材對齊**：直接對齊使用者現有 `~/src/github/novel/yuan/`（元末明初 6 卷 540 章總綱 `outline.md`、角色檔案 `characters.md`、分卷草稿）。
+   - **三層知識分類標記**：落實【史實骨架】（不可違背之生卒年與政權年表）、【合理推演】（制度與地理合理推論）、【小說虛構】（藝術創作與基層配角）。
+   - 實作 `ManuscriptConsistencyObserver`：比對人物年表與逐章情節，自主檢出卒後登場（`POST_MORTEM_APPEARANCE`）、時代錯置（`ANACHRONISM`）等矛盾，並於 Deliberation 區分真實錯誤（ACT 提出勘誤提案）與合理小說改編（有據 NO_ACTION）。
+4. **跨領域任務委派機制 ([AIA-12](file:///home/wade/src/github/aia/docs/specifications/AIA-12-Cross-Domain-Collaboration-and-Agent-Delegation-Specification.md)) [Phase 5B 進行中]**：
+   - 實作經典跨領域協作閉環：Writing Agent 在校核歷史小說時發現年表比對工具不足，向 Coding Agent 建立 `DelegationRequest`；Coding Agent 在沙盒中實作並通過測試後交付，Writing Agent 驗收並套用於文本校勘。
+5. **Phase 5 Entry Gate（進場驗收閘門）**：
+   - 在全面展開 Phase 5 多領域長期演進前，三個 Agent 皆須達成 7 大進場驗收指標（統一 Autonomy Core、Continuity 重建、Initiative 主動發現、Rational NO_ACTION、L2 自我修正閉環、領域客觀基準、跨領域委派跑通）。
 
 #### 5. 行為驗收標準 (Milestone M7)
 - [ ] **投資自主運作**：Investment Agent 能夠跨月持續維持虛擬部位自主運作，且無人工介入完成每月覆盤報告；記得每次買賣理由、當時市場資訊、預測與實際結果，不因後續損益竄改原始判斷。

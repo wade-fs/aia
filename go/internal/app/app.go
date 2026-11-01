@@ -22,6 +22,7 @@ import (
 	"github.com/wade/aia/internal/recovery"
 	agentService "github.com/wade/aia/internal/service/agent"
 	approvalService "github.com/wade/aia/internal/service/approval"
+	delegationService "github.com/wade/aia/internal/service/delegation"
 	execService "github.com/wade/aia/internal/service/execution"
 	goalService "github.com/wade/aia/internal/service/goal"
 	govService "github.com/wade/aia/internal/service/governance"
@@ -82,6 +83,9 @@ type App struct {
 	ExperimentRepo   *repository.ExperimentRepository
 	AutonomyEngine   *autonomy.Engine
 	ExperimentCtrl   *experiment.Controller
+	DelegationSvc    *delegationService.Service
+	CodingObserver   *autonomy.CodeHealthObserver
+	WritingObserver  *autonomy.ManuscriptConsistencyObserver
 }
 
 func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
@@ -213,6 +217,16 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		Bus:              bus,
 	})
 	autonomyEng.RegisterObserver("investment", autonomy.NewInvestmentObserver(invSvc))
+	codingObs := autonomy.NewCodeHealthObserver()
+	writingObs := autonomy.NewManuscriptConsistencyObserver()
+	writingObs.RegisterProjectPath("default", "/home/wade/src/github/novel/yuan")
+	writingObs.RegisterProjectPath("yuan", "/home/wade/src/github/novel/yuan")
+	autonomyEng.RegisterObserver("coding", codingObs)
+	autonomyEng.RegisterObserver("writing", writingObs)
+	autonomyEng.RegisterPilot(autonomy.NewCodingPilotExecutor(taskSvc, nil))
+	autonomyEng.RegisterPilot(autonomy.NewWritingPilotExecutor(taskSvc))
+
+	delegationSvc := delegationService.NewService(experimentRepo, taskSvc, auditRepo)
 
 	expCtrl := experiment.NewController(experiment.Dependencies{
 		ExpRepo:          experimentRepo,
@@ -282,6 +296,9 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		ExperimentRepo:   experimentRepo,
 		AutonomyEngine:   autonomyEng,
 		ExperimentCtrl:   expCtrl,
+		DelegationSvc:    delegationSvc,
+		CodingObserver:   codingObs,
+		WritingObserver:  writingObs,
 	}
 
 	// Seed default domain agents, default project & recurring schedules
@@ -346,6 +363,7 @@ func (a *App) CreateWebHost() (*host.Host, string, error) {
 		LearningRepo:   a.LearningRepo,
 		ExperimentRepo: a.ExperimentRepo,
 		ExperimentCtrl: a.ExperimentCtrl,
+		DelegationSvc:  a.DelegationSvc,
 	})
 
 	// 2. Register Agent Modules with isolated dedicated muxes

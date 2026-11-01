@@ -1,17 +1,17 @@
 # AIA Development: Implementation Status
 
 **Project:** Autonomous Intelligence Architecture (AIA)  
-**Active Implementation Status:** **Phase 0 ～ Phase 4 Completed + Phase 5A Generational Investment Experiment Implemented** (Migrations `001` ～ `012` active)  
-**Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Baseline [`0e189d9`](file:///home/wade/src/github/aia) ➔ Phase 5A Active Workspace  
+**Active Implementation Status:** **Phase 0 ～ Phase 5 Completed** (Phase 5A Generational Investment Experiment + Phase 5B Multi-Domain MVA & Entry Gate, Migrations `001` ～ `012` active)  
+**Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Baseline [`0e189d9`](file:///home/wade/src/github/aia) ➔ Phase 5A Baseline [`29d1cb3`](file:///home/wade/src/github/aia) ➔ Phase 5B Active Workspace  
 **Specification Baseline:** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-19) v2.0  
 **Audit Report:** [docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)  
 **Last Updated:** 2026-11-01  
 
 ---
 
-## 1. Current Architecture Overview (Phase 4 Active Baseline)
+## 1. Current Architecture Overview (Phase 5 Active Baseline)
 
-The physical Go codebase implements Phases 0 through 4 (Runtime, Continuity & Provenance, Governance, 11-Step Autonomy Core, Phase 3.5 Hardening, and Phase 4 Verifiable Self-Correction & Goal Evolution):
+The physical Go codebase implements Phases 0 through 5 (Runtime, Continuity & Provenance, Governance, 11-Step Shared Autonomy Core across 3 Domains, Phase 3.5 Hardening, Phase 4 Verifiable Self-Correction & Goal Evolution, Phase 5A Generational Experimentation, and Phase 5B Multi-Domain MVA & Cross-Domain Delegation):
 
 ```text
 go/
@@ -84,8 +84,11 @@ go/
 | **`internal/provider/antigravity`** | **Production Ready (Phase 3.5)** | Subprocess Harness & Sandbox | Whitelist env secret scrubbing, `bwrap`/`systemd-run` read-only mount isolation, fail-closed `RequireOSNamespace`, stream-json token telemetry. |
 | **`internal/validation`** | **Production Ready (Phase 3.5)** | Execution Output Validator | Rejects empty/auth-error/quota-error outputs even on exit code `0`; enforces `file_non_empty:` & `contains:`. |
 | **`internal/autonomy/clock`** | **Production Ready (Phase 3.5)** | Point-in-Time (`AsOf`) Clock | Context-injected `WithAsOf` / `WithReplayMode` ensuring zero look-ahead bias in historical replay. |
-| **`internal/autonomy`** | **Production Ready (Phase 4)** | 11-Step Closed-Loop Autonomy | Modular `observation`, `recall` (with PiT `L2`/`L3` & negative constraints), `initiative`, `deliberation`, `learning`, and `cycle` coordinator. |
+| **`internal/autonomy`** | **Production Ready (Phase 5B)** | 11-Step Shared Autonomy Core | Modular `observation`, `recall`, `initiative`, `deliberation`, `learning`, and `cycle` coordinator unified across Investment, Coding, and Writing domain agents. |
 | **`internal/autonomy/learning`** | **Production Ready (Phase 4)** | Verifiable Self-Correction Engine | Outcome discrepancy eval, testable RCA, 3-tier profile (`TIER1_AUTO`, `TIER2_APPROVAL`, `TIER3_BLOCKED`), `L0`～`L3` maturity, 7 epistemic comparison fields, regression rollback. |
+| **`internal/service/delegation`** | **Production Ready (Phase 5B)** | Cross-Domain Agent Delegation (AIA-12 §21) | Lifecycle contract state machine (`PENDING` -> `IN_PROGRESS` -> `DELIVERED` -> `VERIFIED`), automatic task spawning, and acceptance verification. |
+| **`internal/domain/coding`** | **Production Ready (Phase 5B)** | Coding Agent MVA (AIA-15 §24) | Code defect detection (`CodeHealthObserver`), sandboxed patch application & test re-run (`CodingPilotExecutor`), and deterministic test verification reaching `L2_VERIFIED`. |
+| **`internal/domain/writing`** | **Production Ready (Phase 5B)** | Writing Agent MVA (AIA-15 §23) | 3-tier knowledge (`FACT_HISTORY`, `PLAUSIBLE_INFERENCE`, `FICTION`), manuscript consistency observer referencing `~/src/github/novel/yuan/`, intentional fiction license (`NO_ACTION`) vs chronological contradiction (`L2_VERIFIED`). |
 
 ---
 
@@ -127,6 +130,5 @@ go/
 - `experiment_comparisons`: Point-in-time Track A (performance + Brier/LogLoss & decision confidence calibration) and Track B (autonomy + 5-regime verdict) comparison snapshots (Migration 012).
 - `delegation_requests`: Cross-agent delegation contract records with acceptance gates (Migration 012).
 
-### Planned Domain Extensions (Phase 5B & Phase 6)
-- Coding & Writing longitudinal domain workflows + Cross-domain `DelegationRequest` runtime orchestration ── *Phase 5B*
-- Isolated sandbox self-modification pipeline ── *Phase 6*
+### Next Milestone: Phase 6 Safe Self-Modification
+- Level A/B/C OS-isolated sandbox code modification pipeline ── *Phase 6*

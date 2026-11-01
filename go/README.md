@@ -20,18 +20,18 @@ go/
 │   │   ├── learning/         # Discrepancy eval, RCA, 3-Tier Correction & L0~L3 verification
 │   │   ├── observation/      # Domain & workspace observers
 │   │   └── recall/           # L1~L5 associative recall with <= asOf temporal filtering
-│   ├── cli/                  # Cobra CLI commands (cycle, goal, learning, approval, etc.)
+│   ├── cli/                  # Cobra CLI commands (cycle, goal, learning, experiment, delegation)
 │   ├── collector/            # TWSE, TPEx, FRED, SEC, and RSS data collectors
 │   ├── config/               # YAML & environment configuration (incl. Budget & Sandbox)
 │   ├── continuity/           # ContextReconstructor & sanitized snapshots
-│   ├── domain/               # Pure domain models & invariants
+│   ├── domain/               # Pure domain models (coding, writing, investment, autonomy, etc.)
 │   ├── eventbus/             # In-process pub/sub event bus
 │   ├── experiment/           # Generational Experiment Controller (G1 frozen baseline vs G2/G2.x LLM)
 │   ├── orchestrator/         # Scheduler & PersonalAgent Strangler-Fig facade
 │   ├── policy/               # Path/financial policies & pre-flight token/cycle budget gates
 │   ├── provider/             # Antigravity CLI (agy) sandboxed adapter & mock executor
 │   ├── recovery/             # Startup crash recovery
-│   ├── service/              # Application services (task, exec, inv, knowledge, approval, goal)
+│   ├── service/              # Application services (task, exec, inv, knowledge, approval, goal, delegation)
 │   ├── storage/sqlite/       # SQLite WAL connection pool, migrations 001~012 & repositories
 │   ├── validation/           # Output/artifact/fatal-marker execution validator
 │   ├── web/                  # Loopback HTTP host (7777), OTT auth & Console REST API

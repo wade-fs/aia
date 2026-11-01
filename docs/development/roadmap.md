@@ -28,9 +28,9 @@ AIA executes a **Dual-Track Evolution Model**:
 │ & Alignment       │ Knowledge Integ.  │ Operational Control            │
 │    [COMPLETED]    │    [COMPLETED]    │          [COMPLETED]           │
 ├───────────────────┼───────────────────┼────────────────────────────────┤
-│ Phase 3 & 3.5:    │ Phase 4: Verif.   │ Phase 5: Domain Experiments &  │
-│ Autonomy & Harden │ Learning & Goal   │ Longitudinal L3 Validation     │
-│    [COMPLETED]    │    [COMPLETED]    │   [IN PROGRESS — 5A READY]     │
+│ Phase 3 & 3.5:    │ Phase 4: Verif.   │ Phase 5: Domain Experiments,   │
+│ Autonomy & Harden │ Learning & Goal   │ MVA & Cross-Domain Delegation  │
+│    [COMPLETED]    │    [COMPLETED]    │          [COMPLETED]           │
 ├───────────────────┴───────────────────┴────────────────────────────────┤
 │ Phase 6: Safe Self-Modification & Autonomous System Evolution [PLANNED]│
 └────────────────────────────────────────────────────────────────────────┘
@@ -87,9 +87,14 @@ Progress is evaluated by verifiable, computable autonomous behavior rather than 
 - Governed Goal Evolution (`PERSISTENCE`, `OPTIMIZATION`, `REVISION`) with deterministic Anti-Goalpost-Moving enforcement.
 - Computable [AIA-13](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md) M3–M7 thresholds and Learning Effectiveness Acceptance Suite (`Scenarios A–E`).
 
-### Phase 5: Domain Experiments & Cross-Domain Collaboration *(In Progress — Phase 5A Completed)*
-- **Phase 5A (Completed — Migration `012`)**: Generational Investment Decision Experiment (`G1` Frozen Rule-Based Control Baseline vs `G2 -> G2.1 -> G2.2` LLM Experimental Cohorts, isolated NT$100,000 ledgers, Brier + LogLoss event calibration separated from decision confidence, 5-regime classification matrix, and live `G1` Difference-in-Differences control verification bridged into Phase 4 `LearningEngine`).
-- **Phase 5B (Next Target)**: Longitudinal `L3_GENERALIZED` accumulation across Coding and Writing domain experiments, plus cross-domain delegation execution (`DelegationRequest`).
+### Phase 5: Domain Experiments, Multi-Domain MVA & Cross-Domain Delegation *(Completed)*
+- **Phase 5A (Migration `012`)**: Generational Investment Decision Experiment (`G1` Frozen Rule-Based Control Baseline vs `G2 -> G2.1 -> G2.2` LLM Experimental Cohorts, isolated NT$100,000 ledgers, Brier + LogLoss event calibration separated from decision confidence, 5-regime classification matrix, and live `G1` Difference-in-Differences control verification bridged into Phase 4 `LearningEngine`).
+- **Phase 5B (Multi-Domain MVA & Entry Gate)**:
+  - **Shared Autonomy Core Alignment**: Unified 11-step Autonomy Loop (`internal/autonomy/`) running simultaneously across Investment, Coding, and Writing domains with rational `NO_ACTION` baseline.
+  - **Coding Agent MVA (AIA-15 §24)**: `CodeHealthObserver`, `CodingPilotExecutor`, sandbox test harness, deterministic test self-correction reaching `L2_VERIFIED`.
+  - **Writing Agent MVA (AIA-15 §23)**: `ManuscriptConsistencyObserver` targeting `/home/wade/src/github/novel/yuan/` with 3 knowledge tiers (`FACT_HISTORY`, `PLAUSIBLE_INFERENCE`, `FICTION`), distinguishing artistic license (rational `NO_ACTION`) from chronological contradictions (`POST_MORTEM_APPEARANCE` -> `L2_VERIFIED`).
+  - **Cross-Domain Delegation (AIA-12 §21)**: `DelegationService` managing `delegation_requests` lifecycle state machine (`PENDING` -> `IN_PROGRESS` -> `DELIVERED` -> `VERIFIED`) with CLI commands (`aia delegation ...`) and Web Console API routes (`/api/v1/delegations`).
+  - **Phase 5 Entry Gate (AIA-15 §22)**: All 7 criteria verified green in integration acceptance suite (`TestPhase5B_EntryGate_*`).
 
 ### Phase 6: Safe Self-Modification & Autonomous System Evolution *(Planned)*
 - Scope isolation: Level A (Domain), Level B (AIA Core - Human Approval Required), Level C (Governance - Locked via OS namespace & immutable storage protections).

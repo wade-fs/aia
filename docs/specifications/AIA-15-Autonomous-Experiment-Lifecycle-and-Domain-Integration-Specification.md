@@ -1758,3 +1758,59 @@ Investment、Coding、Writing 三個 Domain 提供不同的觀察環境：
 2. **非破壞式世代演化 (`G2` ➔ `G2.1` ➔ `G2.2`)**：
    - 當 `G2` 經由 `AIA-11` 完成偏差評估、RCA 與修正提案後，嚴禁原地覆蓋 `G2`；必須衍生子世代 `G2.x`（記錄 `parent_generation_id`、`harness_version`、`model_id`、`prompt_version`、`strategy_version`、`source_correction_id` 與 `source_learning_id`）。
    - `G2.x` 在獨立虛擬帳本中與永久基準 `G1` 同步接受相同市場資料檢驗，並將相對 `G1` 的對照表現回傳至 `AIA-11` 的 `VerifyCorrection`（採用 `CONTROL_GROUP` 對照法），決定正式晉升（`PROMOTED` / `L2_VERIFIED`）或淘汰回滾（`ROLLED_BACK` / `REGRESSED`）。
+
+---
+
+# 22. Phase 5 Entry Gate（三大領域自主進場驗收門檻）
+
+依據架構檢討與 `thinking.md` 決議，Phase 5 不得作為首次開發 Coding Agent 與 Writing Agent 之階段。在全面啟動長週期跨領域實驗之前，三大 Domain Agent 必須全數通過 **Phase 5 Entry Gate**，具備「最低可用版本（Minimum Viable Agent, MVA）」。
+
+### 22.1 七項硬性進場驗收指標
+1. **Autonomy Core 統一性**：Investment、Coding、Writing 必須 100% 透過相同的 11 步自主循環（`internal/autonomy/`）驅動，嚴禁為個別領域獨立開發分立的調度引擎。
+2. **時間連續性 (Continuity)**：三個 Agent 遭中斷重啟後，皆能透過 `event_history`、`projects` 與 Context Snapshot 完整重建未完成事項。
+3. **主動性 (Initiative)**：三個 Agent 的 Domain Observer 皆能自主掃描環境，主動發現至少一項有價值之工作候選（`candidate_initiatives`）。
+4. **有據可查的理性觀望 (Rational NO_ACTION)**：三個 Agent 在無需介入時，皆能產出具備明確證據與推演理由的 `NO_ACTION` 決策（投資：未達顯著性；Coding：良性警告或非關鍵債；Writing：刻意保留之小說虛構/藝術誇張）。
+5. **可驗證之自我修正 (Verifiable Self-Correction)**：三個 Agent 皆能走完 `OutcomeEvaluation -> RCA -> CorrectionAction -> Verification` 閉環，達到 `L2_VERIFIED`。
+6. **領域客觀基準 (Objective Baseline)**：
+   - Investment：以凍結之 `G1` Rule-Based Baseline 作為活體對照。
+   - Coding：以單元測試回歸全綠（`go test ./...` 100% PASS）與編譯診斷作為客觀判定基準。
+   - Writing：以不可違背之【史實骨架】（生卒年、戰役年表、官制）作為客觀判定基準。
+7. **跨領域委派契約 (Cross-Domain Delegation)**：至少完成一次端到端委派閉環（如 Writing 委派 Coding 開發年表檢核工具）。
+
+---
+
+# 23. Writing Agent 最低可用版本 (MVA) 規格
+
+### 23.1 素材定位與三層知識分類
+Writing Agent 以長篇歷史群像小說（以 `~/src/github/novel/yuan/` 6 卷 540 章為實體素材）為驗證場景，管理跨卷、跨年、跨人物之長期脈絡一致性。
+
+系統嚴格劃分三種敘事層級：
+1. **【史實骨架】(`FACT_HISTORY`)**：有正史明確記載之事件、年代、官職、生卒年（如朱元璋 1328 出生、1344 入皇覺寺；脫脫 1354 遭罷黜）。**嚴禁任何未授權修改；若小說出現衝突必須視為錯誤並提出修訂。**
+2. **【合理推演】(`PLAUSIBLE_INFERENCE`)**：史料未載但符合時代制度、民俗、地理交通之情節（如各割據勢力之糧價、私鹽運銷、書信傳遞時效）。
+3. **【小說虛構】(`FICTION`)**：新創配角（如四方幼徒、民俗神秘情節、藝術改編）。**Deliberation 必須辨別小說虛構並做出有據之 `NO_ACTION`，不可將創作情節誤判為史實錯誤。**
+
+### 23.2 觀察器與異常檢測 (`ManuscriptConsistencyObserver`)
+- 讀取小說專案結構（`characters.md`、`outline.md`、各卷逐章詳綱）。
+- 建構人物生命歷程圖（登場年代、行蹤、生死狀態）。
+- 檢測四類主要矛盾（`ConsistencyAnomaly`）：
+  - **`POST_MORTEM_APPEARANCE`（卒後登場）**：人物於卒年之後再次以生者身份參與事件。
+  - **`ANACHRONISM`（時代錯置）**：使用尚未發生之年號、官職或跨時空發明。
+  - **`LOCATION_CONFLICT`（瞬間移動）**：人物在未經合理旅程時間下同時出現於千里之外。
+  - **`CHARACTER_STATE_MISMATCH`（設定矛盾）**：人物能力、身分或親緣關係與先前設定相悖。
+
+---
+
+# 24. Coding Agent 最低可用版本 (MVA) 規格
+
+### 24.1 定位與職責
+Coding Agent 聚焦於**「問題發現、客觀測試與零退化自我修正」**，是檢驗 AIA 自我修正機制是否具備真成效之最精確試驗場。
+
+### 24.2 觀察器與驗證流水線 (`CodeHealthObserver`)
+- 掃描指定專案目錄，執行靜態檢查、編譯診斷與測試執行。
+- 發現三類程式碼問題（`CodeDefect`）：
+  - **`TEST_FAILURE`**：既有或新增之單元/整合測試失敗。
+  - **`BUILD_ERROR`**：編譯錯誤或型別不相容。
+  - **`REGRESSION_RISK`**：未處理之錯誤碼或並行交易競爭。
+- **自我修正安全驗證**：
+  - 於隔離沙盒工作區（`internal/workspace`）套用修正提案。
+  - 執行測試套件：原測試通過 且 其他所有既有測試 100% 綠燈，方可晉升 `L2_VERIFIED`；任一回歸測試失敗立即標記 `REGRESSED` 並自動回滾。

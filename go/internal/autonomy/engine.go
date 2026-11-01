@@ -182,6 +182,12 @@ func (e *Engine) UnregisterObserver(name string) {
 	}
 }
 
+func (e *Engine) RegisterPilot(p cycle.DomainPilotExecutor) {
+	if e.coordinator != nil {
+		e.coordinator.RegisterPilot(p)
+	}
+}
+
 func (e *Engine) RecallEngine() *recall.Engine {
 	return e.recallEng
 }

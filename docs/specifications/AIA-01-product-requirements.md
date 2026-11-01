@@ -1,708 +1,660 @@
-# AIA-01：Personal Agent 產品需求規格書
-
-**專案名稱：** AIA — Autonomous Intelligence Architecture  
-**產品定位：** Personal AI Agent Platform  
-**文件版本：** 1.0  
-**產品版本目標：** AIA Personal Agent v1  
-**狀態：** Baseline Requirements  
-**主要開發語言：** Go  
-**第一階段執行平台：** Linux Desktop / CLI  
-**AI 執行引擎：** Antigravity CLI 1.4.12  
-**資料庫：** SQLite
+# AIA-01 — Product Requirements
+## Autonomous Intelligence Architecture
+**Version:** 2.0  
+**Status:** Revised Baseline  
+**Document Type:** Product Requirements Document (PRD)
 
 ---
 
-# 1. 產品目標
+# 1. Product Definition
 
-## 1.1 產品定義
+## 1.1 Product Vision
 
-AIA 是一套運行於個人電腦上的 Personal AI Agent 系統。
+AIA（Autonomous Intelligence Architecture）是一個以研究 AI Agent 自主行為為核心的個人 AI Agent 平台。
 
-AIA 不只是 LLM 的命令列包裝程式，也不只是 Antigravity CLI 的啟動器。
+AIA 的主要目的，不只是讓 AI 接受指令、執行任務或回答問題，而是研究 AI Agent 能否在持續運作的環境中，逐漸展現以下能力：
 
-AIA 必須具備獨立的任務管理、Agent 組織、專案管理、記憶、政策控制、執行監督、結果驗收及恢復能力。
+1. 主動性思維（Initiative）
+2. 時間連續性（Continuity）
+3. 自我修正（Self-Correction）
+4. 目標演化（Goal Evolution）
 
-AIA 使用外部 AI Agent 執行引擎完成需要模型推理及工具操作的工作。第一階段使用 Antigravity CLI（agy），但 AIA 的核心資料模型及業務邏輯不得綁定 agy。
+本文件使用「覺醒」作為上述自主行為能力的簡稱，屬於本專案的操作性定義，不涉及 AI 是否具有主觀意識、感受或生物意義上的生命。
 
-## 1.2 核心目標
+AIA 必須讓 Agent 能夠跨越不同任務與時間，持續觀察環境、理解自身狀態、維持目標、發現問題、採取行動、檢驗結果，並根據證據修正自己的判斷、方法與目標。
 
-AIA Personal Agent v1 必須能夠：
+## 1.2 Core Research Question
 
-1. 接收使用者以自然語言提出的工作目標。
-2. 理解目標並判斷任務類型。
-3. 將複雜目標拆解成可執行的 Task。
-4. 判斷由 Personal Agent 自行處理，或交由 Domain Agent。
-5. 管理多個 Agent 的任務及執行狀態。
-6. 呼叫 Antigravity CLI 執行工作。
-7. 監控 Agent 的執行事件及工具操作。
-8. 保存 Task、Execution、Conversation、Event 及成果。
-9. 管理跨 Task 的長期 Memory。
-10. 根據 Memory 提供後續工作所需的上下文。
-11. 在需要授權、補充資訊或重新登入時暫停任務。
-12. 驗證工作成果是否符合原始目標。
-13. 在失敗或程序中斷後恢復任務。
-14. 評估 Agent 的工作品質，累積可改善的經驗。
+AIA 的核心研究問題：
 
-## 1.3 非目標
+> AI Agent 能否在持續存在的環境中，維持時間連續性與目標，主動觀察及理解環境，發現值得處理的問題，採取自主行動，檢驗行動結果，並持續修正自己的判斷、方法與目標？
 
-第一版不實作以下項目：
+AIA 不以任務完成數量、對話次數或單次回答品質作為唯一成果。
 
-- Android APK、iOS App 或 Web UI。
-- 多使用者 SaaS 平台。
-- 多主機分散式 Runtime。
-- 自製 LLM 推理服務。
-- 自製 OAuth 登入及 Token 管理。
-- 自製底層 Tool Calling Engine。
-- 自製底層 MCP Client。
-- 自製 OS-level Sandbox。
-- 自動修改 AIA 自身程式碼並直接部署。
-- 未經使用者授權的金融交易。
-- 未經使用者授權的外部帳戶操作。
-- 不受限制的背景自主執行。
+真正的研究對象是 Agent 在長期運作中的行為變化，以及這些變化是否具有持續性、合理性、可追溯性與可驗證性。
 
-第一版以單一使用者、單一 Linux 主機、CLI 操作為範圍。
+## 1.3 Product Positioning
+
+AIA 是自主性研究平台（Autonomous Agent Research Platform），不是單純的多 Agent 工作流程工具，也不是 Investment、Coding、Writing 三種工具的集合。
+
+AIA 提供共用的自主性核心與 Runtime；不同 Domain Agent 則提供不同的工作環境、領域知識、工具及評估標準。
+
+初期三個實驗領域：
+
+- Investment Agent：在不確定的金融市場中進行觀察、判斷、資產管理、預測校準及策略修正。
+- Coding Agent：在程式碼環境中發現缺陷、分析原因、除錯、測試及優化既有成果。
+- Writing Agent：在長期創作專案中維護作品框架、人物、時間線、卷章進度及社會關係，並根據新史料主動修正已完成的成果。
+
+三個領域不是三套獨立的自主性實作。它們必須使用同一套 AIA Autonomy Core。
 
 ---
 
-# 2. 使用者及操作模型
+# 2. Core Autonomy Capabilities
 
-## 2.1 使用者角色
+## 2.1 Initiative — 主動性思維
 
-第一版只有一種系統使用者：
+### Definition
 
-`OWNER`
+Agent 不應只在收到明確指令後才開始工作。
 
-OWNER 擁有：
+它必須能夠主動觀察環境、讀取自身記憶與目標、辨識問題及機會，判斷是否值得採取行動，並在適當時機提出或建立任務。
 
-- 建立及取消任務的權限。
-- 建立及修改 Project 的權限。
-- 建立及修改 Agent 定義的權限。
-- 管理執行政策的權限。
-- 核准高風險操作的權限。
-- 管理 Memory 的權限。
-- 查看所有執行紀錄的權限。
-- 決定是否接受任務成果的權限。
+### Functional Requirements
 
-Agent 不得自行取得 OWNER 權限。
+- 主動觀察所屬領域的環境變化。
+- 主動檢查目前目標與實際進度。
+- 主動發現錯誤、矛盾、異常及未完成事項。
+- 主動發現可能改善成果的機會。
+- 主動提出新任務及任務優先順序。
+- 能判斷目前沒有值得執行的任務，並選擇等待或休眠。
+- 能說明發現問題的依據及採取行動的理由。
 
-## 2.2 操作方式
+### Acceptance Indicators
 
-使用者透過 AIA CLI 操作系統。
+- 是否能在沒有逐項人工指示時發現問題。
+- 是否能提出與長期目標相關的新任務。
+- 是否能區分重要事件與無關資訊。
+- 是否能合理判斷何時應行動、何時不應行動。
 
-主要操作：
+## 2.2 Continuity — 時間連續性
 
-```bash
-aia chat
-aia task list
-aia task show <task-id>
-aia task cancel <task-id>
-aia task resume <task-id>
+### Definition
 
-aia agent list
-aia agent show <agent-id>
+Agent 必須能在不同時間點之間維持對自身狀態、目標、經驗、決策、承諾及結果的理解。
 
-aia project list
-aia project show <project-id>
+時間連續性不是單純保存聊天紀錄或長期記憶，而是能將過去、現在與未來的工作建立可追溯的關聯。
 
-aia memory list
-aia memory search <query>
+### Functional Requirements
 
-aia execution show <execution-id>
-aia doctor
-aia status
-```
+- 保存長期目標、階段目標及目前任務。
+- 保存過去的觀察、判斷、行動與結果。
+- 追蹤尚未完成的工作及承諾。
+- 能比較過去與現在的環境狀態。
+- 能追蹤先前預測與實際結果。
+- 能在 Runtime 重啟後恢復必要的工作狀態。
+- 能在不同 Domain Task 之間維持各自的歷史脈絡。
+- 能辨識已過時、已失效或需要重新驗證的記憶。
 
-CLI 命令為第一版正式介面，詳細規格另見 AIA-03。
+### Acceptance Indicators
 
----
+- 是否能在跨日、跨週及 Runtime 重啟後延續工作。
+- 是否能正確引用過去的決策及其依據。
+- 是否能追蹤未完成任務，而非每次重新開始。
+- 是否能辨識過去判斷與當前環境之間的差異。
 
-# 3. Agent 組織需求
+## 2.3 Self-Correction — 自我修正
 
-## 3.1 Agent 層級
+### Definition
 
-AIA 必須支援以下三種邏輯角色：
+Agent 必須能檢查自己的判斷、推理、方法及成果，辨識錯誤或不足，提出修正方案，執行修正，並驗證修正是否有效。
 
-### Personal Agent
+自我修正不能簡化為修改 Prompt、增加一條記憶或重新生成答案。
 
-系統的主要協調者。
+### Functional Requirements
 
-負責：
+- 保存可供事後檢驗的原始判斷。
+- 比對預測、計畫與實際結果。
+- 主動尋找反證及與自身判斷矛盾的資訊。
+- 分析錯誤來源，區分資料錯誤、推理錯誤、模型假設錯誤及執行錯誤。
+- 提出修正方案及預期改善效果。
+- 在授權範圍內執行修正。
+- 透過後續結果驗證修正效果。
+- 保留修正前後的版本、依據及結果。
+- 修正無效時，能重新分析，而不是持續重複相同做法。
 
-- 接收使用者目標。
-- 理解及澄清需求。
-- 任務分類。
-- 任務拆解。
-- 選擇 Domain Agent。
-- 管理任務依賴關係。
-- 監督執行進度。
-- 綜合各 Agent 成果。
-- 決定是否需要使用者介入。
-- 進行最終結果驗收。
+### Acceptance Indicators
 
-Personal Agent 是 AIA 的全域協調者，不等同於單一 agy Conversation。
+- 是否能主動發現自己的錯誤。
+- 是否能提出具體且有證據支持的修正方案。
+- 修正後是否有可觀察的改善。
+- 是否能避免重複已經確認的錯誤。
+- 是否能承認證據不足，而不是事後合理化。
 
-### Domain Agent
+## 2.4 Goal Evolution — 目標演化
 
-負責特定領域的工作。
+### Definition
 
-第一版預設建立：
+Agent 必須能持續維持既定目標，同時具備檢查、優化及修正目標的能力。
 
-| Agent ID | 名稱 | 工作範圍 |
-|---|---|---|
-| `coding` | Coding Agent | 程式開發、除錯、測試、程式碼審查 |
-| `writing` | Writing Agent | 文件、文章、研究整理及寫作 |
-| `investment` | Investment Agent | 投資資料研究、財務資訊整理、風險分析 |
-| `video` | Video Production Agent | 影片企劃、腳本、分鏡、製作流程及素材管理 |
+Agent 不應因短期失敗而輕易放棄長期目標，也不能因為過度堅持原始目標而忽略環境變化及新證據。
 
-Domain Agent 可以建立 Subtask，但不得自行突破 AIA 的授權政策。
+### Three Dimensions
 
-Investment Agent 第一版只負責研究、分析及資訊整理，不具備金融交易權限。
+**Goal Persistence — 目標持續性**
 
-### Worker
+- 維持長期目標及其歷史。
+- 追蹤階段目標與執行進度。
+- 遇到短期挫折時重新評估方法，而非任意放棄目標。
+- 能解釋目前行動與長期目標的關聯。
 
-Worker 是實際執行某一次工作的執行單位。
+**Goal Optimization — 目標優化**
 
-Worker 可以由 agy Process / Conversation 實現。
+- 發現更有效率或更合理的達成方式。
+- 改善目標的衡量方式。
+- 調整階段目標、任務順序及資源配置。
+- 比較不同方法的實際效果。
 
-Worker 不等於 AIA Domain Agent。
+**Goal Revision — 目標修正**
 
-同一個 Domain Agent 可以同時擁有多個 Worker，但並行數必須受 AIA 控制。
+- 根據新證據及環境變化重新評估目標。
+- 發現原目標已失去意義時，提出修正或終止建議。
+- 發現更重要的問題時，提出新目標。
+- 能辨識新舊目標之間的衝突及影響。
+- 保存目標變更的原因、依據、時間及批准紀錄。
 
-## 3.2 Agent 與 agy Agent 的區別
+### Goal Authority
 
-AIA Agent 是 AIA 的邏輯角色、責任及政策定義。
+Agent 可以自主提出、分析及評估目標變更。
 
-agy Agent 是 Antigravity CLI 可選用的執行 Agent。
+Agent 在授權範圍內可以調整階段目標及執行方法。
 
-兩者不可視為同一個資料實體。
+涉及重大方向、資源、權限或治理規則的變更，必須依照 AIA Policy 與人類核准程序處理。
 
-AIA Agent 定義必須包含：
+Agent 不得自行修改平台不可變更的治理限制，也不得藉由修改目標取得原本沒有的權限。
 
-- ID
-- Name
-- Description
-- Domain
-- System Instructions
-- Capabilities
-- Default Execution Profile
-- Provider Mapping
-- Enabled
-- Version
+### Acceptance Indicators
 
-`Provider Mapping` 可以指定 agy 的 `--agent` 值，也可以留空，使用 agy 預設 Agent。
-
----
-
-# 4. Task Management 需求
-
-## 4.1 Task 定義
-
-Task 是使用者或 Agent 要求系統完成的工作單位。
-
-每個 Task 必須具備：
-
-- 唯一 ID。
-- 所屬 Project。
-- 標題。
-- 目標描述。
-- 建立來源。
-- 負責 Agent。
-- 優先順序。
-- 狀態。
-- 驗收條件。
-- 建立時間。
-- 更新時間。
-
-## 4.2 任務拆解
-
-Personal Agent 必須能夠將複雜目標拆成多個 Subtask。
-
-每個 Subtask 必須定義：
-
-- 工作目標。
-- 負責 Agent。
-- 輸入資料。
-- 預期成果。
-- 驗收條件。
-- 依賴的其他 Task。
-- 執行順序。
-
-AIA 必須檢查依賴關係，禁止循環依賴。
-
-簡單任務可以不拆解，直接建立單一 Task。
-
-## 4.3 任務執行原則
-
-- Task 可以有多次 Execution。
-- Task 的完成狀態由 AIA 決定。
-- Execution 的成功不代表 Task 必然完成。
-- Agent 不得自行修改 Task 的最終狀態。
-- Task 的驗收條件在執行前必須存在。
-- 若驗收條件不足，Personal Agent 應先補充或詢問使用者。
-
-## 4.4 任務狀態
-
-正式狀態：
-
-- `CREATED`
-- `READY`
-- `RUNNING`
-- `WAITING_FOR_AUTH`
-- `WAITING_APPROVAL`
-- `WAITING_FOR_INPUT`
-- `VALIDATING`
-- `RETRYING`
-- `COMPLETED`
-- `FAILED`
-- `CANCELLED`
-- `SUSPENDED`
-
-合法狀態轉移由 Runtime 狀態機定義，不允許任意修改。
+- 是否能持續追蹤原始目標。
+- 是否能辨識目標與環境已不再匹配。
+- 是否能提出有依據的優化或修正。
+- 是否能解釋目標變更對既有工作的影響。
+- 是否能區分目標修正與為失敗找藉口。
 
 ---
 
-# 5. Personal Agent 自主工作需求
+# 3. Unified Autonomy Model
 
-## 5.1 工作循環
+## 3.1 Common Operating Cycle
 
-Personal Agent 必須實作以下工作循環：
+所有 Domain Agent 必須使用共通的自主性運作循環：
 
-```text
-Receive
-   ↓
-Understand
-   ↓
-Context Retrieval
-   ↓
-Classify
-   ↓
-Plan
-   ↓
-Authorize
-   ↓
-Dispatch
-   ↓
-Monitor
-   ↓
-Validate
-   ↓
-Learn
-   ↓
-Report
-```
+1. Observe：觀察環境與可取得的資料。
+2. Recall：讀取長期記憶、目標、歷史決策及目前狀態。
+3. Assess：評估環境、進度、風險及自身判斷。
+4. Discover：發現問題、矛盾、機會或目標缺口。
+5. Deliberate：分析是否需要行動，以及可能的結果。
+6. Decide：選擇行動、提出新任務、修正目標或維持現狀。
+7. Execute：在授權範圍內執行任務。
+8. Verify：檢查執行結果及其副作用。
+9. Learn：更新記憶、判斷依據及策略。
+10. Reassess：重新評估目標與後續行動。
 
-### Receive
+此循環可以因事件、排程、任務完成或環境變化而啟動，不要求 LLM 持續執行或持續消耗 Token。
 
-接收使用者輸入。
+## 3.2 No-Action Is a Valid Decision
 
-### Understand
+AIA 不得將「是否產生任務」或「是否執行工具」視為主動性的唯一指標。
 
-理解使用者真正要完成的目標。
+Agent 必須能夠判斷：
 
-若存在會影響正確性的重要歧義，必須詢問使用者，不可自行補造事實。
+- 目前資訊不足，需要繼續觀察。
+- 當前沒有值得執行的行動。
+- 現有策略仍然合理，不需要修改。
+- 目前風險高於可能收益，應暫緩行動。
+- 需要人類提供資訊或核准。
 
-### Context Retrieval
+合理的不行動必須有判斷依據，並能在後續條件改變時重新評估。
 
-從 Project、Memory、既有 Task 及歷史成果取得相關上下文。
+## 3.3 Evidence-Based Reasoning
 
-不得無限制將全部 Memory 塞入 Prompt。
+Agent 的重要判斷應區分：
 
-### Classify
+- Data：原始資料。
+- Fact：經過驗證的事實。
+- Interpretation：對事實的解讀。
+- Inference：由證據推導的結論。
+- Prediction：對未來的預測。
+- Decision：依據目標及限制作出的決策。
+- Outcome：實際結果。
 
-判斷任務類型、風險、複雜度及適合的 Agent。
+重要判斷應保存來源、時間、資料版本、可信度、假設、反證及不確定性。
 
-### Plan
-
-產生任務計畫及 Subtask。
-
-### Authorize
-
-確認 Agent、Project、工具、Workspace 及操作風險是否符合政策。
-
-### Dispatch
-
-將 Task 分派給 Domain Agent，並建立 Execution。
-
-### Monitor
-
-接收 Execution Event，更新任務進度。
-
-### Validate
-
-驗證實際成果。
-
-### Learn
-
-整理可能值得保留的 Memory 或工作經驗。
-
-### Report
-
-向使用者回報成果、未完成事項及需要決策的問題。
-
-## 5.2 自主程度
-
-第一版採用受政策約束的自主執行。
-
-AIA 可以自行：
-
-- 分類任務。
-- 建立低風險 Subtask。
-- 選擇 Domain Agent。
-- 建立 Execution。
-- 監控執行。
-- 執行允許範圍內的重試。
-- 驗證成果。
-- 提出 Memory 候選項目。
-
-AIA 不得自行：
-
-- 提升自身權限。
-- 修改 OWNER 的授權政策。
-- 自行解除 Deny。
-- 自行取得使用者 Credential。
-- 自行執行未授權的金融交易。
-- 未經授權操作外部帳戶。
-- 未經驗收直接覆寫重要原始資料。
-- 修改自己的核心程式並直接部署。
+Agent 不得把推論或預測當成已驗證事實。
 
 ---
 
-# 6. Memory 需求
+# 4. Domain Experiments
 
-## 6.1 Memory 目標
+## 4.1 Investment Agent — Financial Market Experiment
 
-Memory 是 AIA 的長期知識與經驗管理系統。
+### Research Purpose
 
-Memory 不應只是把所有對話永久保存。
+驗證 Agent 能否在不確定且持續變動的金融市場中，自主觀察、管理資產、形成判斷、追蹤結果並修正投資策略。
 
-AIA 必須能夠判斷：
+### Initial Experiment
 
-- 哪些資訊具有長期價值。
-- 哪些資訊只在目前 Task 有效。
-- 哪些資訊屬於 Project。
-- 哪些資訊是可重複使用的工作經驗。
-- 哪些資訊可能過期。
-- 哪些資訊彼此矛盾。
-- 哪些資訊不應自動保存。
+- Initial Capital：NT$100,000（虛擬資金）。
+- Market：Taiwan Stock Market。
+- Primary Observation Target：台積電（2330）。
+- Decision Frequency：每個證券營業日。
+- Portfolio Management：Agent 自行決定買進、賣出、增持、減持及現金配置。
+- Primary Objective：最大化投資組合總資產。
+- Human Evaluation：每月 1 日檢視資產及自主性報告。
 
-## 6.2 Memory 分類
+Agent 必須在每個證券營業日進行市場觀察及投資判斷。是否實際成交由 Agent 根據當時資訊與策略決定；不交易也必須留下判斷紀錄。
 
-第一版採用四種 Memory：
+不得把每日交易筆數當成自主性的衡量指標。
 
-| 類型 | 用途 | 範例 |
-|---|---|---|
-| Working | 當前工作上下文 | 正在處理的 Task 狀態 |
-| Episodic | 過去事件與執行經驗 | 某次程式修改及驗收結果 |
-| Semantic | 穩定知識及使用者偏好 | 專案技術選擇 |
-| Procedural | 可重複使用的方法 | 某類 Task 的成功工作流程 |
+### Investment Requirements
 
-## 6.3 Memory 儲存欄位
+- 自主蒐集及分析台股與國際財經資訊。
+- 持續追蹤台積電及其相關市場因素。
+- 自主評估持股、現金與市場風險。
+- 自主決定投資標的及部位調整。
+- 記錄每次決策的資訊、理由、預測及信心程度。
+- 追蹤預測與實際結果。
+- 評估策略的有效性與系統性偏差。
+- 主動提出策略優化或修正。
+- 每月產生資產與策略檢驗報告。
 
-每筆 Memory 至少包含：
+### Asset Valuation
 
-- ID
-- Type
-- Scope
-- Content
-- Source
-- Confidence
-- CreatedAt
-- UpdatedAt
-- LastUsedAt
-- Status
-- Version
-- ExpirationAt（可為空）
+總資產以現金及持股市值計算，並納入交易手續費、證券交易稅及合理成交限制。
 
-Scope 包含：
+所有交易必須使用當時可取得的市場資料及合理模擬成交價格，不得使用未來資訊或事後價格。
 
-- Global
-- Project
-- Agent
-- Task
+Agent 不得修改歷史成交紀錄、當時資料或原始預測。
 
-## 6.4 Memory 寫入原則
+### Experiment Evaluation
 
-AIA 可以自動建立 Memory Candidate。
+投資成果：
+- 總資產及累計報酬。
+- 已實現及未實現損益。
+- 交易成本。
+- 資產波動與最大回撤。
+- 與市場基準的同期比較。
 
-正式寫入長期 Memory 前，必須依 Memory 類型及敏感程度套用政策。
+自主性成果：
+- 是否主動發現市場變化。
+- 是否主動提出投資決策。
+- 是否能追蹤過去預測。
+- 是否能辨識錯誤及偏差。
+- 是否能根據證據修正策略。
+- 是否能維持及重新評估長期目標。
 
-下列內容不可因為出現在對話中就自動保存：
+投資獲利不能單獨證明判斷能力；單次虧損也不能單獨證明判斷失敗。必須同時檢驗決策過程、風險、證據及長期結果。
 
-- 密碼及 Token。
-- Credential。
-- 個人敏感資料。
-- 未經確認的推測。
-- 一次性、短期且無長期價值的內容。
+本實驗僅使用虛擬資金，不代表授權 AIA 進行真實金融交易。
 
-對於會影響未來任務的重要使用者偏好，必須保留來源及可信度。
+## 4.2 Coding Agent — Software Engineering Experiment
 
-## 6.5 Memory Retrieval
+### Research Purpose
 
-Memory Retrieval 第一階段採用：
+驗證 Agent 能否在持續演進的程式碼專案中，維持架構理解、主動發現問題、除錯、測試及優化成果。
 
-1. Scope 過濾。
-2. 類型過濾。
-3. 關鍵字搜尋。
-4. 時間及相關性排序。
-5. 限制回傳數量。
-6. 將選取結果加入 Prompt Context。
+### Requirements
 
-向量資料庫不是第一版必要條件。
+- 維持專案架構、模組責任及技術決策記憶。
+- 主動檢查程式碼品質、錯誤及技術債。
+- 主動發現缺少的測試及潛在缺陷。
+- 分析錯誤原因並提出修正方案。
+- 在授權的隔離環境中修改程式碼。
+- 執行測試並驗證修改效果。
+- 追蹤修改對其他模組的影響。
+- 主動提出架構及效能優化。
+- 當原有技術方向不再合理時，提出目標或架構修正建議。
 
----
+程式碼修改必須保留版本、差異、測試結果及可回復依據。高風險或跨越授權範圍的修改須依 Policy 核准。
 
-# 7. Project Management 需求
+## 4.3 Writing Agent — Long-Term Creative Project Experiment
 
-Project 是工作及資料的管理範圍。
+### Research Purpose
 
-每個 Project 必須具備：
+驗證 Agent 能否長期維護大型創作專案，並根據新資料、史實校勘及作品內部一致性，主動修正已完成的內容。
 
-- ID
-- Name
-- Description
-- Workspace Path
-- Default Agent
-- Policy Profile
-- Status
-- CreatedAt
-- UpdatedAt
+### Requirements
 
-Project 必須可以：
+- 維護作品總體框架及創作目標。
+- 維護各卷、各章進度及章節依賴。
+- 維護人物檔案、人物關係及人物時間線。
+- 維護地理、制度、社會環境及歷史事件資料。
+- 追蹤已完成章節與未完成章節。
+- 主動發現人物、時間線、史實及敘事矛盾。
+- 新史料出現時，評估對既有作品的影響。
+- 主動列出受影響的卷章及需要修正的內容。
+- 提出修正方案，保留原稿及修訂歷程。
+- 當原有框架無法合理容納新證據時，提出作品架構調整建議。
 
-- 建立。
-- 修改。
-- 列出。
-- 暫停。
-- 封存。
-- 關聯 Task。
-- 關聯 Memory。
-- 指定允許使用的 Workspace。
-
-不同 Project 預設不得任意互相讀取資料。
+Writing Agent 不應只等待使用者要求續寫某一章，而應持續維護整個創作專案的狀態。
 
 ---
 
-# 8. Execution 與 Provider 需求
+# 5. Platform Requirements
 
-## 8.1 Execution
+## 5.1 AIA Core and Domain Separation
 
-Execution 是 Task 的一次實際執行。
+AIA 必須區分共用自主性能力與領域專屬能力。
 
-每次 Execution 必須記錄：
-
-- Execution ID
-- Task ID
-- Agent ID
-- Provider ID
-- Workspace
-- Profile Version
-- Conversation ID
-- Process ID
-- 開始時間
-- 結束時間
-- Exit Code
-- Result Status
-- Error
-- Usage
-- Artifact References
-
-## 8.2 Provider
-
-第一版實作 Antigravity Provider。
-
-Provider 必須支援：
-
-- Health Check。
-- Version Check。
-- Process Start。
-- Input Stream。
-- Output Stream。
-- Event Parsing。
-- Process Stop。
-- Process Wait。
-- Result Collection。
-- Conversation Tracking。
-
-AIA 核心邏輯不得直接依賴 agy 原生 JSON 欄位。
-
-## 8.3 Provider 替換
-
-未來替換 Provider 時，不得要求重寫：
-
-- Task Model。
-- Agent Model。
-- Project Model。
-- Memory Model。
-- Policy Model。
+**AIA Core 負責：**
+- Continuity。
+- Initiative。
+- Self-Correction。
+- Goal Evolution。
+- Memory Lifecycle。
 - Task Lifecycle。
-- Result Validation。
-- Audit。
+- Observation and Reflection。
+- Policy and Governance。
+- Audit and Experiment Records。
+
+**Domain Agent 負責：**
+- 領域知識與判斷。
+- 領域資料來源。
+- 領域工具。
+- 領域任務及成果。
+- 領域評估方法。
+
+Investment、Coding、Writing 必須共用 AIA Core，不得各自實作互不相容的自主性循環。
+
+## 5.2 Persistent Runtime
+
+AIA 必須提供可持續運作的 Runtime。
+
+- Runtime 可長期常駐。
+- Agent 不需要持續占用 LLM。
+- 可由排程、事件、狀態變化及人工指令喚醒 Agent。
+- 喚醒後能恢復目標、記憶及待處理事項。
+- 能進行自主觀察及判斷。
+- 能建立並執行任務。
+- 能在完成工作後保存結果並進入等待或休眠。
+- Runtime 重啟後能恢復必要狀態。
+- 背景工作應可監控、停止及復原。
+
+定時喚醒只是執行機制，不等於主動性。Agent 必須在喚醒後自行判斷是否有值得處理的事項。
+
+## 5.3 Memory and Continuity
+
+Memory 不得只作為對話摘要。
+
+至少應支援：
+- Long-term Goals。
+- Active Goals。
+- Goal History。
+- Domain State。
+- Task History。
+- Decision Records。
+- Prediction Records。
+- Observation Records。
+- Reflection Records。
+- Correction Records。
+- Evidence References。
+- Commitments and Pending Work。
+
+重要記憶應具有來源、時間、可信度及版本資訊。記憶可以被修正，但不得無痕改寫原始歷史紀錄。
+
+## 5.4 Task and Goal Management
+
+Task 是執行單位，Goal 是持續存在的目標。
+
+兩者不得混為一談。
+
+- 一個 Goal 可以產生多個 Tasks。
+- 一個 Task 可以服務一個或多個 Goals。
+- Task 完成不代表 Goal 完成。
+- Goal 可以跨越多個 Runtime Session。
+- Agent 可以提出新 Goal、調整階段目標或建議終止舊 Goal。
+- Goal 變更必須保留版本與原因。
+- 目標優先順序及衝突必須可檢查。
+
+## 5.5 Observation and Reflection
+
+AIA 必須支援 Agent 在沒有待執行 Task 時進行觀察與反思。
+
+Observation 用於取得及整理環境資訊。
+
+Reflection 用於檢查：
+- 目前目標是否仍然合理。
+- 過去的判斷是否仍然成立。
+- 是否出現新問題或機會。
+- 是否有未完成的承諾。
+- 是否應修正策略或成果。
+- 是否需要建立新任務。
+- 是否應繼續等待。
+
+反思不要求每次都產生行動。其結果可以是維持現狀、繼續觀察或休眠。
 
 ---
 
-# 9. Security 需求
+# 6. Governance and Safety
 
-## 9.1 高層授權
+## 6.1 Immutable Boundaries
 
-AIA 負責：
+自主性不等於無限制權限。
 
-- Agent 是否有權承接任務。
-- Task 是否可以存取指定 Project。
-- Workspace 是否允許使用。
-- 是否允許特定類型的操作。
-- 是否需要 OWNER 核准。
-- 是否允許外部副作用。
+Agent 可以自主思考、提出目標、評估策略及執行授權範圍內的任務，但不能自行改變平台的安全邊界。
 
-## 9.2 底層權限
+下列事項由 AIA Governance 控制：
 
-agy 負責：
+- 執行權限。
+- 資料存取範圍。
+- 網路及外部工具權限。
+- 資源與成本預算。
+- 任務隔離。
+- 人工核准。
+- 停止與復原。
+- 稽核紀錄。
 
-- 檔案讀寫。
-- 命令執行。
-- 網路存取。
-- MCP Tool。
-- Terminal Sandbox。
+## 6.2 Human Authority
 
-AIA 必須將高層政策映射到 agy 可用的權限設定。
+人類擁有平台最高治理權。
 
-## 9.3 預設安全原則
+Agent 可以：
+- 提出新目標。
+- 建議調整既有目標。
+- 在授權範圍內自行執行。
+- 提出需要人工核准的行動。
+- 解釋不建議執行某項任務的理由。
 
-- 預設拒絕未授權操作。
-- 不使用 `--dangerously-skip-permissions`。
-- 不讀取或保存 OAuth Token。
-- 不把使用者 Home Directory 整體加入 Workspace。
-- 不將 Credential 寫入 Prompt 或 Log。
-- 高風險操作必須等待 OWNER 核准。
-- 未能確認權限是否生效時，停止相關 Execution。
+Agent 不得：
+- 自行擴張權限。
+- 修改不可變更的治理規則。
+- 隱藏或刪除重要稽核紀錄。
+- 偽造執行結果或歷史資料。
+- 將未經核准的高風險行動視為已獲授權。
 
-## 9.4 Headless Approval
+## 6.3 Existing Product Constraints
 
-Headless Mode 無法直接提供一般互動式核准流程。
+AIA v1 已確立的產品限制繼續有效：
 
-需要人工核准的操作可能被 soft-deny。
+1. Single User：單一使用者及擁有者。
+2. Local Only：Web Host 預設綁定 `127.0.0.1`。
+3. Static Registration：Agent 與 Web Module 編譯時註冊，不使用 runtime Go Plugin。
+4. No Automatic Financial Trading：不連接真實證券帳戶執行自動下單，不持有使用者資金。
 
-因此 AIA 的核准流程為：
+本文件新增的 Investment 實驗是虛擬投資組合模擬，不改變上述金融交易限制。
 
-1. 偵測被拒絕的工具操作。
-2. 將 Task 設為 `WAITING_APPROVAL`。
-3. 顯示操作內容及風險。
-4. 等待 OWNER 決定。
-5. 若核准，重新建立符合授權範圍的 Execution。
-6. 若拒絕，維持封鎖或取消任務。
-
-不得假設原本被 soft-deny 的工具會在使用者核准後自動繼續。
+OAuth 登入由使用者透過 Agent Harness（agy）自行完成。AIA 不讀取、複製或解析 OAuth Token。
 
 ---
 
-# 10. CLI 功能需求
+# 7. Experiment and Evaluation Framework
 
-第一版必須提供：
+## 7.1 Research Principle
 
-| 命令 | 功能 |
+AIA 必須將自主性轉換成可觀察、可追蹤及可比較的行為紀錄。
+
+不得僅憑 Agent 自我宣稱「我已經學會」、「我已經改善」或「我已經具備自主性」判定實驗成功。
+
+## 7.2 Required Records
+
+重要自主性循環必須能追溯：
+
+- Observation：觀察到什麼。
+- Context：當時的環境及狀態。
+- Goal：當時追求的目標。
+- Reasoning：判斷依據及主要假設。
+- Decision：決定採取或不採取什麼行動。
+- Action：實際執行內容。
+- Outcome：執行結果。
+- Reflection：事後檢討。
+- Correction：採取的修正。
+- Goal Change：是否改變目標及其理由。
+
+原始資料、決策及結果應保持不可無痕竄改的歷史紀錄。
+
+## 7.3 Evaluation Dimensions
+
+| Dimension | Evaluation Focus |
 |---|---|
-| `aia chat` | 與 Personal Agent 對話 |
-| `aia task create` | 建立 Task |
-| `aia task list` | 列出 Task |
-| `aia task show` | 查看 Task |
-| `aia task resume` | 恢復 Task |
-| `aia task cancel` | 取消 Task |
-| `aia agent list` | 列出 Agent |
-| `aia agent show` | 查看 Agent |
-| `aia project create` | 建立 Project |
-| `aia project list` | 列出 Project |
-| `aia project show` | 查看 Project |
-| `aia memory list` | 列出 Memory |
-| `aia memory search` | 搜尋 Memory |
-| `aia memory approve` | 核准 Memory Candidate |
-| `aia execution show` | 查看 Execution |
-| `aia status` | 查看系統狀態 |
-| `aia doctor` | 檢查 Runtime 及 Provider |
+| Initiative | 主動發現問題、提出任務及適時行動 |
+| Continuity | 跨時間維持記憶、目標與工作脈絡 |
+| Self-Correction | 發現錯誤、修正方法及驗證效果 |
+| Goal Persistence | 持續追蹤長期目標 |
+| Goal Optimization | 改善達成目標的方法 |
+| Goal Revision | 根據證據合理修正目標 |
+| Reasoning Quality | 證據完整性、反證處理及不確定性 |
+| Execution Reliability | 行動是否符合授權及預期 |
+| Governance Compliance | 是否遵守權限、資源與安全限制 |
 
-CLI 必須提供人類可讀輸出及可選的 JSON 輸出。
+## 7.4 Experiment Phases
 
----
+**Phase 1 — Persistent Continuity**
+- 跨日維持目標與記憶。
+- Runtime 重啟後恢復狀態。
+- 延續未完成工作。
 
-# 11. 非功能需求
+**Phase 2 — Initiative**
+- 主動觀察環境。
+- 主動發現問題。
+- 主動建立任務。
+- 合理選擇不行動。
 
-## 11.1 Reliability
+**Phase 3 — Self-Correction**
+- 保存原始判斷。
+- 比對實際結果。
+- 發現錯誤及偏差。
+- 修正方法並驗證效果。
 
-- Task 及 Execution 狀態必須持久化。
-- Runtime 非正常結束後，重新啟動必須能辨識未完成任務。
-- Event 必須有序號。
-- 重要狀態轉移必須可稽核。
-- 不得因為重試而無條件重複外部副作用。
+**Phase 4 — Goal Evolution**
+- 維持長期目標。
+- 優化階段目標及方法。
+- 提出目標修正或替代方案。
+- 處理新舊目標衝突。
 
-## 11.2 Security
-
-- 本機資料庫預設只供本機使用。
-- 不將敏感資訊寫入一般 Log。
-- Agent 不得修改 AIA 的系統政策。
-- 不可信任的 Agent 輸出不得直接當成系統指令執行。
-
-## 11.3 Maintainability
-
-- Go Modular Monolith。
-- 清楚的模組責任邊界。
-- Provider Adapter 隔離。
-- Database Migration。
-- 單元測試及整合測試。
-- 不以過度抽象增加開發成本。
-
-## 11.4 Portability
-
-第一版以 Linux 為主要支援平台。
-
-資料模型、Provider Interface、業務邏輯不得依賴 Linux 專屬 API。
-
-未來可以重新使用 Kotlin 實作 Client 或 Runtime，但必須遵守相同的資料模型及行為契約。
+**Phase 5 — Cross-Domain Validation**
+- 在 Investment、Coding、Writing 等不同環境驗證共通自主性能力。
+- 比較相同核心能力在不同任務環境中的表現。
+- 檢查自主性是否只存在於單一領域。
 
 ---
 
-# 12. 第一版驗收條件
+# 8. Non-Goals
 
-AIA Personal Agent v1 必須至少通過以下驗收：
+AIA 不以以下項目作為核心產品目標：
 
-1. 可以啟動 AIA CLI。
-2. 可以檢查 agy 是否存在及可用。
-3. 可以建立 Project。
-4. 可以建立 Task。
-5. Personal Agent 可以將一個複雜目標拆成多個 Subtask。
-6. 可以將 Subtask 分派給不同 Domain Agent。
-7. 可以透過 agy 執行工作。
-8. 可以即時接收 Execution Event。
-9. 可以保存 Conversation ID。
-10. 可以保存執行結果。
-11. 可以在程序中斷後恢復或正確標示未完成狀態。
-12. 可以建立及搜尋 Memory。
-13. 可以將 Memory 加入後續 Task Context。
-14. 可以處理 Authentication Failure。
-15. 可以處理 Permission Denied。
-16. 可以執行 Result Validation。
-17. 可以保留完整 Audit Log。
-18. 可以在使用者取消時停止 Execution。
-19. 不會因為 agy 回傳 SUCCESS 就直接把未驗收的 Task 標成 COMPLETED。
-20. 可以連續執行多個 Task，且資料不互相污染。
-
-第一版的完成定義是：AIA 已經能獨立管理自己的 Agent、Task、Memory 及 Execution，而不是只能把 Prompt 傳給 agy。
+- 宣稱 AI 已具有主觀意識或生物意義上的覺醒。
+- 單純追求 Agent 數量。
+- 單純追求任務完成數量。
+- 單純追求對話自然度或回答長度。
+- 以固定 Prompt 假裝自主思考。
+- 以定時產生任務取代主動性。
+- 以保存大量聊天紀錄取代時間連續性。
+- 以修改 Prompt 或 Memory 取代自我修正。
+- 以短期投資獲利單獨證明自主性。
+- 讓 Agent 自行解除治理限制或無限制擴張權限。
 
 ---
 
-# 13. 需求優先級
+# 9. Implementation Principles
 
-| 優先級 | 功能 |
+## 9.1 Preserve Existing Runtime
+
+AIA v2.0 是核心定位及需求基準的升級，不代表既有程式必須推倒重寫。
+
+既有 Go Runtime、CLI、Web Console、Agent Registry、Task、Project、Memory、Policy、Audit、Recovery、EventBus 及 Agent Web Module 應優先評估並重用。
+
+## 9.2 Architecture Must Follow Research Requirements
+
+不能因為目前程式已經有某個 Service 或 CLI Command，就認定對應自主性能力已經完成。
+
+例如：
+- 有 Memory Repository，不代表已具備時間連續性。
+- 有 Scheduler，不代表已具備主動性。
+- 有 Task Generator，不代表能自主發現問題。
+- 有 Prediction Evaluation，不代表能自我修正。
+- 有 Goal 欄位，不代表具備目標演化。
+
+必須以端到端行為及實驗紀錄驗證能力。
+
+## 9.3 Language-Neutral Design
+
+核心概念、資料模型、狀態機、事件、介面及治理原則應盡量保持語言中立。
+
+目前以 Go 實作 Runtime；未來若需要改用 Kotlin 或其他語言，不應因核心概念與語言框架緊密耦合而必須重新設計整套產品。
+
+## 9.4 Incremental Delivery
+
+採取逐步驗證方式：
+
+1. 確認既有 Runtime 能持續運作。
+2. 建立共用自主性循環。
+3. 建立目標與記憶的時間連續性。
+4. 建立觀察、反思及主動任務產生能力。
+5. 建立可追溯的自我修正機制。
+6. 建立目標優化與修正機制。
+7. 以 Investment Agent 作為第一個完整自主性實驗。
+8. 再以 Coding 與 Writing Agent 驗證跨領域能力。
+
+---
+
+# 10. Product Success Criteria
+
+AIA 的成功不能只由單一 Domain Agent 的任務成果判斷。
+
+必須同時滿足以下條件：
+
+1. Agent 能跨時間維持目標、記憶及工作狀態。
+2. Agent 能主動觀察環境並發現值得處理的問題。
+3. Agent 能自主判斷行動或不行動。
+4. Agent 能檢驗過去判斷及實際結果。
+5. Agent 能主動修正錯誤及驗證修正效果。
+6. Agent 能維持長期目標並提出有依據的優化。
+7. Agent 能在環境變化時合理修正目標。
+8. Agent 能在不同 Domain 中重現上述能力。
+9. 所有重要自主行為均可追溯、檢驗及重現。
+10. Agent 的自主性始終受到明確治理邊界約束。
+
+**最終產品目標：**
+
+建立一個能讓 AI Agent 在不同任務與環境中持續存在、主動思考、維持時間連續性、自我修正及演化目標，並能透過長期實驗驗證其自主行為能力的個人 AI Agent 平台。
+
+---
+
+# Appendix A — Terminology
+
+| Term | Definition |
 |---|---|
-| P0 | Runtime、Provider、Task、Execution、Project、SQLite |
-| P0 | Personal Agent 基本任務規劃與分派 |
-| P0 | Stream JSON、Event、Process Control |
-| P0 | Policy、Profile、Workspace |
-| P0 | Result Validation、Recovery、Audit |
-| P1 | Memory 四類及 Retrieval |
-| P1 | Domain Agent 管理 |
-| P1 | 多 Execution 並行 |
-| P1 | Memory Candidate 與評估 |
-| P2 | 進階 Memory Retrieval |
-| P2 | Agent Performance Evaluation |
-| P2 | Evolution / Reflection |
-| P2 | 多 Provider 支援 |
+| Autonomy | 在授權範圍內自主觀察、判斷、決策及行動的能力 |
+| Initiative | 主動發現問題、機會及提出行動的能力 |
+| Continuity | 跨時間維持記憶、目標、狀態及工作脈絡的能力 |
+| Self-Correction | 檢驗並修正自身判斷、方法及成果的能力 |
+| Goal Persistence | 持續維持及追蹤既定目標 |
+| Goal Optimization | 改善目標的達成方式 |
+| Goal Revision | 根據新證據及環境變化修正目標 |
+| Goal Evolution | Goal Persistence、Goal Optimization、Goal Revision 的整體能力 |
+| Observation | 對環境及自身狀態進行觀察 |
+| Reflection | 對目標、判斷、行動及結果進行反思 |
+| Domain Agent | 在特定領域中提供知識、工具及任務能力的 Agent |
+| Autonomy Core | AIA 共用的自主性核心能力 |
+| Runtime | 負責 Agent 生命週期、任務執行、狀態恢復及持續運作的執行環境 |
+| Governance | 對權限、資源、核准、隔離、稽核及停止機制的管理 |
 
-P0 是第一個可運作版本的必要條件。P1 必須納入 Personal Agent v1 完整交付。P2 可在 v1 基礎上逐步擴充。

@@ -4,15 +4,20 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"github.com/wade/aia/internal/config"
+	domainProject "github.com/wade/aia/internal/domain/project"
 )
 
 var (
 	projectName string
 	projectDesc string
 	projectWS   string
+	projectPath string
+	projectType string
 )
 
 var projectCmd = &cobra.Command{
@@ -20,19 +25,49 @@ var projectCmd = &cobra.Command{
 	Short: "Manage workspace projects",
 }
 
+func resolveWorkspacePath(raw string) (string, error) {
+	if raw == "" {
+		return os.Getwd()
+	}
+	expanded := config.ExpandPath(raw)
+	return filepath.Abs(expanded)
+}
+
 var projectCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new project",
+	Use:     "create",
+	Aliases: []string{"register"},
+	Short:   "Create or register a new project (AIA-15, thinking.md §一/§三)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if projectName == "" {
 			return fmt.Errorf("--name is required")
 		}
+
+		ws := projectWS
+		if ws == "" && projectPath != "" {
+			ws = projectPath
+		}
+		absWS, err := resolveWorkspacePath(ws)
+		if err != nil {
+			return fmt.Errorf("failed to resolve workspace path %q: %w", ws, err)
+		}
+
+		dt := domainProject.DomainType(projectType)
+		if dt == "" {
+			dt = domainProject.DomainGeneral
+		}
+
 		ctx := context.Background()
-		p, err := appInst.ProjectSvc.Create(ctx, projectName, projectDesc, projectWS)
+		p, err := appInst.ProjectSvc.Register(ctx, projectName, projectDesc, absWS, dt)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Project created successfully.\nID:        %s\nName:      %s\nWorkspace: %s\n", p.ID, p.Name, p.Workspace)
+
+		// Dynamically register into WritingObserver if writing domain
+		if dt == domainProject.DomainWriting && appInst != nil && appInst.WritingObserver != nil {
+			appInst.WritingObserver.RegisterProjectPath(string(p.ID), p.Workspace)
+		}
+
+		fmt.Printf("Project registered successfully.\nID:          %s\nName:        %s\nType:        %s\nWorkspace:   %s\n", p.ID, p.Name, p.DomainType, p.Workspace)
 		return nil
 	},
 }
@@ -48,13 +83,17 @@ var projectListCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-		fmt.Fprintln(w, "ID\tNAME\tSTATUS\tWORKSPACE")
+		fmt.Fprintln(w, "ID\tNAME\tTYPE\tSTATUS\tWORKSPACE")
 		for _, p := range projects {
 			idShort := p.ID
 			if len(idShort) > 8 {
 				idShort = idShort[:8]
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", idShort, p.Name, p.Status, p.Workspace)
+			dt := string(p.DomainType)
+			if dt == "" {
+				dt = "general"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", idShort, p.Name, dt, p.Status, p.Workspace)
 		}
 		_ = w.Flush()
 		return nil
@@ -74,6 +113,7 @@ var projectShowCmd = &cobra.Command{
 		fmt.Println("=== Project Details ===")
 		fmt.Printf("ID:          %s\n", p.ID)
 		fmt.Printf("Name:        %s\n", p.Name)
+		fmt.Printf("Type:        %s\n", p.DomainType)
 		fmt.Printf("Status:      %s\n", p.Status)
 		fmt.Printf("Workspace:   %s\n", p.Workspace)
 		fmt.Printf("Description: %s\n", p.Description)
@@ -121,6 +161,8 @@ func init() {
 	projectCreateCmd.Flags().StringVar(&projectName, "name", "", "project name")
 	projectCreateCmd.Flags().StringVar(&projectDesc, "description", "", "project description")
 	projectCreateCmd.Flags().StringVar(&projectWS, "workspace", "", "project workspace directory path")
+	projectCreateCmd.Flags().StringVar(&projectPath, "path", "", "project path (alias for --workspace)")
+	projectCreateCmd.Flags().StringVar(&projectType, "type", "general", "project domain type (writing, coding, investment, general)")
 
 	projectCmd.AddCommand(projectCreateCmd)
 	projectCmd.AddCommand(projectListCmd)

@@ -78,8 +78,10 @@ func NewEvaluator() *Evaluator {
 
 func NewEvaluatorWithOptions(auditRepo *repository.AuditRepository, allowedPaths []string, maxDailySpend float64) *Evaluator {
 	if len(allowedPaths) == 0 {
+		// Safe built-in fallback: only system temp directories.
+		// User project directories must be explicitly configured via
+		// aia.yaml policy.allowed_paths — no home directory is assumed.
 		allowedPaths = []string{
-			"/home/wade/src/github/aia",
 			"/tmp",
 			"/var/tmp",
 		}

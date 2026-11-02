@@ -211,7 +211,7 @@ func TestPhase5B_EntryGate_WritingConsistencyWithHistoricalSkeleton(t *testing.T
 	defer os.RemoveAll(tmpDir)
 	ctx := context.Background()
 
-	realNovelPath := "/home/wade/src/github/novel/yuan"
+	realNovelPath := "/home/wade/src/github/aia/novel/yuan"
 	app.WritingObserver.RegisterProjectPath("default", realNovelPath)
 
 	// Part 1: Deliberate fiction license (Qingnangzi folklore medicine) -> NO_ACTION
@@ -406,7 +406,7 @@ func TestPhase5B_EntryGate_CrossDomainDelegation_Writing_x_Coding(t *testing.T) 
 	// 3. Coding Agent delivers work
 	deliverable := map[string]any{
 		"artifact_type": "TOOL_BINARY",
-		"command":       "aia novel verify-timeline --path=/home/wade/src/github/novel/yuan",
+		"command":       "aia novel verify-timeline --path=/home/wade/src/github/aia/novel/yuan",
 		"tests_passed":  true,
 		"exit_code":     0,
 	}

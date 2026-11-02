@@ -20,6 +20,49 @@ type Config struct {
 	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
 	Logging      LoggingConfig      `yaml:"logging"`
 	DataSources  DataSourcesConfig  `yaml:"data_sources"`
+	Domains      DomainsConfig      `yaml:"domains"`
+	Policy       PolicyConfig       `yaml:"policy"`
+}
+
+// DomainsConfig holds per-domain project registrations that are resolved from
+// the YAML config file, eliminating hardcoded absolute paths from source code.
+type DomainsConfig struct {
+	Writing WritingDomainConfig `yaml:"writing"`
+	Coding  CodingDomainConfig  `yaml:"coding"`
+}
+
+type WritingDomainConfig struct {
+	// Projects lists writing project registrations. Each path supports ~/ expansion
+	// and is resolved to an absolute path at load time relative to the config file.
+	Projects []ProjectPathConfig `yaml:"projects"`
+}
+
+type CodingDomainConfig struct {
+	// Projects lists coding repository registrations.
+	Projects []ProjectPathConfig `yaml:"projects"`
+}
+
+// ProjectPathConfig is a lightweight project registration entry in the config
+// file. Full project lifecycle (goals, continuity, tasks) is managed in SQLite;
+// this entry only seeds the initial path so the observer can start without a DB
+// round-trip at boot.
+type ProjectPathConfig struct {
+	// ID is the stable project identifier (e.g. "yuan", "aia").
+	ID string `yaml:"id"`
+	// Name is a human-readable label (e.g. "元朝系列小說").
+	Name string `yaml:"name"`
+	// Path is the filesystem location of the project root.
+	// Supports ~/  prefix. Relative paths are resolved relative to the directory
+	// that contains the config file (set by LoadConfig after parsing).
+	Path string `yaml:"path"`
+}
+
+// PolicyConfig holds runtime governance settings loaded from config.
+type PolicyConfig struct {
+	// AllowedPaths is the file-write whitelist. Paths support ~/  expansion.
+	// When empty the evaluator falls back to safe built-in defaults
+	// (/tmp and /var/tmp only — no user-home directories are assumed).
+	AllowedPaths []string `yaml:"allowed_paths"`
 }
 
 type BudgetConfig struct {
@@ -177,6 +220,31 @@ func ExpandPath(path string) string {
 	return path
 }
 
+// resolveSinglePath expands ~/ and resolves relative paths against baseDir.
+func resolveSinglePath(path, baseDir string) string {
+	if path == "" {
+		return path
+	}
+	expanded := ExpandPath(path)
+	if filepath.IsAbs(expanded) {
+		return expanded
+	}
+	abs, err := filepath.Abs(filepath.Join(baseDir, expanded))
+	if err != nil {
+		return filepath.Join(baseDir, expanded)
+	}
+	return abs
+}
+
+// resolveProjectPaths resolves every ProjectPathConfig.Path in place and
+// returns the updated slice. baseDir is the directory containing aia.yaml.
+func resolveProjectPaths(projects []ProjectPathConfig, baseDir string) []ProjectPathConfig {
+	for i := range projects {
+		projects[i].Path = resolveSinglePath(projects[i].Path, baseDir)
+	}
+	return projects
+}
+
 func LoadConfig(path string) (*Config, error) {
 	cfg := DefaultConfig()
 	if path == "" {
@@ -199,6 +267,18 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Runtime.DataDir = ExpandPath(cfg.Runtime.DataDir)
 	cfg.Runtime.WorkspaceDir = ExpandPath(cfg.Runtime.WorkspaceDir)
 	cfg.Database.Path = ExpandPath(cfg.Database.Path)
+
+	// Resolve domain project paths relative to the config file's directory so
+	// that users can write short relative paths (e.g. "novel/yuan") instead of
+	// hardcoded absolute paths.
+	configDir := filepath.Dir(cleanPath)
+	cfg.Domains.Writing.Projects = resolveProjectPaths(cfg.Domains.Writing.Projects, configDir)
+	cfg.Domains.Coding.Projects = resolveProjectPaths(cfg.Domains.Coding.Projects, configDir)
+
+	// Resolve policy allowed paths.
+	for i, p := range cfg.Policy.AllowedPaths {
+		cfg.Policy.AllowedPaths[i] = resolveSinglePath(p, configDir)
+	}
 
 	// Environment variable overrides for data sources
 	if k := os.Getenv("FRED_API_KEY"); k != "" {

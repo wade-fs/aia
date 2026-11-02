@@ -53,3 +53,30 @@ data_sources:
   alpha_vantage_key: ""     # Optional: Alpha Vantage global market key (free tier)
   telegram_bot_token: ""    # Optional: Telegram bot token for trade proposal push alerts
   telegram_chat_id: ""      # Optional: Telegram user/group chat ID
+
+# Domain project registrations (thinking.md §一 & §三).
+# Paths support ~/  prefix and relative paths (resolved relative to this config file).
+# This seeds the observer at boot; full project lifecycle is managed in SQLite via
+# `aia project register --type writing --id yuan --name "元朝系列" --path novel/yuan`.
+domains:
+  writing:
+    projects:
+      - id: yuan
+        name: "元朝系列小說"
+        path: "novel/yuan"       # relative to this config file's directory
+
+  coding:
+    projects:
+      - id: aia
+        name: "AIA Core"
+        path: "."                # the AIA repository itself
+
+# Policy: file-write whitelist for the governance evaluator.
+# Paths support ~/  prefix and relative paths (resolved relative to this config file).
+# When empty, only /tmp and /var/tmp are permitted — no user directories are assumed.
+policy:
+  allowed_paths:
+    - "."                        # AIA project root (relative, resolved at load time)
+    - "novel"                    # novel sub-directory
+    - "/tmp"
+    - "/var/tmp"

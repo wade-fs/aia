@@ -63,7 +63,7 @@ type ConsistencyAnomaly struct {
 	Severity            int           `json:"severity"`              // 1~10
 }
 
-// ManuscriptProject links to a novel codebase (e.g. ~/src/github/novel/yuan/).
+// ManuscriptProject links to a novel codebase (e.g. novel/yuan/ under the AIA project root).
 type ManuscriptProject struct {
 	ID             domain.ID `json:"id"`
 	Name           string    `json:"name"`
@@ -84,4 +84,40 @@ type ErratumProposal struct {
 	ProposedFix     string    `json:"proposed_fix"`
 	HistoricalBasis string    `json:"historical_basis"`
 	CreatedAt       time.Time `json:"created_at"`
+}
+
+// BookManifest represents a book.yaml project entrypoint (thinking.md §一 1).
+// It defines the book structure, writing policy classifications, and authority levels.
+type BookManifest struct {
+	Project struct {
+		ID       string `yaml:"id" json:"id"`
+		Name     string `yaml:"name" json:"name"`
+		Type     string `yaml:"type" json:"type"`
+		Language string `yaml:"language" json:"language"`
+	} `yaml:"project" json:"project"`
+
+	Structure struct {
+		Outline       string `yaml:"outline" json:"outline"`
+		Timeline      string `yaml:"timeline,omitempty" json:"timeline,omitempty"`
+		TimelineAudit string `yaml:"timeline_audit,omitempty" json:"timeline_audit,omitempty"`
+		Volumes       string `yaml:"volumes,omitempty" json:"volumes,omitempty"`
+		Chapters      string `yaml:"chapters,omitempty" json:"chapters,omitempty"`
+		Characters    string `yaml:"characters,omitempty" json:"characters,omitempty"`
+		Research      string `yaml:"research,omitempty" json:"research,omitempty"`
+		Consistency   string `yaml:"consistency,omitempty" json:"consistency,omitempty"`
+	} `yaml:"structure" json:"structure"`
+
+	WritingPolicy struct {
+		HistoricalAccuracy        string   `yaml:"historical_accuracy" json:"historical_accuracy"`
+		BattleTacticsFocus        bool     `yaml:"battle_tactics_focus" json:"battle_tactics_focus"`
+		Classifications           []string `yaml:"classifications" json:"classifications"`
+		PreserveHistoricalFigures bool     `yaml:"preserve_historical_figures" json:"preserve_historical_figures"`
+		RequireConsistencyCheck   bool     `yaml:"require_consistency_check" json:"require_consistency_check"`
+	} `yaml:"writing_policy" json:"writing_policy"`
+
+	Authority struct {
+		ConfirmedSettings   string `yaml:"confirmed_settings" json:"confirmed_settings"`
+		HistoricalFacts     string `yaml:"historical_facts" json:"historical_facts"`
+		UnresolvedQuestions string `yaml:"unresolved_questions" json:"unresolved_questions"`
+	} `yaml:"authority" json:"authority"`
 }

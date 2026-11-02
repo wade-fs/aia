@@ -41,6 +41,7 @@ import (
 	"github.com/wade/aia/internal/worker"
 	"github.com/wade/aia/internal/workspace"
 	"github.com/wade/aia/web/assets"
+	domainProject "github.com/wade/aia/internal/domain/project"
 )
 
 type App struct {
@@ -89,6 +90,7 @@ type App struct {
 }
 
 func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
+	ctx := context.Background()
 	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
@@ -185,7 +187,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 
 	// 7. Orchestrator, Policy Evaluator, Governance Service & Memory Retrieval
 	retriever := retrieval.NewRetriever(memRepo, cfg.Memory)
-	evaluator := policy.NewEvaluatorWithOptions(auditRepo, nil, cfg.Budget.MaxDailySpend)
+	evaluator := policy.NewEvaluatorWithOptions(auditRepo, cfg.Policy.AllowedPaths, cfg.Budget.MaxDailySpend)
 	evaluator.SetBudgetLimits(policy.BudgetLimits{
 		MaxDailyTokens:           cfg.Budget.MaxDailyTokens,
 		MaxDailyCycles:           cfg.Budget.MaxDailyCycles,
@@ -219,8 +221,29 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	autonomyEng.RegisterObserver("investment", autonomy.NewInvestmentObserver(invSvc))
 	codingObs := autonomy.NewCodeHealthObserver()
 	writingObs := autonomy.NewManuscriptConsistencyObserver()
-	writingObs.RegisterProjectPath("default", "/home/wade/src/github/novel/yuan")
-	writingObs.RegisterProjectPath("yuan", "/home/wade/src/github/novel/yuan")
+
+	// Seed Writing Observer paths from config (static, no DB needed at boot).
+	// This replaces hardcoded RegisterProjectPath calls. Users configure paths
+	// in aia.yaml under domains.writing.projects without touching source code.
+	for _, wp := range cfg.Domains.Writing.Projects {
+		writingObs.RegisterProjectPath(wp.ID, wp.Path)
+	}
+	// Also seed from DB for projects registered via `aia project register`.
+	// This runs best-effort: if DB query fails we continue with config seeds.
+	if dbProjects, err := projSvc.ListByDomain(ctx, domainProject.DomainWriting); err == nil {
+		for _, dp := range dbProjects {
+			writingObs.RegisterProjectPath(string(dp.ID), dp.Workspace)
+		}
+	}
+
+	// Seed config-declared projects into DB so they appear in `aia project list`.
+	for _, wp := range cfg.Domains.Writing.Projects {
+		_, _ = projSvc.RegisterFromConfig(ctx, wp.ID, wp.Name, wp.Path, domainProject.DomainWriting)
+	}
+	for _, cp := range cfg.Domains.Coding.Projects {
+		_, _ = projSvc.RegisterFromConfig(ctx, cp.ID, cp.Name, cp.Path, domainProject.DomainCoding)
+	}
+
 	autonomyEng.RegisterObserver("coding", codingObs)
 	autonomyEng.RegisterObserver("writing", writingObs)
 	autonomyEng.RegisterPilot(autonomy.NewCodingPilotExecutor(taskSvc, nil))

@@ -1,11 +1,11 @@
 # AIA Development: Implementation Status
 
 **Project:** Autonomous Intelligence Architecture (AIA)  
-**Active Implementation Status:** **Phase 0 ～ Phase 5 Completed** (Phase 5A Generational Investment Experiment + Phase 5B Multi-Domain MVA & Entry Gate, Migrations `001` ～ `012` active)  
+**Active Implementation Status:** **Phase 0 ～ Phase 5 Completed** (Phase 5A Generational Investment Experiment + Phase 5B Multi-Domain MVA & Entry Gate, Migrations `001` ～ `013` active)  
 **Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Baseline [`0e189d9`](file:///home/wade/src/github/aia) ➔ Phase 5A Baseline [`29d1cb3`](file:///home/wade/src/github/aia) ➔ Phase 5B Active Workspace  
 **Specification Baseline:** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-19) v2.0  
 **Audit Report:** [docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)  
-**Last Updated:** 2026-11-01  
+**Last Updated:** 2026-11-02  
 
 ---
 
@@ -94,7 +94,7 @@ go/
 
 ## 3. Database Schema Status
 
-### Active Tables (Migrations 001 ~ 012)
+### Active Tables (Migrations 001 ~ 013)
 - `agents`: Registered agents, capabilities, configurations.
 - `tasks`: Work units, status machine (`READY`, `RUNNING`, `COMPLETED`, `WAITING_APPROVAL`).
 - `task_dependencies`: Inter-task DAG dependencies.
@@ -102,7 +102,7 @@ go/
 - `execution_events`: Execution log stream and events.
 - `memories`: Stored long-term memories with multi-dimensional provenance columns (`provenance_type`, `provenance_ref_type`, `provenance_ref_id`, `provenance_status`).
 - `memory_candidates`: Pending insights awaiting promotion.
-- `projects`: Workspace directory registrations with continuity fields (`primary_goal_id`, `latest_snapshot_id`, `pending_issues_json`).
+- `projects`: Workspace directory registrations with continuity fields (`primary_goal_id`, `latest_snapshot_id`, `pending_issues_json`) and domain routing (`domain_type` added in Migration 013).
 - `artifacts`: Generated artifacts and file hashes.
 - `audit_logs`: System audit trail, expanded in 009 with `policy_id`, `decision_id`, `approval_id`, `risk_tier`, `governance_action`.
 - `schedule_rules`: Periodic cron and interval rules.

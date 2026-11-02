@@ -1,0 +1,30 @@
+project:
+  id: yuan
+  name: 元朝系列小說
+  type: historical_fiction
+  language: zh-TW
+
+structure:
+  outline: outline.md
+  volumes: .
+  chapters: chapters/
+  characters: characters.md
+  rules: chapter_writer_rules.md
+  guidelines: laboratory_writing_guidelines.md
+
+writing_policy:
+  historical_accuracy: high
+  battle_tactics_focus: false
+
+  classifications:
+    - historical_fact
+    - reasonable_inference
+    - fictional_content
+
+  preserve_historical_figures: true
+  require_consistency_check: true
+
+authority:
+  confirmed_settings: user_approved
+  historical_facts: evidence_required
+  unresolved_questions: never_assume_verified

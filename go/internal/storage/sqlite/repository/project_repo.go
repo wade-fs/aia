@@ -22,10 +22,10 @@ func NewProjectRepository(db *sqlite.DB) *ProjectRepository {
 func (r *ProjectRepository) Create(ctx context.Context, p *project.Project) error {
 	query := `
 		INSERT INTO projects (
-			id, name, description, workspace, policy_id, status, created_at, updated_at,
+			id, name, description, workspace, domain_type, policy_id, status, created_at, updated_at,
 			primary_goal_id, latest_snapshot_id, pending_issues_json
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	now := time.Now().UTC()
 	if p.CreatedAt.IsZero() {
@@ -35,10 +35,13 @@ func (r *ProjectRepository) Create(ctx context.Context, p *project.Project) erro
 	if p.PendingIssuesJSON == "" {
 		p.PendingIssuesJSON = "[]"
 	}
+	if p.DomainType == "" {
+		p.DomainType = project.DomainGeneral
+	}
 
 	_, err := r.db.RawDB().ExecContext(
 		ctx, query,
-		p.ID, p.Name, p.Description, p.Workspace, p.PolicyID, string(p.Status),
+		p.ID, p.Name, p.Description, p.Workspace, string(p.DomainType), p.PolicyID, string(p.Status),
 		p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
 		p.PrimaryGoalID, p.LatestSnapshotID, p.PendingIssuesJSON,
 	)
@@ -50,24 +53,74 @@ func (r *ProjectRepository) Create(ctx context.Context, p *project.Project) erro
 
 func (r *ProjectRepository) Get(ctx context.Context, id domain.ID) (*project.Project, error) {
 	query := `
-		SELECT id, name, description, workspace, policy_id, status, created_at, updated_at,
+		SELECT id, name, description, workspace, domain_type, policy_id, status, created_at, updated_at,
 		       primary_goal_id, latest_snapshot_id, pending_issues_json
 		FROM projects WHERE id = ?
 	`
 	row := r.db.RawDB().QueryRowContext(ctx, query, id)
-
-	var p project.Project
-	var status, createdAt, updatedAt string
-	var policyID, primGoal, snapID, issues sql.NullString
-
-	err := row.Scan(&p.ID, &p.Name, &p.Description, &p.Workspace, &policyID, &status, &createdAt, &updatedAt, &primGoal, &snapID, &issues)
+	p, err := scanProject(row.Scan)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("project not found: %s", id)
 		}
 		return nil, fmt.Errorf("failed to get project: %w", err)
 	}
+	return p, nil
+}
 
+func (r *ProjectRepository) List(ctx context.Context) ([]project.Project, error) {
+	query := `
+		SELECT id, name, description, workspace, domain_type, policy_id, status, created_at, updated_at,
+		       primary_goal_id, latest_snapshot_id, pending_issues_json
+		FROM projects ORDER BY created_at DESC
+	`
+	return r.queryProjects(ctx, query)
+}
+
+// ListByDomain returns all ACTIVE projects for a given domain type.
+// Used by app.go at boot to seed domain observers without hardcoded paths.
+func (r *ProjectRepository) ListByDomain(ctx context.Context, dt project.DomainType) ([]project.Project, error) {
+	query := `
+		SELECT id, name, description, workspace, domain_type, policy_id, status, created_at, updated_at,
+		       primary_goal_id, latest_snapshot_id, pending_issues_json
+		FROM projects
+		WHERE domain_type = ? AND status = 'ACTIVE'
+		ORDER BY created_at ASC
+	`
+	return r.queryProjects(ctx, query, string(dt))
+}
+
+func (r *ProjectRepository) queryProjects(ctx context.Context, query string, args ...any) ([]project.Project, error) {
+	rows, err := r.db.RawDB().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query projects: %w", err)
+	}
+	defer rows.Close()
+
+	var projects []project.Project
+	for rows.Next() {
+		p, err := scanProject(rows.Scan)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan project: %w", err)
+		}
+		projects = append(projects, *p)
+	}
+	return projects, nil
+}
+
+// scanProject is a generic scanner that works for both sql.Row.Scan and sql.Rows.Scan.
+func scanProject(scan func(dest ...any) error) (*project.Project, error) {
+	var p project.Project
+	var domainType, status, createdAt, updatedAt string
+	var policyID, primGoal, snapID, issues sql.NullString
+
+	err := scan(&p.ID, &p.Name, &p.Description, &p.Workspace, &domainType, &policyID, &status,
+		&createdAt, &updatedAt, &primGoal, &snapID, &issues)
+	if err != nil {
+		return nil, err
+	}
+
+	p.DomainType = project.DomainType(domainType)
 	p.Status = project.ProjectStatus(status)
 	if policyID.Valid {
 		p.PolicyID = policyID.String
@@ -87,48 +140,6 @@ func (r *ProjectRepository) Get(ctx context.Context, id domain.ID) (*project.Pro
 	p.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
 
 	return &p, nil
-}
-
-func (r *ProjectRepository) List(ctx context.Context) ([]project.Project, error) {
-	query := `
-		SELECT id, name, description, workspace, policy_id, status, created_at, updated_at,
-		       primary_goal_id, latest_snapshot_id, pending_issues_json
-		FROM projects ORDER BY created_at DESC
-	`
-	rows, err := r.db.RawDB().QueryContext(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list projects: %w", err)
-	}
-	defer rows.Close()
-
-	var projects []project.Project
-	for rows.Next() {
-		var p project.Project
-		var status, createdAt, updatedAt string
-		var policyID, primGoal, snapID, issues sql.NullString
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Workspace, &policyID, &status, &createdAt, &updatedAt, &primGoal, &snapID, &issues); err != nil {
-			return nil, fmt.Errorf("failed to scan project: %w", err)
-		}
-		p.Status = project.ProjectStatus(status)
-		if policyID.Valid {
-			p.PolicyID = policyID.String
-		}
-		if primGoal.Valid {
-			p.PrimaryGoalID = &primGoal.String
-		}
-		if snapID.Valid {
-			p.LatestSnapshotID = &snapID.String
-		}
-		if issues.Valid {
-			p.PendingIssuesJSON = issues.String
-		} else {
-			p.PendingIssuesJSON = "[]"
-		}
-		p.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-		p.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
-		projects = append(projects, p)
-	}
-	return projects, nil
 }
 
 func (r *ProjectRepository) UpdateStatus(ctx context.Context, id domain.ID, status project.ProjectStatus) error {

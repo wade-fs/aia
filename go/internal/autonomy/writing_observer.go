@@ -12,12 +12,13 @@ import (
 	domainAutonomy "github.com/wade/aia/internal/domain/autonomy"
 	"github.com/wade/aia/internal/domain/writing"
 	taskService "github.com/wade/aia/internal/service/task"
+	"gopkg.in/yaml.v3"
 )
 
 // ConsistencyScannerFunc scans manuscript files against character/timeline constraints.
 type ConsistencyScannerFunc func(ctx context.Context, basePath string) ([]writing.ConsistencyAnomaly, error)
 
-// ManuscriptConsistencyObserver monitors novel projects (e.g. ~/src/github/novel/yuan/)
+// ManuscriptConsistencyObserver monitors novel projects (e.g. novel/yuan/ under the AIA project root)
 // for chronological contradictions, historical fact violations, and fictional consistency (AIA-15 §23).
 type ManuscriptConsistencyObserver struct {
 	projectPaths    map[string]string // projectID -> base filesystem path
@@ -143,9 +144,18 @@ func (o *ManuscriptConsistencyObserver) Observe(ctx context.Context, projectID s
 	return observations, nil
 }
 
-// defaultScan inspects characters.md and outline.md if accessible on the filesystem.
+// defaultScan inspects characters.md (or the file declared in book.yaml) and outline.md if accessible.
 func (o *ManuscriptConsistencyObserver) defaultScan(basePath string) ([]writing.ConsistencyAnomaly, error) {
-	charPath := filepath.Join(basePath, "characters.md")
+	charRelPath := "characters.md"
+	manifestPath := filepath.Join(basePath, "book.yaml")
+	if data, err := os.ReadFile(manifestPath); err == nil {
+		var manifest writing.BookManifest
+		if err := yaml.Unmarshal(data, &manifest); err == nil && manifest.Structure.Characters != "" {
+			charRelPath = manifest.Structure.Characters
+		}
+	}
+
+	charPath := filepath.Join(basePath, charRelPath)
 	if _, err := os.Stat(charPath); err != nil {
 		return nil, nil
 	}

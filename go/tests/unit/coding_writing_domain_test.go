@@ -78,7 +78,7 @@ func TestCodeHealthObserver_DefectDetection(t *testing.T) {
 func TestManuscriptConsistencyObserver_RealYuanNovel(t *testing.T) {
 	ctx := context.Background()
 	obs := autonomy.NewManuscriptConsistencyObserver()
-	obs.RegisterProjectPath("yuan", "/home/wade/src/github/novel/yuan")
+	obs.RegisterProjectPath("yuan", "/home/wade/src/github/aia/novel/yuan")
 
 	results, err := obs.Observe(ctx, "yuan")
 	if err != nil {

@@ -1,166 +1,517 @@
-我的建議是：Phase 5 不應該成為第一次開始做 Writing Agent 和 Coding Agent 的階段。
+那以寫書為例，怎麼指定書的目錄給它？或是它會怎麼保管書？會使用 git 管理嗎？
 
-但也不必在 Phase 5 前就把兩個 Agent 做到完整成熟。應該先建立它們的可運作版本，讓 Phase 5 負責長期深化與跨領域實驗。
+程式碼呢？會使用 git 管理嗎？  
+我建議兩者都使用 Git 管理，而且不應該讓 Agent 自己隨意決定資料放在哪裡。
 
-## **一、重新看待三個 Agent 的定位**
+但有一個重要區別：
 
-這三個 Agent 其實提供三種不同的自主性驗證環境。
+* Writing Agent 管理的是一本書的長期知識、內容與創作進度。  
+* Coding Agent 管理的是一個軟體專案的程式碼、修改與技術演進。
 
-[The Best Trading Websites That Helped Me on with my ITPM Journey](https://images.openai.com/static-rsc-4/Vf_2uJF9NsfiaYZoydLQMMDhFXQ8HatV5z1PlBKtErjFsxgNEVKQuLxPEqLqipVkBwwbsIDpUEraqWRTtJzdtbczEg9egxFhDD6btm0lQjWlirQiLj_1VPdO82nV6AiPh4qNx4au5XjMWORJ32-LCJUAa1b1zhXgosKTYdl89lc?purpose=inline)
+兩者都可以使用 Git 保存版本，但 Git 不是 AIA 的記憶系統。Git 負責保存檔案變化；AIA 負責記住為什麼改、目前進度、哪些決策已確認，以及下一步要做什麼。
 
-Investment Agent — 決策與結果
+我會設計成「Project Registration + Git Repository + AIA Continuity」三者整合。
 
-自主觀察市場、配置資產、判斷風險、修正投資策略。
+# 一、Writing Agent：如何指定一本書？
 
-驗證：決策品質、預測校準、長期成果
+假設你要讓 AIA 管理《長安秋暮》。
 
-[Best Linux distro for developers of 2025 \| TechRadar](https://images.openai.com/static-rsc-4/dYsBYLYEWcbaMB8nPnuk3yUWddTNw7HOdNupafPVCW-spOQ8tvOqLjHs8UiCnl5FBGbSn5SnYMwXk8r36xUsU_ror3Sovk1W6hj8TcevLpOHm7L6cJRURT_qo2Dym3i0QsWG454L5FWHSmBDvAVob7ot-ZrH-hk0wrXaPIvrdPQ?purpose=inline)
+你不需要把所有內容貼給它，只需要在 AIA 註冊一個 Writing Project，指定書籍所在目錄。
 
-Coding Agent — 問題與修正
+例如：
 
-自主理解程式架構、發現問題、除錯、修正、測試與追蹤技術債。
+aia project create \
 
-驗證：問題發現率、修正正確率、回歸率、技術改善
+  --type writing \
 
-[人物專訪》陳耀昌用小說診斷歷史—浪漫書寫理性編織島嶼史 \- 自由評論網](https://images.openai.com/static-rsc-4/dPmod6cOcT3sLHH_7bHVymD0yJOVNHa28SEltoJu0sXmHdRTD6hGZmtBb9JSTRU7ZlGb88bAY3dMQ0QgJEJzQ9r1Ndn5pPyOcDL9HvHBRLcuz9aTY_5jFjP1_JHU316g0dECVGr3msmr3DzUxxVaieMWCWEqH7ieSVuUli4-B50?purpose=inline)
+  --name "長安秋暮" \
 
-Writing Agent — 知識與一致性
+  --path "/home/wade/books/長安秋暮"
 
-自主管理長篇小說、人物年表、歷史資料、章節進度、跨卷關係與史實校勘。
+AIA 註冊後，會讀取該目錄的專案說明與目錄結構，建立自己的 Project Context。
 
-驗證：矛盾偵測率、史實校勘、跨卷一致性、修正品質
+## 1. 書籍目錄應該由你掌握
 
-這三者的價值在於它們的問題性質不同。
+我建議採用你原本就習慣的 Markdown 文件結構：
 
-* 投資：未來不可完全預測，必須從結果修正判斷。  
-* Coding：程式行為可以測試，能比較修正前後的結果。  
-* Writing：長期知識與複雜關係必須維持一致，能使用既有素材建立測試基準。
+長安秋暮/
 
-如果只用投資測試 AIA，很可能只得到一個擅長投資決策的 Agent，而不是具備跨領域自主能力的 AIA。
+├── README.md
 
-## **二、我建議調整 Phase 3～5 的工作安排**
+├── book.yaml
 
-不是推翻七大 Phase，而是調整 Domain Agent 的進場時間。
+│
 
-| 階段 | Investment | Coding | Writing |
-| ----- | ----- | ----- | ----- |
-| Phase 0 | 盤點既有資產 | 盤點既有資產 | 盤點既有素材 |
-| Phase 1 | 決策資料與市場證據 | 程式修改歷史與來源 | 人物、年表、史料來源 |
-| Phase 2 | 投資風險治理 | 程式執行權限 | 文件修改權限 |
-| Phase 3 | 自主投資 Pilot | 基礎 Coding Pilot | 基礎 Writing Pilot |
-| Phase 4 | 投資決策 RCA | 除錯與修正驗證 | 歷史矛盾偵測與修正驗證 |
-| Phase 5 | 長期虛擬投資實驗 | 長期自主 Coding | 長篇小說長期管理 |
-| Phase 6 | 安全策略自我演進 | 安全程式碼演進 | 安全工具與工作流程演進 |
+├── outline.md
 
-這樣 Phase 5 開始時，三個 Agent 都已經有實際運作經驗，而不是只有 Investment Agent 已經成熟。
+├── timeline.md
 
-## **三、Phase 5 開始前，兩個 Agent 應該完成到什麼程度？**
+├── timeline_audit.md
 
-我會設定最低可用門檻，而不是要求功能全部完成。
+├── geography.md
 
-### **Coding Agent**
+├── social_system.md
 
-Phase 5 前應具備
+│
 
-1. 能讀取並理解指定 Repository。  
-2. 能建立專案結構、依賴與模組關係。  
-3. 能發現程式錯誤、技術債與測試盲區。  
-4. 能提出修改方案及預期效果。  
-5. 能在隔離工作區修改程式。  
-6. 能分析 Diff、執行驗證並追蹤結果。  
-7. 能保存修改歷史與失敗經驗。  
-8. 能在跨 Session 後恢復未完成工作。
+├── characters/
 
-不要求它此時就能修改 AIA 核心 Runtime。
+│   ├── README.md
 
-尤其要區分：Coding Agent 可以協助開發 AIA，但修改 AIA 核心仍然必須遵守 Phase 6 的授權與安全演進機制。
+│   ├── primary.md
 
-### **Writing Agent**
+│   ├── secondary.md
 
-Phase 5 前應具備
+│   └── relationships.md
 
-1. 能讀取長期專案大綱與章節資料。  
-2. 能管理人物年表、歷史大事紀及人物關係。  
-3. 能區分【史實骨架】【合理推演】【小說虛構】。  
-4. 能辨識已知的時間、人物、事件矛盾。  
-5. 能區分確定錯誤與尚待查證事項。  
-6. 能提出修正方案，而不是直接覆蓋原稿。  
-7. 能追蹤跨章、跨卷設定一致性。  
-8. 能在跨 Session 後恢復小說進度及未完成校勘工作。
+│
 
-這裡有一個很好的優勢：你已經有唐末、宋、元系列的小說規劃與歷史素材，不需要從零建立 Writing Agent 的驗收資料。
+├── volumes/
 
-## **四、三個 Agent 應該共用同一個 Autonomy Core**
+│   ├── volume1.md
 
-這點不能因為提早建立三個 Agent 而改變。
+│   ├── volume2.md
+
+│   ├── volume3.md
+
+│   └── ...
+
+│
+
+├── chapters/
+
+│   ├── volume1/
+
+│   │   ├── chapter001.md
+
+│   │   ├── chapter002.md
+
+│   │   └── ...
+
+│   └── volume2/
+
+│
+
+├── research/
+
+│   ├── sources.md
+
+│   ├── historical_facts.md
+
+│   ├── unresolved_questions.md
+
+│   └── source_notes/
+
+│
+
+├── consistency/
+
+│   ├── known_issues.md
+
+│   ├── character_timeline_audit.md
+
+│   └── cross_volume_audit.md
+
+│
+
+└── changelog.md
+
+這是建議的範例，不代表每本書都必須有完全相同的目錄。AIA 可以依照書籍規模與使用者的習慣調整。
+
+其中最重要的是 book.yaml。
+
+它是 Writing Agent 的專案入口，告訴 Agent 這本書是什麼、如何管理、哪些文件具有權威性。
+
+例如：
 
 ```
-                    AIA Runtime
-                         |
-                    Autonomy Core
-                         |
-       +-----------------+-----------------+
-       |                 |                 |
- Investment Agent   Coding Agent     Writing Agent
-       |                 |                 |
-   台灣股市          Git Repository     歷史小說素材
-   虛擬帳本          程式碼與測試       人物與年表
-   投資決策          除錯與修正         史實校勘
-       |                 |                 |
-       +-----------------+-----------------+
-                         |
-                 Evidence / Memory
-                 Learning / Evaluation
-                 Experiment Management
+project:
+  id: changan-autumn
+  name: 長安秋暮
+  type: historical_fiction
+  language: zh-TW
+
+structure:
+  outline: outline.md
+  timeline: timeline.md
+  timeline_audit: timeline_audit.md
+  volumes: volumes/
+  chapters: chapters/
+  characters: characters/
+  research: research/
+  consistency: consistency/
+
+writing_policy:
+  historical_accuracy: high
+  battle_tactics_focus: false
+
+  classifications:
+    - historical_fact
+    - reasonable_inference
+    - fictional_content
+
+  preserve_historical_figures: true
+  require_consistency_check: true
+
+authority:
+  confirmed_settings: user_approved
+  historical_facts: evidence_required
+  unresolved_questions: never_assume_verified
 ```
 
-三個 Agent 可以有不同的專業知識、工具與判斷方法，但：
+這樣你只需要指定書籍目錄，Writing Agent 就能知道從哪裡開始理解這本書。
 
-* Continuity 共用。  
-* Initiative 共用。  
-* Deliberation 共用。  
-* Self-Correction 共用。  
-* Goal Evolution 共用。  
-* Evidence 與 Learning 共用基礎治理。
+## 2. Agent 如何知道哪份文件才是準確版本？
 
-否則最後可能變成三套獨立的 Agent 系統，而不是一個具有自主能力的 AIA。
+這是很重要的問題。
 
-## **五、我建議增加一個 Phase 5 Entry Gate**
+例如：
 
-在進入 Phase 5 前，應該驗收：
+* outline.md 定義全書架構。  
+* volume1.md 定義第一卷章節安排。  
+* characters/primary.md 定義主要人物。  
+* timeline.md 定義人物與歷史事件的時間關係。  
+* timeline_audit.md 保存校勘結果。
 
-| 項目 | 必須達成 |
+如果第一卷章節大綱與人物年表衝突，Agent 不應自行選擇其中一份並覆蓋另一份。
+
+應該由 book.yaml 或其他專案規則定義文件的權威性與用途，並在衝突時建立待處理事項。
+
+文件是書籍內容的來源，AIA 的資料庫則保存它對這些內容的理解與工作狀態。
+
+## 3. Writing Agent 如何保管一本書？
+
+我建議把書籍資料分成三種：
+
+| 資料 | 保存位置 | 用途 |
+| ----- | ----- | ----- |
+| 書籍正式內容 | 書籍目錄 | 大綱、章節、人物、年表 |
+| 研究資料 | 書籍目錄及來源庫 | 史料、考證、待查事項 |
+| Agent 工作記憶 | AIA SQLite | 進度、決策、任務、校勘歷史、記憶關聯 |
+
+例如 Writing Agent 今天發現：
+
+「第一卷第 12 章的人物活動時間與人物年表衝突。」
+
+它應該：
+
+1. 保存問題及來源位置。  
+2. 建立一筆一致性檢查紀錄。  
+3. 找出相關人物與事件的歷史依據。  
+4. 提出修正方案。  
+5. 等待必要的授權。  
+6. 修改章節或設定文件。  
+7. 更新校勘結果，但保留原始問題與處理歷史。
+
+下次 AIA 重啟時，不必重新閱讀整本小說才知道這件事尚未完成。
+
+這就是 Writing Project 的 Continuity。
+
+# 二、Writing Agent 要不要使用 Git？
+
+要，而且我認為應該預設使用 Git。  
+建議預設啟用
+
+一本長篇小說可能持續寫好幾年，Git 非常適合保存：
+
+* 大綱歷次變更。  
+* 人物設定變更。  
+* 歷史考證修正。  
+* 章節重寫。  
+* 跨卷設定調整。  
+* Agent 自主修正前後的差異。
+
+例如：
+
+Git Repository: 長安秋暮
+
+main
+
+ │
+
+ ├── commit: 初始大綱
+
+ ├── commit: 人物年表建立
+
+ ├── commit: 第一卷章節規劃
+
+ │
+
+ ├── branch: agent/timeline-correction
+
+ │     ├── 修正人物活動年代
+
+ │     └── 修正第一卷相關章節
+
+ │
+
+ └── merge: 人工審核後合併
+
+我建議的規則是：
+
+* main：正式版本。  
+* agent/*：Agent 的修改分支。  
+* research/*：大型史料整理或研究工作。  
+* 重大修改必須提供 Diff 與修改理由。  
+* 人物死亡、重要歷史年代、跨卷核心設定等重大變更，必須經過人工確認。  
+* 不允許 Agent 直接刪除或改寫歷史提交紀錄。
+
+不需要每修改一個字就建立 Commit。可以依照工作單位建立 Commit，例如完成一次人物年表校勘、完成一章修訂或完成一次全書一致性修正。
+
+## 4. Git 與 AIA Memory 的分工
+
+這個區分必須牢記：
+
+| Git 保存 | AIA 保存 |
 | ----- | ----- |
-| Autonomy Core | 三個 Agent 都使用同一套核心自主循環 |
-| Continuity | 三個 Agent 都能跨 Session 恢復 |
-| Initiative | 至少能自行發現一項值得處理的工作 |
-| Deliberation | 能比較行動與不行動 |
-| Self-Correction | 至少完成一次可追溯的修正與驗證 |
-| Evaluation | 三個 Domain 都有自己的 Baseline |
-| Governance | 三個 Agent 都受到相同的治理架構約束 |
+| 哪個檔案被修改 | 為什麼修改 |
+| 修改前後的內容 | 當時的決策依據 |
+| Commit 與 Branch | 任務與實驗歷史 |
+| 檔案版本 | 對設定的理解 |
+| Merge 結果 | 是否經過人工核准 |
+| Diff | 修正是否有效 |
 
-不要求三個 Agent 的成熟度相同，但不能有任何一個只是空殼。
+Git 不會自動知道一個人物設定為什麼改變，也不會知道這項修改是否與其他卷衝突。
 
-## **六、我的結論：投資應該是第一個實驗，不應該是唯一的實驗**
+這是 AIA 必須補上的能力。
 
-我會保留目前 Investment Agent 在 Phase 3 提早 Pilot 的安排，因為它有很清楚的實驗條件：
+# 三、Coding Agent：程式碼要不要使用 Git？
 
-* NT\$100,000 虛擬資金。  
-* 規則版與 LLM 版世代比較。  
-* 每個證券營業日觀察。  
-* 每月 1 日檢驗資產。  
-* 長期策略修正。
+這個答案更明確：必須使用 Git，並且 Git 應該是 Coding Agent 的核心工作介面之一。
 
-但同時：
+假設你指定 AIA 自己的程式碼 Repository：
 
-* Coding Agent 應該成為 AIA 自我修正能力的主要驗證場景。  
-* Writing Agent 應該成為 AIA 長期記憶、一致性與知識管理的主要驗證場景。
+aia project create \
 
-我甚至認為，Writing Agent 可能是最適合測試「記憶是否真正一致」的場景，而 Coding Agent 是最適合測試「修正是否真正有效」的場景。
+  --type coding \
 
-這三個場景剛好互補。
+  --name "AIA Core" \
 
-因此，我建議在 Master Implementation Plan v2.0 中修正 Phase 3、Phase 4 與 Phase 5 的 Domain Integration Roadmap，增加三個 Agent 的最低可用門檻及 Phase 5 Entry Gate。
+  --path "/home/wade/src/github/aia"
 
-這不是增加三倍工作量，而是避免 AIA 花了很長時間，最後只證明了它能做自主投資，卻沒有證明它具備跨領域的自主學習能力。
+Coding Agent 註冊後，應該先理解：
 
+1. Repository 目錄結構。  
+2. Go Module 與套件依賴。  
+3. 核心 Runtime、Worker、Autonomy Core 的責任。  
+4. SQLite Schema 與 Migration。  
+5. CLI、Web Console。  
+6. 現有測試。  
+7. Git Branch、Commit 與未提交變更。  
+8. 專案文件及實作狀態。
+
+然後建立自己的 Project Context。
+
+## 1. Coding Agent 的工作流程
+
+我建議採用這種模式：
+
+flowchart TD
+
+    A["Coding Agent 接收或發現問題"] --> B["讀取 Repository 與 Git 狀態"]
+
+    B --> C["分析架構、程式碼與文件"]
+
+    C --> D["建立問題與修正提案"]
+
+    D --> E["建立隔離 Branch / Worktree"]
+
+    E --> F["修改程式碼"]
+
+    F --> G["檢查 Diff"]
+
+    G --> H["執行適用的驗證"]
+
+    H --> I{"驗證是否通過？"}
+
+    I -->|否| J["RCA 與修正"]
+
+    J --> F
+
+    I -->|是| K["產生變更報告"]
+
+    K --> L["依授權等待審核或合併"]
+
+    L --> M["保存 Learning Record"]
+
+Coding Agent 接收或發現問題讀取 Repository 與 Git 狀態分析架構、程式碼與文件建立問題與修正提案建立隔離 Branch / Worktree修改程式碼檢查 Diff執行適用的驗證驗證是否通過？RCA 與修正產生變更報告依授權等待審核或合併保存 Learning Record否是
+
+例如：
+
+main
+
+ │
+
+ ├── commit: Runtime v1
+
+ ├── commit: Worker Recovery
+
+ │
+
+ ├── agent/fix-worker-recovery
+
+ │     ├── 修正 Worker 恢復問題
+
+ │     ├── 新增測試
+
+ │     └── 驗證修正結果
+
+ │
+
+ └── merge: 人工核准
+
+這裡使用 Git Worktree 會很有價值。
+
+它可以讓 Agent 在獨立工作目錄中修改程式碼，不會直接干擾你正在使用的工作目錄。
+
+## 2. Coding Agent 不應該直接管理所有 Git 權限
+
+我會把 Git 操作分成不同權限：
+
+| 操作 | 建議權限 |
+| ----- | ----- |
+| git status / log / diff | 自動允許 |
+| 建立 Agent Branch | 自動允許 |
+| 在隔離工作區修改 | 依 Scope 授權 |
+| 建立 Commit | 依專案政策允許 |
+| Merge 到 main | 依風險與授權決定 |
+| Push 到遠端 | 預設需要授權 |
+| Force Push / 改寫歷史 | 禁止 Agent 自行執行 |
+| 修改 Git Hook 或治理限制 | 嚴格授權 |
+
+尤其 AIA 自己的 Repository 必須更嚴格。
+
+Coding Agent 可以發現 AIA 核心問題、提出修正、建立 Branch、修改程式碼與驗證，但不能因此取得修改自身治理機制的權限。
+
+# 四、三個 Agent 共用一套 Project 管理機制
+
+我認為這是 AIA 架構上應該採取的方向。
+
+不要分別設計：
+
+* Writing Project Manager  
+* Coding Project Manager  
+* Investment Project Manager
+
+而是建立共用的 Project Registry，由不同 Domain Agent 定義自己的專業規則。  
+AIA Project Registry  
+統一註冊、生命週期、目錄、權限與狀態管理  
+Writing  
+Book Project  
+Coding  
+Repository Project  
+Investment  
+Portfolio Project  
+Continuity  
+長期進度與狀態  
+Memory  
+記憶與知識  
+Git Integration  
+版本控制  
+Governance  
+授權與稽核
+
+三種 Project 的差異只在於專業領域：
+
+| Project Type | 主要資產 | 版本管理 |
+| ----- | ----- | ----- |
+| Writing | 書籍、人物、年表、史料 | Git |
+| Coding | 原始碼、測試、文件 | Git |
+| Investment | 虛擬帳本、決策、行情 | AIA Event History |
+
+Investment 不一定需要 Git，因為每日交易與資產變動應由資料庫的交易紀錄與事件歷史管理，而不是用 Git Commit 記錄。
+
+# 五、我會再加一個重要設計：Project Manifest
+
+我建議每個 Project 都有一份由 AIA 管理的 Manifest，記錄：
+
+```
+project:
+  id: changan-autumn
+  name: 長安秋暮
+  type: writing
+  domain_agent: writing
+
+storage:
+  type: filesystem
+  root: /home/wade/books/長安秋暮
+
+version_control:
+  type: git
+  enabled: true
+  default_branch: main
+
+continuity:
+  enabled: true
+
+memory:
+  enabled: true
+
+governance:
+  direct_main_write: false
+  require_diff_review: true
+  require_human_approval_for_major_changes: true
+```
+
+這樣 AIA 重啟後，可以知道：
+
+* 這個 Project 是什麼。  
+* 檔案放在哪裡。  
+* 由哪個 Agent 負責。  
+* 是否使用 Git。  
+* 上次工作進度。  
+* 目前有哪些未完成事項。  
+* 哪些修改尚未核准。
+
+Manifest 本身也應有版本與變更紀錄，避免 Agent 自行改掉專案管理規則。
+
+## 六、我認為還有一件事應該特別注意
+
+Git 管理的是檔案版本，不是所有工作狀態。
+
+例如你可能同時有：
+
+* 《長安秋暮》第一卷正在校勘。  
+* 《丹心千秋》第二卷正在整理人物年表。  
+* AIA Core 正在修正 Worker Recovery。  
+* 另一個 Coding Project 正在開發新功能。
+
+AIA 不應該因為切換到另一個 Project，就忘記前面三個 Project 的進度。
+
+這些狀態應該由 AIA 的 Project、Task、Event History、Memory 和 Continuity 管理。
+
+另外，SQLite 資料庫、OAuth Token、密鑰、暫存檔及大型產出不應因為使用 Git 就全部加入 Repository。各 Project 必須有 .gitignore、檔案白名單及目錄存取範圍；Agent 也不應任意掃描使用者的其他目錄。
+
+## 七、我的建議：這應該成為 AIA 的正式共用功能
+
+我會把它定義成：
+
+Project Lifecycle & Workspace Management
+
+而不是 Writing Agent 或 Coding Agent 的附屬功能。
+
+建議職責如下：
+
+1. Project Registration：指定書籍或程式碼目錄。  
+2. Project Discovery：分析既有資料結構。  
+3. Manifest Management：保存專案設定。  
+4. Workspace Management：管理工作目錄。  
+5. Git Integration：管理 Branch、Worktree、Commit、Diff。  
+6. Project Continuity：跨 Session 恢復進度。  
+7. Project Memory：保存專案知識與決策。  
+8. Project Governance：管理檔案範圍與修改授權。  
+9. Project Archiving：長期保存與封存。
+
+這會讓你未來只需要告訴 AIA：
+
+「這是一本新書，目錄在這裡。」
+
+或者：
+
+「這是另一個 Go 專案，請接手維護。」
+
+AIA 就能註冊、理解、管理並持續工作。
+
+我認為這項共用能力應該在 Phase 3～4 就建立基本版本，Phase 5 再讓三個 Agent 大規模使用。 不必等到 Phase 5 才開始處理。
+
+這也讓 AIA 從「我叫 Agent 做一件事」，逐漸變成「我把一個長期專案交給 AIA，它能持續管理」。

@@ -622,6 +622,13 @@ func TestProblemAndPlan_CrashRecovery_Simulation(t *testing.T) {
 			Version:   1,
 			Objective: "Plan version 1 objective",
 			Status:    domainPlan.StatusActive,
+			WorkItems: []domainPlan.WorkItemDef{
+				{
+					ID:                 "wi-recovery-1",
+					Title:              "Recovery verification task",
+					AcceptanceCriteria: []string{"Persisted properly across process boundary"},
+				},
+			},
 		}
 		if err := planRepo.Create(ctx, plan1); err != nil {
 			t.Fatalf("failed to create plan v1: %v", err)

@@ -13,8 +13,9 @@ var (
 	ErrPlanVersionExists          = errors.New("plan version already exists")
 	ErrNoAlternatives             = errors.New("at least one solution alternative must be provided")
 	ErrSelectedAlternativeNotFound = errors.New("selected alternative ID not found in proposed alternatives")
-	ErrCircularDependency         = errors.New("circular dependency detected in plan work items")
-	ErrMissingAcceptanceCriteria  = errors.New("work item must have at least one acceptance criterion")
+	ErrCircularDependency          = errors.New("circular dependency detected in plan work items")
+	ErrMissingAcceptanceCriteria   = errors.New("work item must have at least one acceptance criterion")
+	ErrEmptyWorkItems              = errors.New("plan must contain at least one work item")
 )
 
 type PlanStatus string
@@ -160,6 +161,9 @@ func (p *Plan) Validate() error {
 	}
 	if strings.TrimSpace(p.Objective) == "" {
 		return errors.New("plan objective cannot be empty")
+	}
+	if len(p.WorkItems) == 0 {
+		return ErrEmptyWorkItems
 	}
 	if p.Status == "" {
 		p.Status = StatusDraft

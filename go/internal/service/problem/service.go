@@ -427,6 +427,9 @@ func (s *Service) ApprovePlan(ctx context.Context, planID string, approver strin
 	if s.planRepo == nil {
 		return nil, errors.New("plan repository is not configured")
 	}
+	if strings.TrimSpace(approver) == "" {
+		return nil, errors.New("approver cannot be empty")
+	}
 
 	p, err := s.planRepo.Get(ctx, planID)
 	if err != nil {
@@ -465,6 +468,10 @@ func (s *Service) MaterializeWorkItemToTask(ctx context.Context, planID string, 
 	plan, err := s.planRepo.Get(ctx, planID)
 	if err != nil {
 		return nil, fmt.Errorf("plan %s not found: %w", planID, err)
+	}
+
+	if plan.Status != domainPlan.StatusApproved && plan.Status != domainPlan.StatusActive {
+		return nil, fmt.Errorf("cannot materialize work item: plan %s is in %s status (must be APPROVED or ACTIVE before execution)", planID, plan.Status)
 	}
 
 	prob, err := s.problemRepo.Get(ctx, plan.ProblemID)
@@ -565,6 +572,10 @@ func (s *Service) MaterializeAllWorkItems(ctx context.Context, planID string) ([
 	plan, err := s.planRepo.Get(ctx, planID)
 	if err != nil {
 		return nil, fmt.Errorf("plan %s not found: %w", planID, err)
+	}
+
+	if plan.Status != domainPlan.StatusApproved && plan.Status != domainPlan.StatusActive {
+		return nil, fmt.Errorf("cannot materialize work item: plan %s is in %s status (must be APPROVED or ACTIVE before execution)", planID, plan.Status)
 	}
 
 	var createdTasks []*domainTask.Task

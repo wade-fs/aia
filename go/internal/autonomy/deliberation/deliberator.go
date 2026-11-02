@@ -117,6 +117,10 @@ func (d *Deliberator) Deliberate(in DeliberateInput) DeliberationResult {
 		in.ActiveTaskCount >= maxConcurrent
 	isDrift := top.ConfidenceLevel == domainAutonomy.ConfidencePotential ||
 		strings.EqualFold(strFromMeta(meta, "category"), domainAutonomy.ObsCategoryDrift)
+	isReassess := boolFromMeta(meta, "is_reassess")
+	isProceed := boolFromMeta(meta, "is_proceed")
+	isResearch := boolFromMeta(meta, "is_research")
+	isProposeDefault := boolFromMeta(meta, "is_propose_default")
 
 	// Evaluate candidate option matrix using EV = P_s * V - C - R
 	actProb := prob
@@ -124,8 +128,15 @@ func (d *Deliberator) Deliberate(in DeliberateInput) DeliberationResult {
 	if requiresHuman {
 		actProb = 0.15
 		actRisk += 10.0 // Acting unilaterally on conflicted/ambiguous truth incurs severe epistemic penalty
+	} else if isReassess {
+		actProb = 0.20
+		actRisk += 8.0 // Acting unilaterally on contradicted brief incurs severe rework penalty (AIA-21 §10.2)
 	} else if isBlockedOrOverloaded {
 		actProb = 0.15 // Congestion or blocked dependency degrades immediate execution success probability
+	} else if isResearch {
+		actRisk += 4.0 // Unilateral execution before evidence gathering carries high uncertainty
+	} else if isProposeDefault {
+		actRisk += 4.0 // Acting on unconfirmed hypothesis as confirmed fact carries assumption risk
 	}
 
 	var learningNote string
@@ -202,6 +213,62 @@ func (d *Deliberator) Deliberate(in DeliberateInput) DeliberationResult {
 		})
 	}
 
+	if isReassess {
+		reassessUtil := round2(0.90*(value*0.80) - 0.30 - 0.10)
+		opts = append(opts, domainAutonomy.DeliberationOption{
+			Option:        fmt.Sprintf("REASSESS: Trigger requirements reassessment for %s (AIA-21 §10.2)", top.DetectedOpportunity),
+			ActionCode:    decision.ActionReassess,
+			SuccessProb:   0.90,
+			ExpectedValue: round2(value * 0.80),
+			Cost:          0.30,
+			RiskPenalty:   0.10,
+			NetUtility:    reassessUtil,
+			Reversible:    true,
+		})
+	}
+
+	if isProceed {
+		proceedUtil := round2(0.98*value - 0.20 - 0.05)
+		opts = append(opts, domainAutonomy.DeliberationOption{
+			Option:        fmt.Sprintf("PROCEED: Advance project stage (%s, AIA-21 §10.2)", top.DetectedOpportunity),
+			ActionCode:    decision.ActionProceed,
+			SuccessProb:   0.98,
+			ExpectedValue: value,
+			Cost:          0.20,
+			RiskPenalty:   0.05,
+			NetUtility:    proceedUtil,
+			Reversible:    true,
+		})
+	}
+
+	if isResearch {
+		resUtil := round2(0.80*(value*0.70) - 0.40 - 0.15)
+		opts = append(opts, domainAutonomy.DeliberationOption{
+			Option:        fmt.Sprintf("RESEARCH: Autonomously gather evidence for %s (AIA-21 §10.2)", top.DetectedOpportunity),
+			ActionCode:    decision.ActionResearch,
+			SuccessProb:   0.80,
+			ExpectedValue: round2(value * 0.70),
+			Cost:          0.40,
+			RiskPenalty:   0.15,
+			NetUtility:    resUtil,
+			Reversible:    true,
+		})
+	}
+
+	if isProposeDefault {
+		propUtil := round2(0.85*(value*0.65) - 0.20 - 0.10)
+		opts = append(opts, domainAutonomy.DeliberationOption{
+			Option:        fmt.Sprintf("PROPOSE_DEFAULT: Formulate provisional default for %s (AIA-21 §10.2)", top.DetectedOpportunity),
+			ActionCode:    decision.ActionProposeDefault,
+			SuccessProb:   0.85,
+			ExpectedValue: round2(value * 0.65),
+			Cost:          0.20,
+			RiskPenalty:   0.10,
+			NetUtility:    propUtil,
+			Reversible:    true,
+		})
+	}
+
 	opts = append(opts, domainAutonomy.DeliberationOption{
 		Option:        "NO_ACTION: Do not intervene this cycle",
 		ActionCode:    decision.ActionNoAction,
@@ -268,6 +335,34 @@ func (d *Deliberator) Deliberate(in DeliberateInput) DeliberationResult {
 	case decision.ActionMonitor:
 		res.ChosenInitiative = top
 		res.Justification = fmt.Sprintf("Monitoring %q (MONITOR, EV=%.2f): signal confidence is %s; continued observation beats premature intervention.%s", top.DetectedOpportunity, opts[bestIdx].NetUtility, top.ConfidenceLevel, learningNote)
+		if len(in.Candidates) > 1 {
+			res.DeferredInitiatives = in.Candidates[1:]
+		}
+
+	case decision.ActionReassess:
+		res.ChosenInitiative = top
+		res.Justification = fmt.Sprintf("Triggering specification reassessment (REASSESS, EV=%.2f): conflicting assumptions must be reconciled (AIA-21 §10.2).%s", opts[bestIdx].NetUtility, learningNote)
+		if len(in.Candidates) > 1 {
+			res.DeferredInitiatives = in.Candidates[1:]
+		}
+
+	case decision.ActionProceed:
+		res.ChosenInitiative = top
+		res.Justification = fmt.Sprintf("Advancing project stage (PROCEED, EV=%.2f): brief completeness and readiness criteria satisfied (AIA-21 §10.2).%s", opts[bestIdx].NetUtility, learningNote)
+		if len(in.Candidates) > 1 {
+			res.DeferredInitiatives = in.Candidates[1:]
+		}
+
+	case decision.ActionResearch:
+		res.ChosenInitiative = top
+		res.Justification = fmt.Sprintf("Starting autonomous evidence gathering (RESEARCH, EV=%.2f): data can be verified without blocking owner (AIA-21 §10.2).%s", opts[bestIdx].NetUtility, learningNote)
+		if len(in.Candidates) > 1 {
+			res.DeferredInitiatives = in.Candidates[1:]
+		}
+
+	case decision.ActionProposeDefault:
+		res.ChosenInitiative = top
+		res.Justification = fmt.Sprintf("Formulating provisional default (PROPOSE_DEFAULT, EV=%.2f): safe conservative assumption keeps project moving (AIA-21 §10.2).%s", opts[bestIdx].NetUtility, learningNote)
 		if len(in.Candidates) > 1 {
 			res.DeferredInitiatives = in.Candidates[1:]
 		}

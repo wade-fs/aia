@@ -5,11 +5,15 @@ import "time"
 type ActionType string
 
 const (
-	ActionAct      ActionType = "ACT"
-	ActionDefer    ActionType = "DEFER"
-	ActionMonitor  ActionType = "MONITOR"
-	ActionAskHuman ActionType = "ASK_HUMAN"
-	ActionNoAction ActionType = "NO_ACTION"
+	ActionAct            ActionType = "ACT"
+	ActionDefer          ActionType = "DEFER"
+	ActionMonitor        ActionType = "MONITOR"
+	ActionAskHuman       ActionType = "ASK_HUMAN"
+	ActionNoAction       ActionType = "NO_ACTION"
+	ActionResearch       ActionType = "RESEARCH"        // AIA-21 §10.2: Autonomous evidence & data gathering
+	ActionProposeDefault ActionType = "PROPOSE_DEFAULT" // AIA-21 §10.2: Propose provisional hypothesis with rationale
+	ActionProceed        ActionType = "PROCEED"         // AIA-21 §10.2: Ready for planning or execution
+	ActionReassess       ActionType = "REASSESS"        // AIA-21 §10.2: Reassessment triggered by contradiction
 )
 
 type GovernanceResult string

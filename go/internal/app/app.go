@@ -91,6 +91,7 @@ type App struct {
 	DelegationSvc    *delegationService.Service
 	CodingObserver   *autonomy.CodeHealthObserver
 	WritingObserver  *autonomy.ManuscriptConsistencyObserver
+	BriefObserver    *autonomy.BriefCompletenessObserver
 	SelfModRepo      *repository.SelfModRepository
 	SelfModPipeline  *selfmodService.Pipeline
 	SelfEvolutionEng *autonomy.SelfEvolutionEngine
@@ -297,6 +298,9 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	genericBriefSvc.SetAuditRepo(auditRepo)
 	recMgr.SetClarificationRepository(clarificationRepo)
 
+	briefObs := autonomy.NewBriefCompletenessObserver(genericBriefRepo, projRepo)
+	autonomyEng.RegisterObserver("brief_completeness", briefObs)
+
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	contextAssembler := orchestrator.NewContextAssembler(projRepo, memRepo, writingWorkflowRepo)
 	contextAssembler.SetGenericBriefRepository(genericBriefRepo)
@@ -361,6 +365,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		DelegationSvc:    delegationSvc,
 		CodingObserver:   codingObs,
 		WritingObserver:  writingObs,
+		BriefObserver:    briefObs,
 		SelfModRepo:      selfmodRepo,
 		SelfModPipeline:  selfmodPipeline,
 		SelfEvolutionEng: selfEvolutionEng,

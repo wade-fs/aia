@@ -7,7 +7,7 @@
 **版本：** v1.0  
 **適用範圍：** AIA Core / Project Management / All Domain Agents  
 **依賴規格：** AIA-01、AIA-02、AIA-03、AIA-08、AIA-09、AIA-10、AIA-16、AIA-17、AIA-18、AIA-20  
-**相關後續規格：** AIA-22 Creative Project Lifecycle、AIA-23 Research & Evidence Lifecycle、AIA-24 Project Workspace & Execution Integration（待整體規格交叉檢查後確認編號）
+**相關後續規格：** AIA-22 Complex Problem Analysis & Planning、AIA-23 Research & Evidence Lifecycle、AIA-24 Project Workspace & Execution Integration（待整體規格交叉檢查後確認編號）
 
 ---
 
@@ -1091,7 +1091,7 @@ updated_at: "2026-11-02T12:00:00+08:00"
 | AIA-18 | Integration Architecture | 定義整體整合方式 |
 | AIA-20 | Book Manifest | 定義書籍 Project 的結構 |
 | AIA-21 | Brief & Clarification | 定義需求模型及釐清流程 |
-| AIA-22 | Creative Lifecycle | 管理創作階段與產物生命週期 |
+| AIA-22 | Complex Problem Analysis & Planning | 定義複雜未知問題分析、問題建模與自主規劃機制 |
 | AIA-23 | Research & Evidence | 管理研究及事實驗證 |
 | AIA-24 | Workspace Integration | 管理 Project 與 Execution Workspace |
 

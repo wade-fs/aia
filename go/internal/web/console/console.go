@@ -1542,6 +1542,56 @@ func (s *ConsoleServices) handleProjectSubroutes(w http.ResponseWriter, r *http.
 			host.WriteJSON(w, http.StatusOK, history, reqID)
 			return
 		}
+
+		if len(parts) == 3 && parts[2] == "prompt" {
+			if r.Method != http.MethodGet {
+				host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+				return
+			}
+			b, err := s.BriefSvc.GetBrief(ctx, projectID)
+			if err != nil || b == nil {
+				host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Brief not found", reqID)
+				return
+			}
+			cat, err := domainBrief.GetCatalog(b.Domain)
+			if err != nil {
+				host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), reqID)
+				return
+			}
+			var agProfile string
+			if s.AgentSvc != nil {
+				if ags, _ := s.AgentSvc.List(ctx); len(ags) > 0 {
+					for _, ag := range ags {
+						if ag.Domain == b.Domain {
+							agProfile = ag.Instructions
+							break
+						}
+					}
+				}
+			}
+			prompt := domainBrief.BuildBriefAnalysisPrompt(b, cat, agProfile, nil)
+			host.WriteJSON(w, http.StatusOK, map[string]string{"prompt": prompt}, reqID)
+			return
+		}
+
+		if len(parts) == 3 && parts[2] == "analysis" {
+			if r.Method != http.MethodPost {
+				host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+				return
+			}
+			var analysis domainBrief.AgentBriefAnalysis
+			if err := json.NewDecoder(r.Body).Decode(&analysis); err != nil {
+				host.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid brief analysis JSON", reqID)
+				return
+			}
+			updatedBrief, err := s.BriefSvc.ApplyAnalysis(ctx, projectID, &analysis, s.ClarifySvc, "", "")
+			if err != nil {
+				host.WriteError(w, http.StatusBadRequest, "APPLY_ERROR", err.Error(), reqID)
+				return
+			}
+			host.WriteJSON(w, http.StatusOK, updatedBrief, reqID)
+			return
+		}
 	}
 
 	host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Unknown project subroute: "+path, reqID)

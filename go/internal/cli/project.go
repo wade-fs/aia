@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/wade/aia/internal/config"
+	domainBrief "github.com/wade/aia/internal/domain/brief"
 	domainProject "github.com/wade/aia/internal/domain/project"
 )
 
@@ -286,6 +288,88 @@ var projectBriefHistoryCmd = &cobra.Command{
 	},
 }
 
+var projectBriefAnalysisFile string
+
+var projectBriefPromptCmd = &cobra.Command{
+	Use:   "prompt <project-id>",
+	Short: "Generate the agy Brief Analysis prompt for a project (AIA-21 §6, §9)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		projectID := args[0]
+
+		if appInst.GenericBriefSvc == nil {
+			return fmt.Errorf("GenericBriefSvc is not initialized")
+		}
+
+		b, err := appInst.GenericBriefSvc.GetBrief(ctx, projectID)
+		if err != nil || b == nil {
+			return fmt.Errorf("project brief for %s not found: %v", projectID, err)
+		}
+
+		catalog, err := domainBrief.GetCatalog(b.Domain)
+		if err != nil {
+			return fmt.Errorf("failed to get domain catalog: %w", err)
+		}
+
+		// Retrieve agent profile instructions if available
+		var agentInstructions string
+		if appInst.AgentSvc != nil {
+			if ags, _ := appInst.AgentSvc.List(ctx); len(ags) > 0 {
+				for _, ag := range ags {
+					if ag.Domain == b.Domain {
+						agentInstructions = ag.Instructions
+						break
+					}
+				}
+			}
+		}
+
+		prompt := domainBrief.BuildBriefAnalysisPrompt(b, catalog, agentInstructions, nil)
+		fmt.Println(prompt)
+		return nil
+	},
+}
+
+var projectBriefApplyCmd = &cobra.Command{
+	Use:   "apply-analysis <project-id>",
+	Short: "Validate and apply an agy AgentBriefAnalysis JSON file to the project (AIA-21 §6.3)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		projectID := args[0]
+
+		if projectBriefAnalysisFile == "" {
+			return fmt.Errorf("--file <path.json> is required")
+		}
+
+		data, err := os.ReadFile(projectBriefAnalysisFile)
+		if err != nil {
+			return fmt.Errorf("failed to read analysis file: %w", err)
+		}
+
+		var analysis domainBrief.AgentBriefAnalysis
+		if err := json.Unmarshal(data, &analysis); err != nil {
+			return fmt.Errorf("invalid analysis JSON: %w", err)
+		}
+
+		if appInst.GenericBriefSvc == nil {
+			return fmt.Errorf("GenericBriefSvc is not initialized")
+		}
+
+		updatedBrief, err := appInst.GenericBriefSvc.ApplyAnalysis(ctx, projectID, &analysis, appInst.ClarificationSvc, "", "")
+		if err != nil {
+			return fmt.Errorf("failed to apply analysis: %w", err)
+		}
+
+		fmt.Printf("✓ Brief analysis applied successfully to project %s.\n", projectID)
+		fmt.Printf("  新成熟度狀態: %s (%s)\n", updatedBrief.Readiness, updatedBrief.ReadinessRationale)
+		fmt.Printf("  已套用預設值: %d 個\n", len(analysis.ProposedDefaults))
+		fmt.Printf("  已建立釐清提問: %d 個\n", len(analysis.ClarificationQuestions))
+		return nil
+	},
+}
+
 func init() {
 	projectCreateCmd.Flags().StringVar(&projectName, "name", "", "project name")
 	projectCreateCmd.Flags().StringVar(&projectDesc, "description", "", "project description")
@@ -294,6 +378,7 @@ func init() {
 	projectCreateCmd.Flags().StringVar(&projectType, "type", "general", "project domain type (writing, coding, investment, general)")
 
 	projectBriefHistoryCmd.Flags().StringVarP(&projectBriefHistoryField, "field", "f", "", "brief field key to inspect history")
+	projectBriefApplyCmd.Flags().StringVarP(&projectBriefAnalysisFile, "file", "f", "", "path to AgentBriefAnalysis JSON file")
 
 	projectCmd.AddCommand(projectCreateCmd)
 	projectCmd.AddCommand(projectListCmd)
@@ -302,4 +387,6 @@ func init() {
 	projectCmd.AddCommand(projectDeleteCmd)
 	projectCmd.AddCommand(projectBriefCmd)
 	projectBriefCmd.AddCommand(projectBriefHistoryCmd)
+	projectBriefCmd.AddCommand(projectBriefPromptCmd)
+	projectBriefCmd.AddCommand(projectBriefApplyCmd)
 }

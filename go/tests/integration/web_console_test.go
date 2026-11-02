@@ -771,4 +771,67 @@ func TestWeb_ClarificationsAndProjectBriefs(t *testing.T) {
 	if recDefer.Code != http.StatusOK {
 		t.Fatalf("expected 200 from defer, got %d: %s", recDefer.Code, recDefer.Body.String())
 	}
+
+	// 10. GET /api/v1/projects/{id}/brief/prompt (AIA-21 Stage 3)
+	reqPrompt := httptest.NewRequest("GET", "/api/v1/projects/"+projID+"/brief/prompt", nil)
+	reqPrompt.AddCookie(cookie)
+	recPrompt2 := httptest.NewRecorder()
+	handler.ServeHTTP(recPrompt2, reqPrompt)
+	if recPrompt2.Code != http.StatusOK {
+		t.Fatalf("expected 200 from brief prompt, got %d: %s", recPrompt2.Code, recPrompt2.Body.String())
+	}
+	var promptResp2 struct {
+		Data struct {
+			Prompt string `json:"prompt"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(recPrompt2.Body.Bytes(), &promptResp2)
+	if !strings.Contains(promptResp2.Data.Prompt, projID) || !strings.Contains(promptResp2.Data.Prompt, "AGENT BRIEF ANALYSIS") {
+		t.Fatalf("unexpected prompt content: %s", promptResp2.Data.Prompt)
+	}
+
+	// 11. POST /api/v1/projects/{id}/brief/analysis (AIA-21 Stage 3)
+	analysisPayload := map[string]any{
+		"summary": "非虛構徒步環島規劃書分析報告",
+		"understanding": []string{
+			"規劃實際徒步行程與圖書結構",
+		},
+		"missing_fields": []map[string]any{},
+		"clarification_questions": []map[string]any{},
+		"proposed_defaults": []map[string]any{
+			{
+				"field":      "daily_mileage_km",
+				"value":      22,
+				"rationale":  "依據一般徒步者體力預設 22 公里",
+				"confidence": 0.65,
+			},
+		},
+		"research_candidates": []string{
+			"環島路線補給站研究",
+		},
+		"readiness": map[string]any{
+			"status": "READY_WITH_ASSUMPTIONS",
+			"reason": "主要路線已確定，部分每日里程採保守預設",
+		},
+	}
+	analysisBytes, _ := json.Marshal(analysisPayload)
+	reqApply := httptest.NewRequest("POST", "/api/v1/projects/"+projID+"/brief/analysis", bytes.NewReader(analysisBytes))
+	reqApply.Header.Set("Content-Type", "application/json")
+	reqApply.AddCookie(cookie)
+	recApply := httptest.NewRecorder()
+	handler.ServeHTTP(recApply, reqApply)
+	if recApply.Code != http.StatusOK {
+		t.Fatalf("expected 200 from brief analysis apply, got %d: %s", recApply.Code, recApply.Body.String())
+	}
+
+	var applyResp struct {
+		Data struct {
+			ProjectID string `json:"project_id"`
+			Readiness string `json:"readiness"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(recApply.Body.Bytes(), &applyResp)
+	if applyResp.Data.ProjectID != projID {
+		t.Fatalf("expected project %s in apply response, got: %+v", projID, applyResp)
+	}
 }

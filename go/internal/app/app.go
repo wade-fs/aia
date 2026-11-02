@@ -22,6 +22,7 @@ import (
 	"github.com/wade/aia/internal/recovery"
 	agentService "github.com/wade/aia/internal/service/agent"
 	approvalService "github.com/wade/aia/internal/service/approval"
+	briefService "github.com/wade/aia/internal/service/brief"
 	delegationService "github.com/wade/aia/internal/service/delegation"
 	execService "github.com/wade/aia/internal/service/execution"
 	goalService "github.com/wade/aia/internal/service/goal"
@@ -94,6 +95,8 @@ type App struct {
 	SelfEvolutionEng *autonomy.SelfEvolutionEngine
 	WritingWorkflowRepo *repository.WritingWorkflowRepository
 	WritingWorkflowSvc  *writingService.WorkflowService
+	GenericBriefRepo    *repository.GenericBriefRepository
+	GenericBriefSvc     *briefService.Service
 }
 
 func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
@@ -282,8 +285,12 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	)
 	writingWorkflowSvc.SetTaskRepository(taskRepo)
 
+	genericBriefRepo := repository.NewGenericBriefRepository(db)
+	genericBriefSvc := briefService.NewService(genericBriefRepo, projRepo)
+
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	contextAssembler := orchestrator.NewContextAssembler(projRepo, memRepo, writingWorkflowRepo)
+	contextAssembler.SetGenericBriefRepository(genericBriefRepo)
 	scheduler.SetContextAssembler(contextAssembler)
 	pa := orchestrator.NewPersonalAgent(prov, retriever, taskSvc, scheduler, evaluator)
 	pa.SetAutonomyEngine(autonomyEng)
@@ -350,6 +357,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		SelfEvolutionEng: selfEvolutionEng,
 		WritingWorkflowRepo: writingWorkflowRepo,
 		WritingWorkflowSvc:  writingWorkflowSvc,
+		GenericBriefRepo:    genericBriefRepo,
+		GenericBriefSvc:     genericBriefSvc,
 	}
 
 	// Seed default domain agents, default project & recurring schedules

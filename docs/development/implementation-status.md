@@ -1,7 +1,7 @@
 # AIA Development: Implementation Status
 
 **Project:** Autonomous Intelligence Architecture (AIA)  
-**Active Implementation Status:** **Phase 0 ～ Phase 6 Completed** (Phase 6 Safe Self-Modification, Multi-Domain MVA & Writing Dual-Loop Workflow, Migrations `001` ～ `015` active)  
+**Active Implementation Status:** **Phase 0 ～ Phase 6 Completed + AIA-21 Stage 1** (Phase 6 Safe Self-Modification, Multi-Domain MVA & Writing Dual-Loop Workflow, Universal Project Brief & Field History, Migrations `001` ～ `016` active)  
 **Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Baseline [`0e189d9`](file:///home/wade/src/github/aia) ➔ Phase 5A Baseline [`29d1cb3`](file:///home/wade/src/github/aia) ➔ Phase 5B Baseline ➔ Phase 6 Active Baseline  
 **Specification Baseline:** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-19) v2.0  
 **Audit Report:** [docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)  
@@ -101,7 +101,7 @@ go/
 
 ## 3. Database Schema Status
 
-### Active Tables (Migrations 001 ~ 015)
+### Active Tables (Migrations 001 ~ 016)
 - `agents`: Registered agents, capabilities, configurations.
 - `tasks`: Work units, status machine (`READY`, `RUNNING`, `COMPLETED`, `WAITING_APPROVAL`).
 - `task_dependencies`: Inter-task DAG dependencies.
@@ -139,6 +139,8 @@ go/
 - `self_modification_proposals`: Self-modification proposal tracking with scope levels (`LEVEL_A`, `LEVEL_B`, `LEVEL_C`), patch diff, status machine (`PROPOSED`, `VERIFYING`, `VERIFIED`, `PENDING_APPROVAL`, `APPLIED`, `MERGED`, `FAILED`, `REJECTED`, `ROLLED_BACK`), verification test logs, and approval binding (Migration 014).
 - `writing_briefs`: Creative brief tracking with genre, era, scale, protagonists, worldview, status, and pending questions (Migration 015).
 - `writing_clarifications`: Human clarification requests (`ASK_HUMAN` / `WAITING_FOR_INPUT`) with category, options, user answer, and status (Migration 015).
+- `project_briefs`: Universal project requirements model across all domains with brief version, readiness stage, and YAML payload (Migration 016).
+- `brief_field_history`: Immutable field revision tracking preserving version, old/new value, old/new status, source, rationale, task ID, and clarification ID (Migration 016).
 
 ---
 

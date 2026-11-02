@@ -15,9 +15,10 @@ import (
 // ContextAssembler compiles complete, authoritative execution context for agy
 // combining Agent Profile, Domain Rules, Project Brief, and Project Memory (AIA-21 §3.1, §8.4).
 type ContextAssembler struct {
-	projectRepo  *repository.ProjectRepository
-	memoryRepo   *repository.MemoryRepository
-	workflowRepo *repository.WritingWorkflowRepository
+	projectRepo      *repository.ProjectRepository
+	memoryRepo       *repository.MemoryRepository
+	workflowRepo     *repository.WritingWorkflowRepository
+	genericBriefRepo *repository.GenericBriefRepository
 }
 
 // NewContextAssembler creates an assembler instance.
@@ -31,6 +32,11 @@ func NewContextAssembler(
 		memoryRepo:   memoryRepo,
 		workflowRepo: workflowRepo,
 	}
+}
+
+// SetGenericBriefRepository wires the universal project brief repository.
+func (ca *ContextAssembler) SetGenericBriefRepository(gbr *repository.GenericBriefRepository) {
+	ca.genericBriefRepo = gbr
 }
 
 // Assemble compiles the structured markdown context prompt for agy.
@@ -66,7 +72,26 @@ func (ca *ContextAssembler) Assemble(ctx context.Context, t *task.Task, ag *agen
 
 		// Check database brief
 		var briefLoaded bool
-		if ca.workflowRepo != nil {
+		if ca.genericBriefRepo != nil {
+			if gb, err := ca.genericBriefRepo.GetByProjectID(ctx, projID); err == nil && gb != nil {
+				briefLoaded = true
+				sb.WriteString(fmt.Sprintf("**Domain:** %s\n", gb.Domain))
+				sb.WriteString(fmt.Sprintf("**Brief Version:** %d\n", gb.BriefVersion))
+				sb.WriteString(fmt.Sprintf("**Readiness Stage:** %s (%s)\n", gb.Readiness, gb.ReadinessRationale))
+				if gb.RawIntent != "" {
+					sb.WriteString(fmt.Sprintf("**Raw Intent:** %s\n", gb.RawIntent))
+				}
+				if len(gb.Fields) > 0 {
+					sb.WriteString("\n### Brief Field Specifications & States:\n")
+					for k, f := range gb.Fields {
+						sb.WriteString(fmt.Sprintf("- **%s**: %v [Status: %s, Source: %s, Conf: %.2f] — %s\n",
+							k, f.Value, f.Status, f.Source, f.Confidence, f.Rationale))
+					}
+				}
+			}
+		}
+
+		if !briefLoaded && ca.workflowRepo != nil {
 			if brief, err := ca.workflowRepo.GetBriefByProjectID(ctx, projID); err == nil && brief != nil {
 				briefLoaded = true
 				sb.WriteString(fmt.Sprintf("**Title:** %s\n", brief.Title))

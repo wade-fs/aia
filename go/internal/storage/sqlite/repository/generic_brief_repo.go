@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -81,6 +82,92 @@ func (r *GenericBriefRepository) Save(ctx context.Context, b *domainBrief.Projec
 		return fmt.Errorf("failed to begin tx: %w", err)
 	}
 	defer tx.Rollback()
+
+	query := `
+		INSERT INTO project_briefs (
+			id, project_id, domain, brief_version, readiness_status, raw_intent, brief_yaml, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(project_id) DO UPDATE SET
+			domain = excluded.domain,
+			brief_version = excluded.brief_version,
+			readiness_status = excluded.readiness_status,
+			raw_intent = excluded.raw_intent,
+			brief_yaml = excluded.brief_yaml,
+			updated_at = excluded.updated_at
+	`
+	_, err = tx.ExecContext(
+		ctx, query,
+		b.ID, b.ProjectID, b.Domain, b.BriefVersion, string(b.Readiness), b.RawIntent, yamlStr,
+		b.CreatedAt.Format(time.RFC3339), b.UpdatedAt.Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to upsert project_brief: %w", err)
+	}
+
+	// Persist field history entries
+	histQuery := `
+		INSERT OR IGNORE INTO brief_field_history (
+			id, brief_id, project_id, field_key, version,
+			old_value_json, new_value_json, old_status, new_status,
+			source, rationale, related_task_id, related_clarification_id, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+	for key, entries := range b.History {
+		for _, entry := range entries {
+			oldJSON, _ := json.Marshal(entry.OldValue)
+			newJSON, _ := json.Marshal(entry.NewValue)
+			entryID := fmt.Sprintf("hist-%s-%s-v%d", b.ProjectID, key, entry.Version)
+
+			_, err = tx.ExecContext(
+				ctx, histQuery,
+				entryID, b.ID, b.ProjectID, key, entry.Version,
+				string(oldJSON), string(newJSON), string(entry.OldStatus), string(entry.NewStatus),
+				entry.Source, entry.Reason, entry.RelatedTaskID, entry.RelatedClarificationID,
+				entry.Timestamp.Format(time.RFC3339),
+			)
+			if err != nil {
+				return fmt.Errorf("failed to insert brief field history: %w", err)
+			}
+		}
+	}
+
+	return tx.Commit()
+}
+
+// ErrBriefVersionConflict indicates an optimistic concurrency violation (AIA-21 §12.3).
+var ErrBriefVersionConflict = errors.New("brief version conflict")
+
+// SaveWithVersionCheck persists the project brief only if current database version matches expectedVersion.
+func (r *GenericBriefRepository) SaveWithVersionCheck(ctx context.Context, b *domainBrief.ProjectBrief, expectedVersion int) error {
+	if expectedVersion <= 0 {
+		return r.Save(ctx, b)
+	}
+
+	tx, err := r.db.RawDB().BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Check current version in database
+	var curVersion int
+	row := tx.QueryRowContext(ctx, `SELECT brief_version FROM project_briefs WHERE project_id = ?`, b.ProjectID)
+	if err := row.Scan(&curVersion); err == nil {
+		if curVersion != expectedVersion {
+			return fmt.Errorf("%w: expected v%d, but current database version is v%d (AIA-21 §12.3)", ErrBriefVersionConflict, expectedVersion, curVersion)
+		}
+	}
+
+	yamlStr, err := b.ToYAML()
+	if err != nil {
+		return fmt.Errorf("failed to serialize brief: %w", err)
+	}
+
+	now := time.Now().UTC()
+	if b.CreatedAt.IsZero() {
+		b.CreatedAt = now
+	}
+	b.UpdatedAt = now
 
 	query := `
 		INSERT INTO project_briefs (

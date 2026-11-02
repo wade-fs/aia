@@ -23,12 +23,15 @@ type Summary struct {
 	InterruptedExecutions int
 	RecoveredTasks        int
 	ReadyTasksPromoted    int
+	PreservedWaitingInput int
+	ExpiredClarifications int
 }
 
 type Manager struct {
 	taskRepo      *repository.TaskRepository
 	executionRepo *repository.ExecutionRepository
 	auditRepo     *repository.AuditRepository
+	clarifyRepo   *repository.ClarificationRepository
 	validator     validation.Validator
 	wsMgr         *workspace.Manager
 	artRepo       *repository.ArtifactRepository
@@ -44,6 +47,10 @@ func NewManager(
 		executionRepo: executionRepo,
 		auditRepo:     auditRepo,
 	}
+}
+
+func (m *Manager) SetClarificationRepository(repo *repository.ClarificationRepository) {
+	m.clarifyRepo = repo
 }
 
 func (m *Manager) SetValidator(v validation.Validator) {
@@ -215,6 +222,55 @@ func (m *Manager) Recover(ctx context.Context) (*Summary, error) {
 				_ = m.taskRepo.UpdateStatus(ctx, wt.ID, task.StatusReady)
 				summary.ReadyTasksPromoted++
 			}
+		}
+	}
+
+	now := time.Now().UTC()
+
+	// 3. Reconcile Expired Clarification Requests (AIA-21 §13.7)
+	// CRITICAL: Expiration never automatically assumes user consent or unblocks tasks.
+	if m.clarifyRepo != nil {
+		expired, err := m.clarifyRepo.ListExpiredOpen(ctx, now)
+		if err == nil {
+			for _, exp := range expired {
+				exp.Status = "EXPIRED"
+				exp.UpdatedAt = now
+				_ = m.clarifyRepo.Update(ctx, exp)
+				summary.ExpiredClarifications++
+
+				if m.auditRepo != nil {
+					_ = m.auditRepo.Append(ctx, &repository.AuditLogEntry{
+						ID:           domain.ID("audit-exp-" + uuid.New().String()[:8]),
+						ActorType:    "SYSTEM",
+						ActorID:      "RECOVERY",
+						Action:       "CLARIFICATION_EXPIRED",
+						ResourceType: "CLARIFICATION",
+						ResourceID:   exp.ID,
+						Outcome:      "EXPIRED",
+						CreatedAt:    now,
+					})
+				}
+			}
+		}
+	}
+
+	// 4. Reconcile WAITING_FOR_INPUT tasks (AIA-21 §7.2, §7.4, Stage 4)
+	waitingInputTasks, err := m.taskRepo.List(ctx, repository.TaskFilter{Status: task.StatusWaitingInput})
+	if err == nil {
+		for _, wit := range waitingInputTasks {
+			if m.clarifyRepo != nil {
+				blocking, err := m.clarifyRepo.ListBlockingOpenByProject(ctx, string(wit.ProjectID))
+				if err == nil && len(blocking) == 0 {
+					// All blocking clarifications resolved while offline -> resume task to READY (AIA-21 §7.4)
+					_ = m.taskRepo.UpdateStatus(ctx, wit.ID, task.StatusReady)
+					summary.ReadyTasksPromoted++
+					slog.Info("recovered and promoted WAITING_FOR_INPUT task to READY as all blocking clarifications are resolved", "task_id", wit.ID)
+					continue
+				}
+			}
+			// Retain WAITING_FOR_INPUT: Never crash, never mark failed, never assume consent (AIA-21 §7.2)
+			summary.PreservedWaitingInput++
+			slog.Info("preserved WAITING_FOR_INPUT task awaiting user input across restart", "task_id", wit.ID, "project_id", wit.ProjectID)
 		}
 	}
 

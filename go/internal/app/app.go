@@ -293,6 +293,9 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 
 	clarificationRepo := repository.NewClarificationRepository(db)
 	clarificationSvc := clarifyService.NewService(clarificationRepo, genericBriefSvc, projRepo, taskRepo, memRepo)
+	clarificationSvc.SetAuditRepo(auditRepo)
+	genericBriefSvc.SetAuditRepo(auditRepo)
+	recMgr.SetClarificationRepository(clarificationRepo)
 
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	contextAssembler := orchestrator.NewContextAssembler(projRepo, memRepo, writingWorkflowRepo)

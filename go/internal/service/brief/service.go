@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/wade/aia/internal/domain"
 	domainBrief "github.com/wade/aia/internal/domain/brief"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 )
@@ -15,6 +17,7 @@ import (
 type Service struct {
 	briefRepo   *repository.GenericBriefRepository
 	projectRepo *repository.ProjectRepository
+	auditRepo   *repository.AuditRepository
 }
 
 // NewService creates a new BriefService.
@@ -23,6 +26,11 @@ func NewService(briefRepo *repository.GenericBriefRepository, projectRepo *repos
 		briefRepo:   briefRepo,
 		projectRepo: projectRepo,
 	}
+}
+
+// SetAuditRepo attaches an audit repository for change tracking (AIA-21 §13.9).
+func (s *Service) SetAuditRepo(auditRepo *repository.AuditRepository) {
+	s.auditRepo = auditRepo
 }
 
 // InitializeBrief initializes a new Project Brief, applies domain catalog schema, and synchronizes to workspace brief.yaml.
@@ -68,6 +76,7 @@ func (s *Service) InitializeBrief(ctx context.Context, projectID string, domainN
 	res := domainBrief.AssessReadiness(b, catalog)
 	b.Readiness = res.Status
 	b.ReadinessRationale = res.Rationale
+	b.BriefVersion = 1 // Canonical base version for newly initialized brief (AIA-21 §4.5)
 
 	// Persist in database
 	if s.briefRepo != nil {
@@ -90,6 +99,29 @@ func (s *Service) InitializeBrief(ctx context.Context, projectID string, domainN
 func (s *Service) UpdateField(
 	ctx context.Context,
 	projectID string,
+	key string,
+	val any,
+	status domainBrief.FieldStatus,
+	source string,
+	confidence float64,
+	rationale string,
+	confirmationRequired bool,
+	updatedBy string,
+	relatedTaskID string,
+	relatedClarificationID string,
+	workspaceRoot string,
+) (*domainBrief.ProjectBrief, error) {
+	return s.UpdateFieldWithVersion(
+		ctx, projectID, 0, key, val, status, source, confidence,
+		rationale, confirmationRequired, updatedBy, relatedTaskID, relatedClarificationID, workspaceRoot,
+	)
+}
+
+// UpdateFieldWithVersion updates a field checking optimistic lock expectedVersion (AIA-21 §12.3).
+func (s *Service) UpdateFieldWithVersion(
+	ctx context.Context,
+	projectID string,
+	expectedVersion int,
 	key string,
 	val any,
 	status domainBrief.FieldStatus,
@@ -130,14 +162,28 @@ func (s *Service) UpdateField(
 		b.ReadinessRationale = res.Rationale
 	}
 
-	// Save to database
-	if err := s.briefRepo.Save(ctx, b); err != nil {
+	// Save to database with optimistic version check
+	if err := s.briefRepo.SaveWithVersionCheck(ctx, b, expectedVersion); err != nil {
 		return nil, fmt.Errorf("failed to update brief in database: %w", err)
 	}
 
 	// Synchronize to workspace brief.yaml
 	if workspaceRoot != "" {
 		_ = s.SyncToWorkspace(b, workspaceRoot)
+	}
+
+	// Audit trail logging (AIA-21 §13.9)
+	if s.auditRepo != nil {
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:           domain.ID("audit-" + uuid.New().String()[:8]),
+			ActorType:    "HUMAN",
+			ActorID:      updatedBy,
+			Action:       "BRIEF_FIELD_UPDATED",
+			ResourceType: "PROJECT_BRIEF",
+			ResourceID:   projectID,
+			Outcome:      "SUCCESS",
+			CreatedAt:    time.Now().UTC(),
+		})
 	}
 
 	return b, nil

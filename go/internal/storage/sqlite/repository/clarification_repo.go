@@ -166,6 +166,25 @@ func (r *ClarificationRepository) ListBlockingOpenByProject(ctx context.Context,
 	return r.scanRows(rows)
 }
 
+// ListExpiredOpen returns open requests whose expires_at is non-null and <= now.
+func (r *ClarificationRepository) ListExpiredOpen(ctx context.Context, now time.Time) ([]*domainClarify.ClarificationRequest, error) {
+	query := `
+		SELECT id, project_id, task_id, field_key, question, options_json,
+		       reason, impact, priority, blocking, status, answer,
+		       answered_at, expires_at, created_at, updated_at
+		FROM clarification_requests
+		WHERE status = 'OPEN' AND expires_at IS NOT NULL AND expires_at <= ?
+		ORDER BY expires_at ASC
+	`
+	rows, err := r.db.RawDB().QueryContext(ctx, query, now.Format(time.RFC3339))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list expired clarifications: %w", err)
+	}
+	defer rows.Close()
+
+	return r.scanRows(rows)
+}
+
 func (r *ClarificationRepository) scanRow(row *sql.Row) (*domainClarify.ClarificationRequest, error) {
 	var c domainClarify.ClarificationRequest
 	var optsJSON, statusStr, createdAt, updatedAt string

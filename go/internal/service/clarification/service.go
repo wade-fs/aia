@@ -23,6 +23,7 @@ type Service struct {
 	projectRepo *repository.ProjectRepository
 	taskRepo    *repository.TaskRepository
 	memoryRepo  *repository.MemoryRepository
+	auditRepo   *repository.AuditRepository
 }
 
 // NewService creates a new clarification service.
@@ -40,6 +41,11 @@ func NewService(
 		taskRepo:    taskRepo,
 		memoryRepo:  memoryRepo,
 	}
+}
+
+// SetAuditRepo attaches an audit repository (AIA-21 §13.9).
+func (s *Service) SetAuditRepo(repo *repository.AuditRepository) {
+	s.auditRepo = repo
 }
 
 // CreateRequests validates and registers a batch of clarification inquiries (AIA-21 §5.4, §6.3).
@@ -78,6 +84,19 @@ func (s *Service) CreateRequests(ctx context.Context, requests []*domainClarify.
 		for _, t := range tasks {
 			_ = s.taskRepo.UpdateStatus(ctx, t.ID, domainTask.StatusWaitingInput)
 		}
+	}
+
+	if s.auditRepo != nil {
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:           domain.ID("audit-cr-" + uuid.New().String()[:8]),
+			ActorType:    "AGENT",
+			ActorID:      "system",
+			Action:       "CLARIFICATION_REQUESTED",
+			ResourceType: "PROJECT",
+			ResourceID:   projectID,
+			Outcome:      "SUCCESS",
+			CreatedAt:    now,
+		})
 	}
 
 	return nil
@@ -168,6 +187,19 @@ func (s *Service) Answer(ctx context.Context, requestID string, answer string) (
 		}
 	}
 
+	if s.auditRepo != nil {
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:           domain.ID("audit-cr-" + uuid.New().String()[:8]),
+			ActorType:    "HUMAN",
+			ActorID:      "user",
+			Action:       "CLARIFICATION_ANSWERED",
+			ResourceType: "CLARIFICATION",
+			ResourceID:   c.ID,
+			Outcome:      "SUCCESS",
+			CreatedAt:    now,
+		})
+	}
+
 	return c, nil
 }
 
@@ -178,7 +210,23 @@ func (s *Service) Defer(ctx context.Context, requestID string) error {
 		return fmt.Errorf("clarification request not found")
 	}
 	c.Status = domainClarify.StatusDeferred
-	return s.clarifyRepo.Update(ctx, c)
+	if err := s.clarifyRepo.Update(ctx, c); err != nil {
+		return err
+	}
+
+	if s.auditRepo != nil {
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:           domain.ID("audit-cr-" + uuid.New().String()[:8]),
+			ActorType:    "HUMAN",
+			ActorID:      "user",
+			Action:       "CLARIFICATION_DEFERRED",
+			ResourceType: "CLARIFICATION",
+			ResourceID:   requestID,
+			Outcome:      "SUCCESS",
+			CreatedAt:    time.Now().UTC(),
+		})
+	}
+	return nil
 }
 
 // Cancel marks a question as cancelled.
@@ -189,6 +237,37 @@ func (s *Service) Cancel(ctx context.Context, requestID string) error {
 	}
 	c.Status = domainClarify.StatusCancelled
 	return s.clarifyRepo.Update(ctx, c)
+}
+
+// CheckExpirations identifies open requests past their expiration time and marks them EXPIRED (AIA-21 §13.7).
+// CRITICAL GOVERNANCE RULE: Expiration NEVER assumes user consent or unblocks tasks automatically.
+func (s *Service) CheckExpirations(ctx context.Context) ([]*domainClarify.ClarificationRequest, error) {
+	now := time.Now().UTC()
+	expired, err := s.clarifyRepo.ListExpiredOpen(ctx, now)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list expired clarifications: %w", err)
+	}
+
+	for _, c := range expired {
+		c.Status = domainClarify.StatusExpired
+		c.UpdatedAt = now
+		_ = s.clarifyRepo.Update(ctx, c)
+
+		if s.auditRepo != nil {
+			_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+				ID:           domain.ID("audit-cr-" + uuid.New().String()[:8]),
+				ActorType:    "SYSTEM",
+				ActorID:      "TIMEOUT_POLICY",
+				Action:       "CLARIFICATION_EXPIRED",
+				ResourceType: "CLARIFICATION",
+				ResourceID:   c.ID,
+				Outcome:      "EXPIRED",
+				CreatedAt:    now,
+			})
+		}
+	}
+
+	return expired, nil
 }
 
 // ListByProject returns all clarification requests for a project.

@@ -9,6 +9,8 @@ import (
 
 	"github.com/wade/aia/internal/autonomy"
 	"github.com/wade/aia/internal/domain"
+	domainBrief "github.com/wade/aia/internal/domain/brief"
+	domainClarify "github.com/wade/aia/internal/domain/clarification"
 	"github.com/wade/aia/internal/domain/continuity"
 	domainGoal "github.com/wade/aia/internal/domain/goal"
 	"github.com/wade/aia/internal/domain/governance"
@@ -20,6 +22,8 @@ import (
 	"github.com/wade/aia/internal/provider"
 	agentService "github.com/wade/aia/internal/service/agent"
 	approvalService "github.com/wade/aia/internal/service/approval"
+	briefService "github.com/wade/aia/internal/service/brief"
+	clarifyService "github.com/wade/aia/internal/service/clarification"
 	delegationService "github.com/wade/aia/internal/service/delegation"
 	execService "github.com/wade/aia/internal/service/execution"
 	goalService "github.com/wade/aia/internal/service/goal"
@@ -54,6 +58,8 @@ type ConsoleServices struct {
 	ExperimentRepo *repository.ExperimentRepository
 	ExperimentCtrl *experiment.Controller
 	DelegationSvc  *delegationService.Service
+	BriefSvc       *briefService.Service
+	ClarifySvc     *clarifyService.Service
 }
 
 func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
@@ -107,6 +113,11 @@ func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
 	// 9. Cross-Domain Delegations (AIA-12 §21, Phase 5)
 	mux.HandleFunc("/api/v1/delegations", s.handleDelegations)
 	mux.HandleFunc("/api/v1/delegations/", s.handleDelegationSubroutes)
+
+	// 10. Clarifications & Project Briefs (AIA-21 Stage 2)
+	mux.HandleFunc("/api/v1/clarifications", s.handleClarifications)
+	mux.HandleFunc("/api/v1/clarifications/", s.handleClarificationSubroutes)
+	mux.HandleFunc("/api/v1/projects/", s.handleProjectSubroutes)
 }
 
 func getReqID(r *http.Request) string {
@@ -1347,4 +1358,191 @@ func (s *ConsoleServices) handleDelegationSubroutes(w http.ResponseWriter, r *ht
 	default:
 		host.WriteError(w, http.StatusNotFound, "UNKNOWN_ACTION", "Unknown delegation subroute action: "+action, reqID)
 	}
+}
+
+// --- Clarifications & Project Briefs (AIA-21 Stage 2) ---
+
+func (s *ConsoleServices) handleClarifications(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	if r.Method != http.MethodGet {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	if s.ClarifySvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Clarification service not initialized", reqID)
+		return
+	}
+
+	projectID := r.URL.Query().Get("project_id")
+	status := r.URL.Query().Get("status")
+	ctx := r.Context()
+
+	var list []*domainClarify.ClarificationRequest
+	var err error
+
+	if strings.EqualFold(status, "OPEN") {
+		list, err = s.ClarifySvc.ListOpenByProject(ctx, projectID)
+	} else {
+		list, err = s.ClarifySvc.ListByProject(ctx, projectID)
+	}
+
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), reqID)
+		return
+	}
+
+	if list == nil {
+		list = []*domainClarify.ClarificationRequest{}
+	}
+
+	if status != "" && !strings.EqualFold(status, "OPEN") {
+		filtered := make([]*domainClarify.ClarificationRequest, 0, len(list))
+		for _, item := range list {
+			if strings.EqualFold(string(item.Status), status) {
+				filtered = append(filtered, item)
+			}
+		}
+		list = filtered
+	}
+
+	host.WriteJSON(w, http.StatusOK, list, reqID)
+}
+
+func (s *ConsoleServices) handleClarificationSubroutes(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	if s.ClarifySvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Clarification service not initialized", reqID)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/clarifications/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		s.handleClarifications(w, r)
+		return
+	}
+
+	id := parts[0]
+	ctx := r.Context()
+
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		c, err := s.ClarifySvc.Get(ctx, id)
+		if err != nil {
+			host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), reqID)
+			return
+		}
+		if c == nil {
+			host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Clarification request not found", reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, c, reqID)
+		return
+	}
+
+	action := parts[1]
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	switch action {
+	case "answer":
+		var body struct {
+			Answer string `json:"answer"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid answer JSON", reqID)
+			return
+		}
+		res, err := s.ClarifySvc.Answer(ctx, id, body.Answer)
+		if err != nil {
+			host.WriteError(w, http.StatusBadRequest, "ANSWER_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, res, reqID)
+
+	case "defer":
+		if err := s.ClarifySvc.Defer(ctx, id); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "DEFER_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "DEFERRED", "id": id}, reqID)
+
+	case "cancel":
+		if err := s.ClarifySvc.Cancel(ctx, id); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "CANCEL_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"status": "CANCELLED", "id": id}, reqID)
+
+	default:
+		host.WriteError(w, http.StatusNotFound, "UNKNOWN_ACTION", "Unknown clarification action: "+action, reqID)
+	}
+}
+
+func (s *ConsoleServices) handleProjectSubroutes(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/projects/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 2 {
+		host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Project subroute not found", reqID)
+		return
+	}
+
+	projectID := parts[0]
+	ctx := r.Context()
+
+	if parts[1] == "brief" {
+		if s.BriefSvc == nil {
+			host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Brief service not initialized", reqID)
+			return
+		}
+
+		if len(parts) == 2 {
+			if r.Method != http.MethodGet {
+				host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+				return
+			}
+			b, err := s.BriefSvc.GetBrief(ctx, projectID)
+			if err != nil {
+				host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), reqID)
+				return
+			}
+			if b == nil {
+				host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Brief not found for project: "+projectID, reqID)
+				return
+			}
+			host.WriteJSON(w, http.StatusOK, b, reqID)
+			return
+		}
+
+		if len(parts) == 3 && parts[2] == "history" {
+			if r.Method != http.MethodGet {
+				host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+				return
+			}
+			field := r.URL.Query().Get("field")
+			if field == "" {
+				host.WriteError(w, http.StatusBadRequest, "MISSING_FIELD", "Query parameter 'field' is required", reqID)
+				return
+			}
+			history, err := s.BriefSvc.ListFieldHistory(ctx, projectID, field)
+			if err != nil {
+				host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), reqID)
+				return
+			}
+			if history == nil {
+				history = []domainBrief.FieldHistoryEntry{}
+			}
+			host.WriteJSON(w, http.StatusOK, history, reqID)
+			return
+		}
+	}
+
+	host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Unknown project subroute: "+path, reqID)
 }

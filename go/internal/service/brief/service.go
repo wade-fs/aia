@@ -148,6 +148,14 @@ func (s *Service) GetBrief(ctx context.Context, projectID string) (*domainBrief.
 	return s.briefRepo.GetByProjectID(ctx, projectID)
 }
 
+// ListFieldHistory retrieves chronological revisions for a specific field.
+func (s *Service) ListFieldHistory(ctx context.Context, projectID string, fieldKey string) ([]domainBrief.FieldHistoryEntry, error) {
+	if s.briefRepo == nil {
+		return nil, fmt.Errorf("brief repository not configured")
+	}
+	return s.briefRepo.ListFieldHistory(ctx, projectID, fieldKey)
+}
+
 // SyncToWorkspace atomically serializes and writes brief.yaml to the project directory.
 func (s *Service) SyncToWorkspace(b *domainBrief.ProjectBrief, workspaceRoot string) error {
 	if err := os.MkdirAll(workspaceRoot, 0755); err != nil {

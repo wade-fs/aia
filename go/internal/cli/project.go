@@ -181,6 +181,111 @@ var projectDeleteCmd = &cobra.Command{
 	},
 }
 
+var projectBriefHistoryField string
+
+var projectBriefCmd = &cobra.Command{
+	Use:     "brief <project-id>",
+	Aliases: []string{"show-brief"},
+	Short:   "View the living Project Brief, field states, and readiness (AIA-21 §4, §11.1)",
+	Args:    cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		projectID := args[0]
+
+		if appInst.GenericBriefSvc == nil {
+			return fmt.Errorf("GenericBriefSvc is not initialized")
+		}
+
+		brief, err := appInst.GenericBriefSvc.GetBrief(ctx, projectID)
+		if err != nil {
+			return fmt.Errorf("failed to load brief: %w", err)
+		}
+		if brief == nil {
+			return fmt.Errorf("no project brief found for %s", projectID)
+		}
+
+		fmt.Printf("=== Project Brief: %s (Domain: %s, Version: %d) ===\n", brief.ProjectID, brief.Domain, brief.BriefVersion)
+		fmt.Printf("成熟度狀態:       %s\n", brief.Readiness)
+		fmt.Printf("成熟度診斷:       %s\n", brief.ReadinessRationale)
+		if brief.RawIntent != "" {
+			fmt.Printf("原始意圖描述:     %s\n", brief.RawIntent)
+		}
+
+		if brief.Generic.Purpose != "" {
+			fmt.Printf("\n--- 通用專案規格 ---\n")
+			fmt.Printf("專案目的:         %s\n", brief.Generic.Purpose)
+			if brief.Generic.Audience != "" {
+				fmt.Printf("目標受眾:         %s\n", brief.Generic.Audience)
+			}
+			if brief.Generic.Scope != "" {
+				fmt.Printf("工作範圍:         %s\n", brief.Generic.Scope)
+			}
+		}
+
+		if len(brief.Fields) > 0 {
+			fmt.Printf("\n--- 領域規格欄位狀態 (Field States) ---\n")
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+			fmt.Fprintln(w, "FIELD\tSTATUS\tCONF\tSOURCE\tVALUE\tRATIONALE")
+			for k, f := range brief.Fields {
+				valStr := fmt.Sprintf("%v", f.Value)
+				if len(valStr) > 30 {
+					valStr = valStr[:30] + "..."
+				}
+				ratStr := f.Rationale
+				if len(ratStr) > 40 {
+					ratStr = ratStr[:40] + "..."
+				}
+				fmt.Fprintf(w, "%s\t%s\t%.2f\t%s\t%s\t%s\n",
+					k, f.Status, f.Confidence, f.Source, valStr, ratStr)
+			}
+			_ = w.Flush()
+		}
+
+		return nil
+	},
+}
+
+var projectBriefHistoryCmd = &cobra.Command{
+	Use:   "history <project-id>",
+	Short: "View immutable revision history of brief fields (AIA-21 §4.5, §11.1)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		projectID := args[0]
+
+		if appInst.GenericBriefRepo == nil {
+			return fmt.Errorf("GenericBriefRepo is not initialized")
+		}
+
+		if projectBriefHistoryField == "" {
+			return fmt.Errorf("--field <key> is required to inspect field revision history")
+		}
+
+		history, err := appInst.GenericBriefRepo.ListFieldHistory(ctx, projectID, projectBriefHistoryField)
+		if err != nil {
+			return fmt.Errorf("failed to query history: %w", err)
+		}
+		if len(history) == 0 {
+			fmt.Printf("No history entries found for field '%s' in project '%s'.\n", projectBriefHistoryField, projectID)
+			return nil
+		}
+
+		fmt.Printf("=== Revision History: %s.%s (%d revisions) ===\n", projectID, projectBriefHistoryField, len(history))
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+		fmt.Fprintln(w, "VER\tSTATUS\tSOURCE\tVALUE\tTIMESTAMP\tREASON")
+		for _, h := range history {
+			vStr := fmt.Sprintf("%v", h.NewValue)
+			if len(vStr) > 25 {
+				vStr = vStr[:25] + "..."
+			}
+			fmt.Fprintf(w, "v%d\t%s\t%s\t%s\t%s\t%s\n",
+				h.Version, h.NewStatus, h.Source, vStr, h.Timestamp.Format("2006-01-02 15:04"), h.Reason)
+		}
+		_ = w.Flush()
+		return nil
+	},
+}
+
 func init() {
 	projectCreateCmd.Flags().StringVar(&projectName, "name", "", "project name")
 	projectCreateCmd.Flags().StringVar(&projectDesc, "description", "", "project description")
@@ -188,9 +293,13 @@ func init() {
 	projectCreateCmd.Flags().StringVar(&projectPath, "path", "", "project path (alias for --workspace)")
 	projectCreateCmd.Flags().StringVar(&projectType, "type", "general", "project domain type (writing, coding, investment, general)")
 
+	projectBriefHistoryCmd.Flags().StringVarP(&projectBriefHistoryField, "field", "f", "", "brief field key to inspect history")
+
 	projectCmd.AddCommand(projectCreateCmd)
 	projectCmd.AddCommand(projectListCmd)
 	projectCmd.AddCommand(projectShowCmd)
 	projectCmd.AddCommand(projectArchiveCmd)
 	projectCmd.AddCommand(projectDeleteCmd)
+	projectCmd.AddCommand(projectBriefCmd)
+	projectBriefCmd.AddCommand(projectBriefHistoryCmd)
 }

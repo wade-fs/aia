@@ -23,6 +23,7 @@ import (
 	agentService "github.com/wade/aia/internal/service/agent"
 	approvalService "github.com/wade/aia/internal/service/approval"
 	briefService "github.com/wade/aia/internal/service/brief"
+	clarifyService "github.com/wade/aia/internal/service/clarification"
 	delegationService "github.com/wade/aia/internal/service/delegation"
 	execService "github.com/wade/aia/internal/service/execution"
 	goalService "github.com/wade/aia/internal/service/goal"
@@ -97,6 +98,8 @@ type App struct {
 	WritingWorkflowSvc  *writingService.WorkflowService
 	GenericBriefRepo    *repository.GenericBriefRepository
 	GenericBriefSvc     *briefService.Service
+	ClarificationRepo   *repository.ClarificationRepository
+	ClarificationSvc    *clarifyService.Service
 }
 
 func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
@@ -288,6 +291,9 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	genericBriefRepo := repository.NewGenericBriefRepository(db)
 	genericBriefSvc := briefService.NewService(genericBriefRepo, projRepo)
 
+	clarificationRepo := repository.NewClarificationRepository(db)
+	clarificationSvc := clarifyService.NewService(clarificationRepo, genericBriefSvc, projRepo, taskRepo, memRepo)
+
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	contextAssembler := orchestrator.NewContextAssembler(projRepo, memRepo, writingWorkflowRepo)
 	contextAssembler.SetGenericBriefRepository(genericBriefRepo)
@@ -359,6 +365,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		WritingWorkflowSvc:  writingWorkflowSvc,
 		GenericBriefRepo:    genericBriefRepo,
 		GenericBriefSvc:     genericBriefSvc,
+		ClarificationRepo:   clarificationRepo,
+		ClarificationSvc:    clarificationSvc,
 	}
 
 	// Seed default domain agents, default project & recurring schedules
@@ -425,6 +433,8 @@ func (a *App) CreateWebHost() (*host.Host, string, error) {
 		ExperimentRepo: a.ExperimentRepo,
 		ExperimentCtrl: a.ExperimentCtrl,
 		DelegationSvc:  a.DelegationSvc,
+		BriefSvc:       a.GenericBriefSvc,
+		ClarifySvc:     a.ClarificationSvc,
 	})
 
 	// 2. Register Agent Modules with isolated dedicated muxes

@@ -203,6 +203,7 @@ func (r *ProjectRepository) Delete(ctx context.Context, id domain.ID) error {
 		`DELETE FROM writing_briefs WHERE project_id = ?`,
 		`DELETE FROM brief_field_history WHERE project_id = ?`,
 		`DELETE FROM project_briefs WHERE project_id = ?`,
+		`DELETE FROM clarification_requests WHERE project_id = ?`,
 	}
 	for _, q := range deleteQueries {
 		if _, err := tx.ExecContext(ctx, q, id); err != nil {

@@ -2,6 +2,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +12,10 @@ import (
 	"testing"
 
 	"github.com/wade/aia/internal/app"
+	domainClarify "github.com/wade/aia/internal/domain/clarification"
 	"github.com/wade/aia/internal/domain/investment"
 	"github.com/wade/aia/internal/domain/memory"
+	domainProject "github.com/wade/aia/internal/domain/project"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/provider/mock"
 	taskService "github.com/wade/aia/internal/service/task"
@@ -617,5 +620,155 @@ func TestWeb_CodingAndWritingAgentModules(t *testing.T) {
 	_ = json.Unmarshal(recAgentTasks.Body.Bytes(), &agentTasksResp)
 	if len(agentTasksResp.Data) == 0 {
 		t.Fatalf("expected at least 1 recent coding task")
+	}
+}
+
+func TestWeb_ClarificationsAndProjectBriefs(t *testing.T) {
+	appInst, handler, token := setupTestWeb(t)
+	defer appInst.Close()
+	ctx := context.Background()
+
+	// 1. Authenticate with one-time token
+	loginBody, _ := json.Marshal(map[string]string{"token": token})
+	reqLogin := httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(loginBody))
+	reqLogin.Header.Set("Content-Type", "application/json")
+	recLogin := httptest.NewRecorder()
+	handler.ServeHTTP(recLogin, reqLogin)
+	if recLogin.Code != http.StatusOK {
+		t.Fatalf("login failed: %d body: %s", recLogin.Code, recLogin.Body.String())
+	}
+	cookie := recLogin.Result().Cookies()[0]
+
+	// 2. Setup project and initialize brief
+	projID := "proj-clarify-web"
+	wsDir := t.TempDir()
+	if _, err := appInst.ProjectSvc.RegisterFromConfig(ctx, projID, "徒步環島規劃", wsDir, domainProject.DomainGeneral); err != nil {
+		t.Fatalf("failed to register project: %v", err)
+	}
+	if _, err := appInst.GenericBriefSvc.InitializeBrief(ctx, projID, "nonfiction_plan", "徒步環台灣本島", wsDir); err != nil {
+		t.Fatalf("failed to initialize brief: %v", err)
+	}
+
+	// 3. GET /api/v1/projects/{id}/brief
+	reqBrief := httptest.NewRequest("GET", "/api/v1/projects/"+projID+"/brief", nil)
+	reqBrief.AddCookie(cookie)
+	recBrief := httptest.NewRecorder()
+	handler.ServeHTTP(recBrief, reqBrief)
+	if recBrief.Code != http.StatusOK {
+		t.Fatalf("expected 200 from GET /api/v1/projects/{id}/brief, got %d: %s", recBrief.Code, recBrief.Body.String())
+	}
+
+	var briefResp struct {
+		Data struct {
+			ProjectID string `json:"project_id"`
+			Domain    string `json:"domain"`
+			Readiness string `json:"readiness"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recBrief.Body.Bytes(), &briefResp); err != nil {
+		t.Fatalf("failed to parse brief json: %v", err)
+	}
+	if briefResp.Data.ProjectID != projID || briefResp.Data.Domain != "nonfiction_plan" {
+		t.Fatalf("unexpected brief response: %+v", briefResp)
+	}
+
+	// 4. Create Clarification Requests
+	reqs := []*domainClarify.ClarificationRequest{
+		{
+			ID:        "cr-web-01",
+			ProjectID: projID,
+			FieldKey:  "route_scope",
+			Question:  "徒步路線是順時針還是逆時針？",
+			Reason:    "規劃路線方向與補給順序",
+			Impact:    "全書各章節結構",
+			Priority:  domainClarify.PriorityP0,
+			Blocking:  true,
+		},
+		{
+			ID:        "cr-web-02",
+			ProjectID: projID,
+			FieldKey:  "accommodation_preference",
+			Question:  "沿途住宿方式？",
+			Reason:    "預算與裝備重量估算",
+			Impact:    "裝備章節篇幅",
+			Priority:  domainClarify.PriorityP1,
+			Blocking:  false,
+		},
+	}
+	if err := appInst.ClarificationSvc.CreateRequests(ctx, reqs); err != nil {
+		t.Fatalf("failed to create clarification requests: %v", err)
+	}
+
+	// 5. GET /api/v1/clarifications?project_id=...
+	reqList := httptest.NewRequest("GET", "/api/v1/clarifications?project_id="+projID, nil)
+	reqList.AddCookie(cookie)
+	recList := httptest.NewRecorder()
+	handler.ServeHTTP(recList, reqList)
+	if recList.Code != http.StatusOK {
+		t.Fatalf("expected 200 from GET /api/v1/clarifications, got %d: %s", recList.Code, recList.Body.String())
+	}
+
+	var listResp struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(recList.Body.Bytes(), &listResp); err != nil || len(listResp.Data) != 2 {
+		t.Fatalf("expected 2 clarifications in response, got %d (err: %v)", len(listResp.Data), err)
+	}
+
+	// 6. GET /api/v1/clarifications/{id}
+	reqGet := httptest.NewRequest("GET", "/api/v1/clarifications/cr-web-01", nil)
+	reqGet.AddCookie(cookie)
+	recGet := httptest.NewRecorder()
+	handler.ServeHTTP(recGet, reqGet)
+	if recGet.Code != http.StatusOK {
+		t.Fatalf("expected 200 from GET /api/v1/clarifications/cr-web-01, got %d: %s", recGet.Code, recGet.Body.String())
+	}
+
+	// 7. POST /api/v1/clarifications/{id}/answer
+	answerPayload, _ := json.Marshal(map[string]string{"answer": "順時針走海線"})
+	reqAns := httptest.NewRequest("POST", "/api/v1/clarifications/cr-web-01/answer", bytes.NewReader(answerPayload))
+	reqAns.Header.Set("Content-Type", "application/json")
+	reqAns.AddCookie(cookie)
+	recAns := httptest.NewRecorder()
+	handler.ServeHTTP(recAns, reqAns)
+	if recAns.Code != http.StatusOK {
+		t.Fatalf("expected 200 from answer, got %d: %s", recAns.Code, recAns.Body.String())
+	}
+
+	var ansResp struct {
+		Data struct {
+			Status string `json:"status"`
+			Answer string `json:"answer"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(recAns.Body.Bytes(), &ansResp)
+	if ansResp.Data.Status != "ANSWERED" || ansResp.Data.Answer != "順時針走海線" {
+		t.Fatalf("unexpected answer response: %+v", ansResp)
+	}
+
+	// 8. GET /api/v1/projects/{id}/brief/history?field=route_scope
+	reqHist := httptest.NewRequest("GET", "/api/v1/projects/"+projID+"/brief/history?field=route_scope", nil)
+	reqHist.AddCookie(cookie)
+	recHist := httptest.NewRecorder()
+	handler.ServeHTTP(recHist, reqHist)
+	if recHist.Code != http.StatusOK {
+		t.Fatalf("expected 200 from history, got %d: %s", recHist.Code, recHist.Body.String())
+	}
+
+	var histResp struct {
+		Data []map[string]any `json:"data"`
+	}
+	_ = json.Unmarshal(recHist.Body.Bytes(), &histResp)
+	if len(histResp.Data) == 0 {
+		t.Fatalf("expected field history entries for route_scope")
+	}
+
+	// 9. POST /api/v1/clarifications/{id}/defer
+	reqDefer := httptest.NewRequest("POST", "/api/v1/clarifications/cr-web-02/defer", nil)
+	reqDefer.AddCookie(cookie)
+	recDefer := httptest.NewRecorder()
+	handler.ServeHTTP(recDefer, reqDefer)
+	if recDefer.Code != http.StatusOK {
+		t.Fatalf("expected 200 from defer, got %d: %s", recDefer.Code, recDefer.Body.String())
 	}
 }

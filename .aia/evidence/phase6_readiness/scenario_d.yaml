@@ -1,0 +1,17 @@
+scenario_id: scenario_d
+executed_at: "2026-11-02T13:13:42Z"
+status: PASSED
+target_domain: coding
+target_project: /tmp/TestPhase6_Readiness_ScenarioD_FailureAndSelfCorrection1054704/002
+steps_executed:
+    - step_index: 1
+      name: ATTEMPT_1_VERIFICATION_FAILURE_AND_RCA
+      result: FAILED_AS_EXPECTED
+    - step_index: 2
+      name: ATTEMPT_2_SELF_CORRECTION_AND_L2_VERIFY
+      result: SUCCESS
+verification:
+    gate: G4
+    level: L2_VERIFIED
+    evidence_hash: sha256-c13d8942810f376859b966d54f4d81ee340d6493c56dff670f84087448bc633c
+rca_or_notes: Attempt 1 failed with compiler diagnostic; system parsed failure, executed clean rollback, self-corrected on attempt 2 without human intervention.

@@ -87,6 +87,20 @@ func TestBookManifest_RealNovels_FullVerification(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {
 			manifestPath := filepath.Join(tc.dir, "book.yaml")
+			if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+				// Fall back to local workspace or ~/src/github/novel
+				homeDir, _ := os.UserHomeDir()
+				altPath := filepath.Join(homeDir, "src/github/novel", tc.id, "book.yaml")
+				if tc.id == "aia-yuan" {
+					altPath = filepath.Join(homeDir, "src/github/aia/novel/yuan/book.yaml")
+				}
+				if _, aErr := os.Stat(altPath); aErr == nil {
+					manifestPath = altPath
+				} else {
+					t.Skipf("skipping %s: manifest path %s not found on this environment", tc.id, manifestPath)
+					return
+				}
+			}
 			data, err := os.ReadFile(manifestPath)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", manifestPath, err)
@@ -131,11 +145,12 @@ func TestBookManifest_RealNovels_FullVerification(t *testing.T) {
 			}
 
 			// 6. Verify declared files actually exist on disk
+			actualDir := filepath.Dir(manifestPath)
 			checkFileExists := func(name, relPath string) {
 				if relPath == "" || relPath == "." {
 					return
 				}
-				targetPath := filepath.Join(tc.dir, relPath)
+				targetPath := filepath.Join(actualDir, relPath)
 				if _, err := os.Stat(targetPath); err != nil {
 					t.Errorf("[%s] declared %s file %q does not exist: %v", tc.id, name, targetPath, err)
 				}

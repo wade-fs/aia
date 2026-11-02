@@ -4,15 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/wade/aia/internal/autonomy/clock"
 	domainAutonomy "github.com/wade/aia/internal/domain/autonomy"
 	"github.com/wade/aia/internal/domain/writing"
 	taskService "github.com/wade/aia/internal/service/task"
-	"gopkg.in/yaml.v3"
 )
 
 // ConsistencyScannerFunc scans manuscript files against character/timeline constraints.
@@ -149,46 +145,14 @@ func (o *ManuscriptConsistencyObserver) Observe(ctx context.Context, projectID s
 	return observations, nil
 }
 
-// defaultScan inspects characters.md (or the file declared in book.yaml) and outline.md if accessible.
+// defaultScan uses the general ConsistencyEngine to validate real manuscript projects (Plan.md §5.3).
 func (o *ManuscriptConsistencyObserver) defaultScan(basePath string) ([]writing.ConsistencyAnomaly, error) {
-	charRelPath := "characters.md"
-	manifestPath := filepath.Join(basePath, "book.yaml")
-	if data, err := os.ReadFile(manifestPath); err == nil {
-		var manifest writing.BookManifest
-		if err := yaml.Unmarshal(data, &manifest); err == nil && manifest.Structure.Characters != "" {
-			charRelPath = manifest.Structure.Characters
-		}
-	}
-
-	charPath := filepath.Join(basePath, charRelPath)
-	if _, err := os.Stat(charPath); err != nil {
+	engine := writing.NewConsistencyEngine()
+	anoms, err := engine.ScanProject(basePath, nil)
+	if err != nil {
 		return nil, nil
 	}
-	content, err := os.ReadFile(charPath)
-	if err != nil {
-		return nil, err
-	}
-
-	var anomalies []writing.ConsistencyAnomaly
-	// Example sanity check against known historical milestones in outline.md:
-	// Guo Zixing (郭子興) died in 1355.
-	// Tuotuo (脫脫) dismissed in 1354 and died in 1355/1356.
-	str := string(content)
-	if strings.Contains(str, "脫脫") && strings.Contains(str, "1360 年依然在位指揮") {
-		anomalies = append(anomalies, writing.ConsistencyAnomaly{
-			ID:                  "anom-tuotuo-1360",
-			AnomalyType:         writing.AnomalyPostMortemAppearance,
-			CharacterName:       "脫脫",
-			ChapterRef:          "characters.md / volume3",
-			StatedYear:          1360,
-			DeathYear:           1355,
-			Description:         "脫脫於至正十五年 (1355) 遭流放賜死，不可在 1360 年繼續擔任朝廷統帥",
-			KnowledgeTier:       writing.TierFactHistory,
-			IsDeliberateFiction: false,
-			Severity:            9,
-		})
-	}
-	return anomalies, nil
+	return anoms, nil
 }
 
 // WritingPilotExecutor handles editorial correction proposals and manuscript errata during Step 8 (Execute).

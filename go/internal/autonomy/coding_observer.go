@@ -4,11 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"time"
 
 	"github.com/wade/aia/internal/autonomy/clock"
 	domainAutonomy "github.com/wade/aia/internal/domain/autonomy"
 	"github.com/wade/aia/internal/domain/coding"
 	taskService "github.com/wade/aia/internal/service/task"
+	"github.com/wade/aia/internal/workspace"
 )
 
 // TestRunnerFunc is a pluggable test execution hook (e.g. running `go test ./...` or checking static diagnostics).
@@ -16,6 +21,9 @@ type TestRunnerFunc func(ctx context.Context, projectDir string) (*coding.TestRu
 
 // DefectScannerFunc scans a repository directory for syntax, build, or test defects.
 type DefectScannerFunc func(ctx context.Context, projectDir string) ([]coding.CodeDefect, error)
+
+// PatchApplierFunc applies a remediating code change in an isolated workspace (Plan.md §5.2).
+type PatchApplierFunc func(ctx context.Context, targetDir, defectID string) error
 
 // CodeHealthObserver monitors repository health, test suite pass rates, and build diagnostics (AIA-15 §24).
 type CodeHealthObserver struct {
@@ -152,8 +160,10 @@ func (o *CodeHealthObserver) Observe(ctx context.Context, projectID string) ([]d
 
 // CodingPilotExecutor executes code diagnostics, applies patches in isolated sandbox, and re-runs test suites.
 type CodingPilotExecutor struct {
-	taskSvc    *taskService.Service
-	testRunner TestRunnerFunc
+	taskSvc      *taskService.Service
+	testRunner   TestRunnerFunc
+	patchApplier PatchApplierFunc
+	useWorktree  bool
 }
 
 func NewCodingPilotExecutor(taskSvc *taskService.Service, runner TestRunnerFunc) *CodingPilotExecutor {
@@ -161,6 +171,14 @@ func NewCodingPilotExecutor(taskSvc *taskService.Service, runner TestRunnerFunc)
 		taskSvc:    taskSvc,
 		testRunner: runner,
 	}
+}
+
+func (p *CodingPilotExecutor) SetPatchApplier(applier PatchApplierFunc) {
+	p.patchApplier = applier
+}
+
+func (p *CodingPilotExecutor) SetUseWorktree(enable bool) {
+	p.useWorktree = enable
 }
 
 func (p *CodingPilotExecutor) CanHandle(init *domainAutonomy.CandidateInitiative) bool {
@@ -188,13 +206,85 @@ func (p *CodingPilotExecutor) Execute(ctx context.Context, init *domainAutonomy.
 	_ = json.Unmarshal([]byte(init.MetadataJSON), &meta)
 
 	defectID, _ := meta["defect_id"].(string)
-	workspace, _ := meta["workspace"].(string)
+	wsPath, _ := meta["workspace"].(string)
 
-	outputSummary := fmt.Sprintf("Coding Agent executed diagnostic and remediation for defect %s in %s", defectID, workspace)
+	isolate := p.useWorktree
+	if iso, ok := meta["isolate_worktree"].(bool); ok && iso {
+		isolate = true
+	}
+	repoRoot := wsPath
+	if rr, ok := meta["repo_root"].(string); ok && rr != "" {
+		repoRoot = rr
+	}
 
-	// If a testRunner is attached, verify remediation in sandbox
-	if p.testRunner != nil && workspace != "" {
-		res, err := p.testRunner(ctx, workspace)
+	// If worktree isolation is requested and repo is git-managed, isolate in a dedicated branch
+	if isolate && repoRoot != "" {
+		if _, statErr := os.Stat(filepath.Join(repoRoot, ".git")); statErr == nil {
+			branchName := fmt.Sprintf("aia-remedy-%s-%d", defectID, time.Now().UnixNano())
+			tmpWorktree, err := os.MkdirTemp("", "aia-worktree-*")
+			if err != nil {
+				return "", fmt.Errorf("failed to allocate temp worktree path: %w", err)
+			}
+			_ = os.Remove(tmpWorktree)
+
+			if err := workspace.CreateIsolatedWorktree(repoRoot, branchName, tmpWorktree); err != nil {
+				return "", fmt.Errorf("git worktree creation failed: %w", err)
+			}
+
+			// Defer worktree removal
+			defer func() {
+				_ = workspace.RemoveIsolatedWorktree(repoRoot, tmpWorktree)
+			}()
+
+			// Apply patch in isolated worktree
+			if p.patchApplier != nil {
+				if err := p.patchApplier(ctx, tmpWorktree, defectID); err != nil {
+					// Clean rollback: delete temporary branch
+					delCmd := exec.Command("git", "branch", "-D", branchName)
+					delCmd.Dir = repoRoot
+					_ = delCmd.Run()
+					return "", fmt.Errorf("patch application failed in isolated worktree: %w", err)
+				}
+			}
+
+			diff, _ := workspace.GetWorktreeDiff(tmpWorktree)
+
+			// L2 verification in isolated worktree
+			if p.testRunner != nil {
+				res, err := p.testRunner(ctx, tmpWorktree)
+				if err != nil || (res != nil && !res.Passed) {
+					// Clean rollback on verification failure: delete branch
+					delCmd := exec.Command("git", "branch", "-D", branchName)
+					delCmd.Dir = repoRoot
+					_ = delCmd.Run()
+					errMsg := "verification failed"
+					if err != nil {
+						errMsg = err.Error()
+					} else if res != nil {
+						errMsg = res.Output
+					}
+					return "", fmt.Errorf("isolated L2 verification failed (clean rollback executed): %s", errMsg)
+				}
+				return fmt.Sprintf("Coding Agent remediated defect %s in isolated branch %s | Verification passed: %d tests OK | Diff: %d bytes",
+					defectID, branchName, res.TotalTests, len(diff)), nil
+			}
+
+			return fmt.Sprintf("Coding Agent applied patch for defect %s in isolated branch %s | Diff: %d bytes",
+				defectID, branchName, len(diff)), nil
+		}
+	}
+
+	// Direct execution fallback if not git-isolated
+	outputSummary := fmt.Sprintf("Coding Agent executed diagnostic and remediation for defect %s in %s", defectID, wsPath)
+
+	if p.patchApplier != nil && wsPath != "" {
+		if err := p.patchApplier(ctx, wsPath, defectID); err != nil {
+			return outputSummary, fmt.Errorf("patch application failed: %w", err)
+		}
+	}
+
+	if p.testRunner != nil && wsPath != "" {
+		res, err := p.testRunner(ctx, wsPath)
 		if err != nil {
 			return outputSummary, fmt.Errorf("remediation verification failed: %w", err)
 		}

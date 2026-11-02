@@ -11,6 +11,7 @@ type ProjectStatus string
 
 const (
 	StatusActive   ProjectStatus = "ACTIVE"
+	StatusPaused   ProjectStatus = "PAUSED"
 	StatusArchived ProjectStatus = "ARCHIVED"
 )
 

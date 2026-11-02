@@ -57,6 +57,7 @@ type ConsistencyAnomaly struct {
 	ChapterRef          string        `json:"chapter_ref"`
 	StatedYear          int           `json:"stated_year"`
 	ExpectedYear        int           `json:"expected_year,omitempty"`
+	BirthYear           int           `json:"birth_year,omitempty"`
 	DeathYear           int           `json:"death_year,omitempty"`
 	Description         string        `json:"description"`
 	KnowledgeTier       KnowledgeTier `json:"knowledge_tier"`
@@ -118,6 +119,12 @@ type ProjectMeta struct {
 	Status      string   `yaml:"status,omitempty" json:"status,omitempty"` // planning, in_progress, completed
 	Tags        []string `yaml:"tags,omitempty" json:"tags,omitempty"`
 }
+
+const (
+	TypeHistoricalFiction    = "historical_fiction"
+	TypeDualWorldHistorical  = "dual_world_historical"
+	TypeXianxiaWorldbuilding = "xianxia_worldbuilding"
+)
 
 // BookScale defines volume, chapter, and scale metrics for large multi-volume works.
 type BookScale struct {

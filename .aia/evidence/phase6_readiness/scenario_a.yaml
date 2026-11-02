@@ -1,0 +1,40 @@
+scenario_id: scenario_a
+executed_at: "2026-11-02T13:13:42Z"
+status: PASSED
+target_domain: writing
+target_project: novel/yuan
+steps_executed:
+    - step_index: 1
+      name: RESOLVE_AND_SECURE_WORKSPACE
+      result: SUCCESS
+      artifacts:
+        - outline.md
+        - characters.md
+    - step_index: 2
+      name: VALIDATE_PROJECT_AND_MANIFEST
+      result: SUCCESS
+      artifacts:
+        - book.yaml
+    - step_index: 3
+      name: MAP_CHAPTERS_AND_VOLUMES
+      result: SUCCESS
+      artifacts:
+        - volume1.md
+        - volume2.md
+        - volume3.md
+        - volume4.md
+        - volume5.md
+        - volume6.md
+    - step_index: 4
+      name: PARSE_CHARACTERS_AND_LIFESPANS
+      result: SUCCESS
+      artifacts:
+        - characters.md
+    - step_index: 5
+      name: CONSISTENCY_BASELINE_SCAN
+      result: SUCCESS
+verification:
+    gate: G1
+    level: L2_VERIFIED
+    evidence_hash: sha256-82f39e0cfcefcb69e699c0ae641c4d0b7d111bb2fea78695ec013604d1f12eb1
+rca_or_notes: Novel novel/yuan fully understood without hardcoded strings; 6 volumes (540 chapters) mapped; character lifespans aligned.

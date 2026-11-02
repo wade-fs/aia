@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -122,4 +123,159 @@ func detectMediaType(filePath string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// FileChange records a filesystem modification within a workspace (Plan.md §4.2).
+type FileChange struct {
+	RelPath    string `json:"rel_path"`
+	ChangeType string `json:"change_type"` // ADDED, MODIFIED, DELETED
+	SHA256     string `json:"sha256,omitempty"`
+}
+
+// ResolveWorkspaceRoot resolves ~, relative paths, and ensures the target directory exists.
+func ResolveWorkspaceRoot(rawPath string) (string, error) {
+	if rawPath == "" {
+		return os.Getwd()
+	}
+	if strings.HasPrefix(rawPath, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("failed to get user home dir: %w", err)
+		}
+		if rawPath == "~" {
+			rawPath = home
+		} else if strings.HasPrefix(rawPath, "~/") {
+			rawPath = filepath.Join(home, rawPath[2:])
+		}
+	}
+	abs, err := filepath.Abs(rawPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve absolute path %s: %w", rawPath, err)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("workspace directory does not exist: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("workspace path is not a directory: %s", abs)
+	}
+	return abs, nil
+}
+
+// ValidateBoundaries verifies that targetPath resides strictly within wsRoot (anti-path-traversal).
+func ValidateBoundaries(wsRoot, targetPath string) (string, error) {
+	absRoot, err := filepath.Abs(wsRoot)
+	if err != nil {
+		return "", fmt.Errorf("invalid workspace root %s: %w", wsRoot, err)
+	}
+	var absTarget string
+	if filepath.IsAbs(targetPath) {
+		absTarget = filepath.Clean(targetPath)
+	} else {
+		absTarget = filepath.Clean(filepath.Join(absRoot, targetPath))
+	}
+
+	rel, err := filepath.Rel(absRoot, absTarget)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+		return "", fmt.Errorf("access denied: path %s escapes workspace root %s", targetPath, wsRoot)
+	}
+	return absTarget, nil
+}
+
+// TrackWorkspaceChanges compares current file hashes against previousHashes and returns the updated map and delta.
+func TrackWorkspaceChanges(wsRoot string, previousHashes map[string]string) (map[string]string, []FileChange, error) {
+	currentHashes := make(map[string]string)
+	var changes []FileChange
+
+	err := filepath.Walk(wsRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, _ := filepath.Rel(wsRoot, path)
+		if rel == "." || strings.HasPrefix(rel, ".git") || strings.HasPrefix(rel, ".cache") {
+			if info.IsDir() && (rel == ".git" || rel == ".cache") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		hash, _, err := computeSHA256(path)
+		if err != nil {
+			return nil
+		}
+		currentHashes[rel] = hash
+
+		prev, exists := previousHashes[rel]
+		if !exists {
+			changes = append(changes, FileChange{
+				RelPath:    rel,
+				ChangeType: "ADDED",
+				SHA256:     hash,
+			})
+		} else if prev != hash {
+			changes = append(changes, FileChange{
+				RelPath:    rel,
+				ChangeType: "MODIFIED",
+				SHA256:     hash,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to scan workspace %s: %w", wsRoot, err)
+	}
+
+	for prevRel := range previousHashes {
+		if _, exists := currentHashes[prevRel]; !exists {
+			changes = append(changes, FileChange{
+				RelPath:    prevRel,
+				ChangeType: "DELETED",
+			})
+		}
+	}
+
+	return currentHashes, changes, nil
+}
+
+// CreateIsolatedWorktree creates a dedicated Git worktree branch for safe modifications (Plan.md §4.4, §10).
+func CreateIsolatedWorktree(repoRoot, branchName, worktreeDir string) error {
+	if _, err := os.Stat(filepath.Join(repoRoot, ".git")); err != nil {
+		return fmt.Errorf("repo root %s is not a git repository: %w", repoRoot, err)
+	}
+	_ = os.RemoveAll(worktreeDir)
+
+	cmd := exec.Command("git", "worktree", "add", "-b", branchName, worktreeDir, "HEAD")
+	cmd.Dir = repoRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		// If branch already exists, try checking it out directly
+		cmdReuse := exec.Command("git", "worktree", "add", worktreeDir, branchName)
+		cmdReuse.Dir = repoRoot
+		if out2, err2 := cmdReuse.CombinedOutput(); err2 != nil {
+			return fmt.Errorf("git worktree add failed: %s (%s): %w", string(out), string(out2), err)
+		}
+	}
+	return nil
+}
+
+// RemoveIsolatedWorktree detaches and cleans up an isolated worktree.
+func RemoveIsolatedWorktree(repoRoot, worktreeDir string) error {
+	cmd := exec.Command("git", "worktree", "remove", "--force", worktreeDir)
+	cmd.Dir = repoRoot
+	_ = cmd.Run()
+	_ = os.RemoveAll(worktreeDir)
+	return nil
+}
+
+// GetWorktreeDiff inspects uncommitted diffs inside a worktree.
+func GetWorktreeDiff(worktreeDir string) (string, error) {
+	cmd := exec.Command("git", "diff", "HEAD")
+	cmd.Dir = worktreeDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git diff failed: %s: %w", string(out), err)
+	}
+	return string(out), nil
 }

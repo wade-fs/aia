@@ -1,0 +1,17 @@
+scenario_id: scenario_b
+executed_at: "2026-11-02T13:13:42Z"
+status: PASSED
+target_domain: writing
+target_project: synthetic-adaptation-novel
+steps_executed:
+    - step_index: 1
+      name: INJECT_CROSS_TIER_REQUIREMENTS
+      result: SUCCESS
+    - step_index: 2
+      name: CLASSIFY_FICTION_VS_CONTRADICTION
+      result: SUCCESS
+verification:
+    gate: G2
+    level: L2_VERIFIED
+    evidence_hash: sha256-a684c38ed72cabc2d817a4939300520bc265e80676e872a0a58b229ae688ee9a
+rca_or_notes: System dynamically adapted to unknown multi-tier requirement; rational NO_ACTION preserved for artistic fiction; high severity ANOMALY emitted for historical post-mortem appearance.

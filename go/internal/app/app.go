@@ -101,6 +101,8 @@ type App struct {
 	GenericBriefSvc     *briefService.Service
 	ClarificationRepo   *repository.ClarificationRepository
 	ClarificationSvc    *clarifyService.Service
+	ProblemRepo         *repository.ProblemRepository
+	PlanRepo            *repository.PlanRepository
 }
 
 func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
@@ -301,6 +303,9 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	briefObs := autonomy.NewBriefCompletenessObserver(genericBriefRepo, projRepo)
 	autonomyEng.RegisterObserver("brief_completeness", briefObs)
 
+	problemRepo := repository.NewProblemRepository(db)
+	planRepo := repository.NewPlanRepository(db)
+
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	contextAssembler := orchestrator.NewContextAssembler(projRepo, memRepo, writingWorkflowRepo)
 	contextAssembler.SetGenericBriefRepository(genericBriefRepo)
@@ -375,6 +380,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		GenericBriefSvc:     genericBriefSvc,
 		ClarificationRepo:   clarificationRepo,
 		ClarificationSvc:    clarificationSvc,
+		ProblemRepo:         problemRepo,
+		PlanRepo:            planRepo,
 	}
 
 	// Seed default domain agents, default project & recurring schedules

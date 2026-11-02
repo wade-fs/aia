@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	execService "github.com/wade/aia/internal/service/execution"
 	invService "github.com/wade/aia/internal/service/investment"
 	taskService "github.com/wade/aia/internal/service/task"
+	"github.com/wade/aia/internal/storage/sqlite/repository"
 	"github.com/wade/aia/internal/web/host"
 )
 
@@ -79,7 +81,51 @@ func (m *InvestmentWebModule) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/info", m.handleInfo)
 	mux.HandleFunc("/instructions", m.handleInstructions)
 	mux.HandleFunc("/prompt", m.handlePrompt)
+	mux.HandleFunc("/tasks", m.handleTasks)
 	return nil
+}
+
+func (m *InvestmentWebModule) handleTasks(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	ctx := r.Context()
+	limit := 10
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+		limit = l
+	}
+	tasks, err := m.taskSvc.List(ctx, repository.TaskFilter{
+		AgentID:     "investment-agent",
+		OrderByDesc: true,
+		Limit:       limit,
+	})
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+
+	items := make([]map[string]any, 0, len(tasks))
+	for _, t := range tasks {
+		item := map[string]any{
+			"id":           t.ID,
+			"title":        t.Title,
+			"description":  t.Description,
+			"agent_id":     t.AgentID,
+			"project_id":   t.ProjectID,
+			"status":       t.Status,
+			"created_at":   t.CreatedAt,
+			"started_at":   t.StartedAt,
+			"completed_at": t.CompletedAt,
+		}
+		if m.execSvc != nil {
+			execs, _ := m.execSvc.ListByTask(ctx, t.ID)
+			if len(execs) > 0 {
+				item["conversation_id"] = execs[0].ConversationID
+				item["execution_id"] = execs[0].ID
+				item["execution_status"] = execs[0].Status
+			}
+		}
+		items = append(items, item)
+	}
+	host.WriteJSON(w, http.StatusOK, items, reqID)
 }
 
 func (m *InvestmentWebModule) handleProfile(w http.ResponseWriter, r *http.Request) {
@@ -452,6 +498,7 @@ func (m *InvestmentWebModule) handlePrompt(w http.ResponseWriter, r *http.Reques
 	var req struct {
 		Prompt    string `json:"prompt"`
 		ProjectID string `json:"project_id"`
+		Async     bool   `json:"async"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Prompt == "" {
 		host.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "prompt is required", reqID)
@@ -480,22 +527,36 @@ func (m *InvestmentWebModule) handlePrompt(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if req.Async {
+		go func() {
+			_ = m.sched.RunTask(context.Background(), t.ID)
+		}()
+		host.WriteJSON(w, http.StatusOK, map[string]any{
+			"task_id": t.ID,
+			"status":  "RUNNING",
+		}, reqID)
+		return
+	}
+
 	if err := m.sched.RunTask(ctx, t.ID); err != nil {
 		host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Task run error: "+err.Error(), reqID)
 		return
 	}
 
 	var latestExec any
+	var convID string
 	if m.execSvc != nil {
 		execs, _ := m.execSvc.ListByTask(ctx, t.ID)
 		if len(execs) > 0 {
 			latestExec = execs[0]
+			convID = execs[0].ConversationID
 		}
 	}
 
 	host.WriteJSON(w, http.StatusOK, map[string]any{
-		"task_id":   t.ID,
-		"status":    "COMPLETED",
-		"execution": latestExec,
+		"task_id":         t.ID,
+		"status":          "COMPLETED",
+		"conversation_id": convID,
+		"execution":       latestExec,
 	}, reqID)
 }

@@ -2,8 +2,10 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -57,6 +59,19 @@ func (s *Service) SetPolicyEvaluator(eval *policy.Evaluator) {
 
 func (s *Service) Execute(ctx context.Context, t *task.Task, ag *agent.Agent, prof profile.ExecutionProfile, contextPrompt string) (*execution.Execution, error) {
 	now := time.Now().UTC()
+
+	// Check if task already has an active (STARTING or RUNNING) execution
+	if s.execRepo != nil {
+		if activeExecs, err := s.execRepo.ListByTask(ctx, t.ID); err == nil {
+			for _, ae := range activeExecs {
+				if ae.Status == execution.StatusStarting || ae.Status == execution.StatusRunning {
+					slog.Info("task already has active execution, reusing in-flight execution", "task_id", t.ID, "execution_id", ae.ID)
+					return &ae, nil
+				}
+			}
+		}
+	}
+
 	if s.evaluator != nil && s.execRepo != nil {
 		dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 		if usedTokens, tErr := s.execRepo.SumTokensSince(ctx, dayStart); tErr == nil {
@@ -86,6 +101,7 @@ func (s *Service) Execute(ctx context.Context, t *task.Task, ag *agent.Agent, pr
 		ProfileVersion: prof.Version,
 		Workspace:      wsPath,
 		Status:         execution.StatusStarting,
+		ProcessID:      os.Getpid(),
 		CreatedAt:      now,
 	}
 
@@ -148,6 +164,16 @@ func (s *Service) Execute(ctx context.Context, t *task.Task, ag *agent.Agent, pr
 				Payload:     ev.Payload,
 				CreatedAt:   ev.Timestamp,
 			})
+
+			if execRecord.ConversationID == "" && len(ev.Payload) > 0 {
+				var generic map[string]any
+				if err := json.Unmarshal(ev.Payload, &generic); err == nil {
+					if cID, ok := generic["conversation_id"].(string); ok && cID != "" {
+						execRecord.ConversationID = cID
+						_ = s.execRepo.UpdateConversationID(context.Background(), execID, cID)
+					}
+				}
+			}
 		}
 	}()
 
@@ -181,7 +207,9 @@ func (s *Service) Execute(ctx context.Context, t *task.Task, ag *agent.Agent, pr
 		return execRecord, nil
 	}
 
-	execRecord.ConversationID = result.ConversationID
+	if result.ConversationID != "" {
+		execRecord.ConversationID = result.ConversationID
+	}
 	execRecord.ResultStatus = result.Status
 	execRecord.InputTokens = result.Usage.InputTokens
 	execRecord.OutputTokens = result.Usage.OutputTokens

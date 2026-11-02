@@ -368,6 +368,8 @@ body.dark-theme {
 
 .btn-accent { background-color: var(--accent); color: #fff; }
 .btn-accent:hover { opacity: 0.9; }
+.btn-danger { background-color: var(--danger); color: #fff; }
+.btn-danger:hover { opacity: 0.9; }
 
 .btn-outline { background: transparent; border-color: var(--border-color); color: var(--text-main); }
 .btn-outline:hover { background-color: var(--bg-elevated); }

@@ -424,6 +424,12 @@ func TestWeb_CodingAndWritingAgentModules(t *testing.T) {
 	if recCodingReg.Code != http.StatusCreated {
 		t.Fatalf("expected 201 from coding/projects, got %d: %s", recCodingReg.Code, recCodingReg.Body.String())
 	}
+	var codingCreated struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(recCodingReg.Body.Bytes(), &codingCreated)
 
 	// 3. Coding Scan
 	codingScanBody, _ := json.Marshal(map[string]string{})
@@ -436,7 +442,16 @@ func TestWeb_CodingAndWritingAgentModules(t *testing.T) {
 		t.Fatalf("expected 200 from coding/scan, got %d: %s", recCodingScan.Code, recCodingScan.Body.String())
 	}
 
-	// 4. Writing Agent Info
+	// 4. Coding Delete Project
+	reqCodingDel := httptest.NewRequest("DELETE", "/api/v1/agents/coding/projects?id="+codingCreated.Data.ID, nil)
+	reqCodingDel.AddCookie(cookie)
+	recCodingDel := httptest.NewRecorder()
+	handler.ServeHTTP(recCodingDel, reqCodingDel)
+	if recCodingDel.Code != http.StatusOK {
+		t.Fatalf("expected 200 from DELETE coding/projects, got %d: %s", recCodingDel.Code, recCodingDel.Body.String())
+	}
+
+	// 5. Writing Agent Info
 	reqWritingInfo := httptest.NewRequest("GET", "/api/v1/agents/writing/info", nil)
 	reqWritingInfo.AddCookie(cookie)
 	recWritingInfo := httptest.NewRecorder()
@@ -445,7 +460,7 @@ func TestWeb_CodingAndWritingAgentModules(t *testing.T) {
 		t.Fatalf("expected 200 from writing/info, got %d: %s", recWritingInfo.Code, recWritingInfo.Body.String())
 	}
 
-	// 5. Writing Register Novel Project
+	// 6. Writing Register Novel Project
 	writingRegBody, _ := json.Marshal(map[string]string{
 		"name": "Test Novel",
 		"path": ".",
@@ -458,8 +473,23 @@ func TestWeb_CodingAndWritingAgentModules(t *testing.T) {
 	if recWritingReg.Code != http.StatusCreated {
 		t.Fatalf("expected 201 from writing/projects, got %d: %s", recWritingReg.Code, recWritingReg.Body.String())
 	}
+	var writingCreated struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(recWritingReg.Body.Bytes(), &writingCreated)
 
-	// 6. Investment Agent Info and Instructions Update
+	// 7. Writing Delete Project
+	reqWritingDel := httptest.NewRequest("DELETE", "/api/v1/agents/writing/projects?id="+writingCreated.Data.ID, nil)
+	reqWritingDel.AddCookie(cookie)
+	recWritingDel := httptest.NewRecorder()
+	handler.ServeHTTP(recWritingDel, reqWritingDel)
+	if recWritingDel.Code != http.StatusOK {
+		t.Fatalf("expected 200 from DELETE writing/projects, got %d: %s", recWritingDel.Code, recWritingDel.Body.String())
+	}
+
+	// 8. Investment Agent Info and Instructions Update
 	reqInvInfo := httptest.NewRequest("GET", "/api/v1/agents/investment/info", nil)
 	reqInvInfo.AddCookie(cookie)
 	recInvInfo := httptest.NewRecorder()
@@ -478,5 +508,67 @@ func TestWeb_CodingAndWritingAgentModules(t *testing.T) {
 	handler.ServeHTTP(recInvInst, reqInvInst)
 	if recInvInst.Code != http.StatusOK {
 		t.Fatalf("expected 200 from investment/instructions, got %d: %s", recInvInst.Code, recInvInst.Body.String())
+	}
+
+	// 9. Prompt Submission and Progress Query
+	promptBody, _ := json.Marshal(map[string]any{
+		"prompt": "Test code analysis prompt",
+		"async":  false,
+	})
+	reqPrompt := httptest.NewRequest("POST", "/api/v1/agents/coding/prompt", bytes.NewReader(promptBody))
+	reqPrompt.AddCookie(cookie)
+	reqPrompt.Header.Set("Content-Type", "application/json")
+	recPrompt := httptest.NewRecorder()
+	handler.ServeHTTP(recPrompt, reqPrompt)
+	if recPrompt.Code != http.StatusOK {
+		t.Fatalf("expected 200 from coding/prompt, got %d: %s", recPrompt.Code, recPrompt.Body.String())
+	}
+
+	var promptResp struct {
+		Data struct {
+			TaskID string `json:"task_id"`
+			Status string `json:"status"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(recPrompt.Body.Bytes(), &promptResp)
+	if promptResp.Data.TaskID == "" {
+		t.Fatalf("expected valid task_id from prompt submission")
+	}
+
+	// 10. Query Task Progress
+	reqProgress := httptest.NewRequest("GET", "/api/v1/tasks/"+promptResp.Data.TaskID+"/progress", nil)
+	reqProgress.AddCookie(cookie)
+	recProgress := httptest.NewRecorder()
+	handler.ServeHTTP(recProgress, reqProgress)
+	if recProgress.Code != http.StatusOK {
+		t.Fatalf("expected 200 from tasks/progress, got %d: %s", recProgress.Code, recProgress.Body.String())
+	}
+
+	var progressResp struct {
+		Data struct {
+			TaskID         string `json:"task_id"`
+			Status         string `json:"status"`
+			ConversationID string `json:"conversation_id"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(recProgress.Body.Bytes(), &progressResp)
+	if progressResp.Data.TaskID != promptResp.Data.TaskID {
+		t.Fatalf("expected progress for task %s, got %s", promptResp.Data.TaskID, progressResp.Data.TaskID)
+	}
+
+	// 11. Query Agent Recent Tasks
+	reqAgentTasks := httptest.NewRequest("GET", "/api/v1/agents/coding/tasks?limit=5", nil)
+	reqAgentTasks.AddCookie(cookie)
+	recAgentTasks := httptest.NewRecorder()
+	handler.ServeHTTP(recAgentTasks, reqAgentTasks)
+	if recAgentTasks.Code != http.StatusOK {
+		t.Fatalf("expected 200 from coding/tasks, got %d: %s", recAgentTasks.Code, recAgentTasks.Body.String())
+	}
+	var agentTasksResp struct {
+		Data []map[string]any `json:"data"`
+	}
+	_ = json.Unmarshal(recAgentTasks.Body.Bytes(), &agentTasksResp)
+	if len(agentTasksResp.Data) == 0 {
+		t.Fatalf("expected at least 1 recent coding task")
 	}
 }

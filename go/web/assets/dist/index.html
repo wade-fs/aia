@@ -547,9 +547,38 @@
               <span id="inv-prompt-status" class="text-muted"></span>
             </div>
             <div id="inv-prompt-output-box" class="mt-3 hidden">
-              <h4 class="mt-2">執行輸出：</h4>
-              <pre id="inv-prompt-output" class="code-block"></pre>
+              <div class="d-flex justify-between align-center mb-2">
+                <h4 style="margin:0;">執行輸出與進度 (<code id="inv-prompt-task-id">-</code> | agy: <code id="inv-prompt-conv-id">-</code>)：</h4>
+                <div>
+                  <span id="inv-prompt-badge" class="badge badge-RUNNING">執行中</span>
+                  <span id="inv-prompt-time" class="text-muted text-sm ml-2"></span>
+                </div>
+              </div>
+              <pre id="inv-prompt-output" class="code-block" style="max-height: 420px; overflow-y: auto;"></pre>
             </div>
+          </div>
+        </div>
+
+        <!-- Investment Recent Tasks & History -->
+        <div class="card mt-4">
+          <div class="card-header d-flex justify-between align-center">
+            <h3>📋 最近投資研究任務與進度 (Recent Investment Tasks)</h3>
+            <button class="btn btn-sm btn-outline" onclick="app.loadInvestmentTasks()">🔄 重新載入任務進度</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table" id="inv-tasks-table">
+              <thead>
+                <tr>
+                  <th>任務 ID</th>
+                  <th>agy 對話 ID</th>
+                  <th>建立時間</th>
+                  <th>任務標題 / 提示詞</th>
+                  <th>狀態</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="6" class="text-center text-muted">尚無任務歷史</td></tr></tbody>
+            </table>
           </div>
         </div>
 
@@ -644,9 +673,38 @@
               <span id="coding-prompt-status" class="text-muted"></span>
             </div>
             <div id="coding-prompt-output-box" class="mt-3 hidden">
-              <h4 class="mt-2">執行輸出：</h4>
-              <pre id="coding-prompt-output" class="code-block"></pre>
+              <div class="d-flex justify-between align-center mb-2">
+                <h4 style="margin:0;">執行輸出與進度 (<code id="coding-prompt-task-id">-</code> | agy: <code id="coding-prompt-conv-id">-</code>)：</h4>
+                <div>
+                  <span id="coding-prompt-badge" class="badge badge-RUNNING">執行中</span>
+                  <span id="coding-prompt-time" class="text-muted text-sm ml-2"></span>
+                </div>
+              </div>
+              <pre id="coding-prompt-output" class="code-block" style="max-height: 420px; overflow-y: auto;"></pre>
             </div>
+          </div>
+        </div>
+
+        <!-- Coding Recent Tasks & History -->
+        <div class="card mt-4">
+          <div class="card-header d-flex justify-between align-center">
+            <h3>📋 最近代碼任務與執行進度 (Recent Coding Tasks)</h3>
+            <button class="btn btn-sm btn-outline" onclick="app.loadCodingTasks()">🔄 重新載入任務進度</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table" id="coding-tasks-table">
+              <thead>
+                <tr>
+                  <th>任務 ID</th>
+                  <th>agy 對話 ID</th>
+                  <th>建立時間</th>
+                  <th>任務標題 / 提示詞</th>
+                  <th>狀態</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="6" class="text-center text-muted">尚無任務歷史</td></tr></tbody>
+            </table>
           </div>
         </div>
 
@@ -755,9 +813,38 @@
               <span id="writing-prompt-status" class="text-muted"></span>
             </div>
             <div id="writing-prompt-output-box" class="mt-3 hidden">
-              <h4 class="mt-2">執行輸出：</h4>
-              <pre id="writing-prompt-output" class="code-block"></pre>
+              <div class="d-flex justify-between align-center mb-2">
+                <h4 style="margin:0;">執行輸出與進度 (<code id="writing-prompt-task-id">-</code> | agy: <code id="writing-prompt-conv-id">-</code>)：</h4>
+                <div>
+                  <span id="writing-prompt-badge" class="badge badge-RUNNING">執行中</span>
+                  <span id="writing-prompt-time" class="text-muted text-sm ml-2"></span>
+                </div>
+              </div>
+              <pre id="writing-prompt-output" class="code-block" style="max-height: 420px; overflow-y: auto;"></pre>
             </div>
+          </div>
+        </div>
+
+        <!-- Writing Recent Tasks & History -->
+        <div class="card mt-4">
+          <div class="card-header d-flex justify-between align-center">
+            <h3>📋 最近寫作任務與執行進度 (Recent Writing Tasks)</h3>
+            <button class="btn btn-sm btn-outline" onclick="app.loadWritingTasks()">🔄 重新載入任務進度</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table" id="writing-tasks-table">
+              <thead>
+                <tr>
+                  <th>任務 ID</th>
+                  <th>agy 對話 ID</th>
+                  <th>建立時間</th>
+                  <th>任務標題 / 提示詞</th>
+                  <th>狀態</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="6" class="text-center text-muted">尚無任務歷史</td></tr></tbody>
+            </table>
           </div>
         </div>
 

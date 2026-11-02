@@ -18,6 +18,11 @@ clean:
 	@$(MAKE) -C go clean
 
 # Background Service Management (systemd user daemon)
+reinstall_service:
+	@./go/scripts/service.sh uninstall
+	@sleep 1
+	@./go/scripts/service.sh install
+
 install_service:
 	@./go/scripts/service.sh install
 

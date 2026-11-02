@@ -664,6 +664,13 @@ const app = {
       } catch (e) {
         console.warn('Investment agent info error:', e);
       }
+
+      // 3. Recent Tasks & History
+      await this.loadInvestmentTasks();
+      const activeTask = localStorage.getItem('aia_active_task_investment');
+      if (activeTask) {
+        this.trackTaskProgress('investment', activeTask);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -966,36 +973,54 @@ const app = {
   },
 
   // ----------------------------------------------------------------
-  // Investment Prompt
+  // Investment Prompt & Tasks
   // ----------------------------------------------------------------
   async sendInvestmentPrompt() {
     const input = document.getElementById('inv-prompt-input');
     const status = document.getElementById('inv-prompt-status');
-    const outBox = document.getElementById('inv-prompt-output-box');
-    const outPre = document.getElementById('inv-prompt-output');
     const prompt = input.value.trim();
     if (!prompt) return this.showToast('請輸入投資研究指令', 'error');
 
-    status.textContent = '⏳ 執行任務中...';
+    status.textContent = '⏳ 指派任務中...';
     try {
       const res = await this.apiCall('/api/v1/agents/investment/prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ prompt, async: true })
       });
-      status.textContent = '✅ 任務完成';
-      outBox.classList.remove('hidden');
-      let outText = `任務 ID: ${res.task_id}\n狀態: ${res.status}`;
-      if (res.execution) {
-        outText += `\n執行 ID: ${res.execution.id || ''}\nResult: ${res.execution.result_status || ''}\nTokens: ${res.execution.total_tokens || 0}`;
-        if (res.execution.error_message) outText += `\nError: ${res.execution.error_message}`;
-      }
-      outPre.textContent = outText;
-      this.showToast('投資任務已成功執行', 'success');
-      this.loadInvestment();
+      status.textContent = '⏳ 任務執行中...';
+      localStorage.setItem('aia_active_task_investment', res.task_id);
+      input.value = '';
+      this.trackTaskProgress('investment', res.task_id);
+      this.loadInvestmentTasks();
     } catch (e) {
-      status.textContent = '❌ 執行失敗: ' + e.message;
+      status.textContent = '❌ 指派失敗: ' + e.message;
       this.showToast(e.message, 'error');
+    }
+  },
+
+  async loadInvestmentTasks() {
+    try {
+      const res = await this.apiCall('/api/v1/agents/investment/tasks?limit=8');
+      const tbody = document.querySelector('#inv-tasks-table tbody');
+      if (res && res.length > 0) {
+        tbody.innerHTML = res.map(t => `
+          <tr>
+            <td><code>${t.id.substring(0, 8)}</code></td>
+            <td><code title="${t.conversation_id || ''}">${t.conversation_id ? t.conversation_id.substring(0, 8) : '-'}</code></td>
+            <td>${this.formatTime(t.created_at)}</td>
+            <td><strong>${this.escape(t.title)}</strong></td>
+            <td><span class="badge badge-${t.status}">${t.status}</span></td>
+            <td>
+              <button class="btn btn-sm btn-outline" onclick="app.viewTaskProgress('investment', '${t.id}')">🔍 查看日誌/進度</button>
+            </td>
+          </tr>
+        `).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">尚無任務歷史</td></tr>';
+      }
+    } catch (e) {
+      console.error(e);
     }
   },
 
@@ -1038,6 +1063,7 @@ const app = {
             <td><code>${this.escape(p.workspace)}</code></td>
             <td>
               <button class="btn btn-sm btn-outline" onclick="app.runCodingScan('${this.escape(p.id)}')">🔍 掃描代碼</button>
+              <button class="btn btn-sm btn-outline text-danger ml-1" title="從 AIA 解除註冊" onclick="app.deleteCodingRepo('${this.escape(p.id)}', '${this.escape(p.name)}')">🗑️ 移除</button>
             </td>
           </tr>
         `).join('');
@@ -1059,6 +1085,13 @@ const app = {
         if (verEl) verEl.textContent = `v${info.version || 1}`;
         const instEl = document.getElementById('coding-instructions-input');
         if (instEl && !instEl.value) instEl.value = info.instructions || '';
+      }
+
+      // 3. Recent Tasks & History
+      await this.loadCodingTasks();
+      const activeTask = localStorage.getItem('aia_active_task_coding');
+      if (activeTask) {
+        this.trackTaskProgress('coding', activeTask);
       }
     } catch (e) {
       console.error('Failed to load coding agent data:', e);
@@ -1088,6 +1121,22 @@ const app = {
       this.loadCoding();
     } catch (e) {
       this.showToast('註冊失敗: ' + e.message, 'error');
+    }
+  },
+
+  async deleteCodingRepo(projectID, name) {
+    if (!projectID) return;
+    if (!confirm(`確定要從 AIA 解除註冊代碼專案「${name || projectID}」嗎？\n\n提示：此操作只會從 AIA 平台移除專案管理與健康度掃描，不會刪除硬碟上的實際代碼庫。`)) {
+      return;
+    }
+    try {
+      await this.apiCall('/api/v1/agents/coding/projects?id=' + encodeURIComponent(projectID), {
+        method: 'DELETE'
+      });
+      this.showToast('代碼專案已解除註冊', 'success');
+      this.loadCoding();
+    } catch (e) {
+      this.showToast('移除失敗: ' + e.message, 'error');
     }
   },
 
@@ -1128,33 +1177,53 @@ const app = {
     const projectSelect = document.getElementById('coding-prompt-project');
     const input = document.getElementById('coding-prompt-input');
     const status = document.getElementById('coding-prompt-status');
-    const outBox = document.getElementById('coding-prompt-output-box');
-    const outPre = document.getElementById('coding-prompt-output');
     const prompt = input.value.trim();
     if (!prompt) return this.showToast('請輸入代碼指令', 'error');
 
-    status.textContent = '⏳ 執行代碼任務中...';
+    status.textContent = '⏳ 指派任務中...';
     try {
       const res = await this.apiCall('/api/v1/agents/coding/prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt,
-          project_id: projectSelect.value || ''
+          project_id: projectSelect.value || '',
+          async: true
         })
       });
-      status.textContent = '✅ 任務完成';
-      outBox.classList.remove('hidden');
-      let outText = `任務 ID: ${res.task_id}\n狀態: ${res.status}`;
-      if (res.execution) {
-        outText += `\n執行 ID: ${res.execution.id || ''}\nResult: ${res.execution.result_status || ''}\nTokens: ${res.execution.total_tokens || 0}`;
-        if (res.execution.error_message) outText += `\nError: ${res.execution.error_message}`;
-      }
-      outPre.textContent = outText;
-      this.showToast('代碼任務已成功執行', 'success');
+      status.textContent = '⏳ 任務執行中...';
+      localStorage.setItem('aia_active_task_coding', res.task_id);
+      input.value = '';
+      this.trackTaskProgress('coding', res.task_id);
+      this.loadCodingTasks();
     } catch (e) {
-      status.textContent = '❌ 執行失敗: ' + e.message;
+      status.textContent = '❌ 指派失敗: ' + e.message;
       this.showToast(e.message, 'error');
+    }
+  },
+
+  async loadCodingTasks() {
+    try {
+      const res = await this.apiCall('/api/v1/agents/coding/tasks?limit=8');
+      const tbody = document.querySelector('#coding-tasks-table tbody');
+      if (res && res.length > 0) {
+        tbody.innerHTML = res.map(t => `
+          <tr>
+            <td><code>${t.id.substring(0, 8)}</code></td>
+            <td><code title="${t.conversation_id || ''}">${t.conversation_id ? t.conversation_id.substring(0, 8) : '-'}</code></td>
+            <td>${this.formatTime(t.created_at)}</td>
+            <td><strong>${this.escape(t.title)}</strong></td>
+            <td><span class="badge badge-${t.status}">${t.status}</span></td>
+            <td>
+              <button class="btn btn-sm btn-outline" onclick="app.viewTaskProgress('coding', '${t.id}')">🔍 查看日誌/進度</button>
+            </td>
+          </tr>
+        `).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">尚無任務歷史</td></tr>';
+      }
+    } catch (e) {
+      console.error(e);
     }
   },
 
@@ -1199,6 +1268,7 @@ const app = {
             <td>
               <button class="btn btn-sm btn-primary" onclick="app.runWritingScan('${this.escape(p.id)}')">📖 史實校勘</button>
               <button class="btn btn-sm btn-outline ml-1" onclick="app.viewWritingManifest('${this.escape(p.id)}')">📋 檢視 Manifest</button>
+              <button class="btn btn-sm btn-outline text-danger ml-1" title="從 AIA 解除註冊" onclick="app.deleteWritingProject('${this.escape(p.id)}', '${this.escape(p.name)}')">🗑️ 移除</button>
             </td>
           </tr>
         `).join('');
@@ -1220,6 +1290,13 @@ const app = {
         if (verEl) verEl.textContent = `v${info.version || 1}`;
         const instEl = document.getElementById('writing-instructions-input');
         if (instEl && !instEl.value) instEl.value = info.instructions || '';
+      }
+
+      // 3. Recent Tasks & History
+      await this.loadWritingTasks();
+      const activeTask = localStorage.getItem('aia_active_task_writing');
+      if (activeTask) {
+        this.trackTaskProgress('writing', activeTask);
       }
     } catch (e) {
       console.error('Failed to load writing agent data:', e);
@@ -1249,6 +1326,22 @@ const app = {
       this.loadWriting();
     } catch (e) {
       this.showToast('註冊失敗: ' + e.message, 'error');
+    }
+  },
+
+  async deleteWritingProject(projectID, name) {
+    if (!projectID) return;
+    if (!confirm(`確定要從 AIA 解除註冊小說目錄「${name || projectID}」嗎？\n\n提示：此操作只會從 AIA 平台移除專案管理與史實校勘，不會刪除硬碟上的實際小說檔案。`)) {
+      return;
+    }
+    try {
+      await this.apiCall('/api/v1/agents/writing/projects?id=' + encodeURIComponent(projectID), {
+        method: 'DELETE'
+      });
+      this.showToast('小說專案已解除註冊', 'success');
+      this.loadWriting();
+    } catch (e) {
+      this.showToast('移除失敗: ' + e.message, 'error');
     }
   },
 
@@ -1304,33 +1397,53 @@ const app = {
     const projectSelect = document.getElementById('writing-prompt-project');
     const input = document.getElementById('writing-prompt-input');
     const status = document.getElementById('writing-prompt-status');
-    const outBox = document.getElementById('writing-prompt-output-box');
-    const outPre = document.getElementById('writing-prompt-output');
     const prompt = input.value.trim();
     if (!prompt) return this.showToast('請輸入寫作指令', 'error');
 
-    status.textContent = '⏳ 執行寫作任務中...';
+    status.textContent = '⏳ 指派任務中...';
     try {
       const res = await this.apiCall('/api/v1/agents/writing/prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt,
-          project_id: projectSelect.value || ''
+          project_id: projectSelect.value || '',
+          async: true
         })
       });
-      status.textContent = '✅ 任務完成';
-      outBox.classList.remove('hidden');
-      let outText = `任務 ID: ${res.task_id}\n狀態: ${res.status}`;
-      if (res.execution) {
-        outText += `\n執行 ID: ${res.execution.id || ''}\nResult: ${res.execution.result_status || ''}\nTokens: ${res.execution.total_tokens || 0}`;
-        if (res.execution.error_message) outText += `\nError: ${res.execution.error_message}`;
-      }
-      outPre.textContent = outText;
-      this.showToast('寫作任務已成功執行', 'success');
+      status.textContent = '⏳ 任務執行中...';
+      localStorage.setItem('aia_active_task_writing', res.task_id);
+      input.value = '';
+      this.trackTaskProgress('writing', res.task_id);
+      this.loadWritingTasks();
     } catch (e) {
-      status.textContent = '❌ 執行失敗: ' + e.message;
+      status.textContent = '❌ 指派失敗: ' + e.message;
       this.showToast(e.message, 'error');
+    }
+  },
+
+  async loadWritingTasks() {
+    try {
+      const res = await this.apiCall('/api/v1/agents/writing/tasks?limit=8');
+      const tbody = document.querySelector('#writing-tasks-table tbody');
+      if (res && res.length > 0) {
+        tbody.innerHTML = res.map(t => `
+          <tr>
+            <td><code>${t.id.substring(0, 8)}</code></td>
+            <td><code title="${t.conversation_id || ''}">${t.conversation_id ? t.conversation_id.substring(0, 8) : '-'}</code></td>
+            <td>${this.formatTime(t.created_at)}</td>
+            <td><strong>${this.escape(t.title)}</strong></td>
+            <td><span class="badge badge-${t.status}">${t.status}</span></td>
+            <td>
+              <button class="btn btn-sm btn-outline" onclick="app.viewTaskProgress('writing', '${t.id}')">🔍 查看日誌/進度</button>
+            </td>
+          </tr>
+        `).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">尚無任務歷史</td></tr>';
+      }
+    } catch (e) {
+      console.error(e);
     }
   },
 
@@ -1352,6 +1465,112 @@ const app = {
       status.textContent = '❌ 儲存失敗';
       this.showToast('儲存失敗: ' + e.message, 'error');
     }
+  },
+
+  // ----------------------------------------------------------------
+  // Generic Task Progress & Streaming Tracker
+  // ----------------------------------------------------------------
+  taskPollTimers: {},
+
+  trackTaskProgress(agentID, taskID) {
+    if (!taskID) return;
+    const prefixMap = {
+      'investment': 'inv',
+      'investment-agent': 'inv',
+      'coding': 'coding',
+      'coding-agent': 'coding',
+      'writing': 'writing',
+      'writing-agent': 'writing'
+    };
+    const pfx = prefixMap[agentID] || agentID;
+
+    const outBox = document.getElementById(`${pfx}-prompt-output-box`);
+    const outPre = document.getElementById(`${pfx}-prompt-output`);
+    const taskIdEl = document.getElementById(`${pfx}-prompt-task-id`);
+    const badgeEl = document.getElementById(`${pfx}-prompt-badge`);
+    const timeEl = document.getElementById(`${pfx}-prompt-time`);
+    const statusEl = document.getElementById(`${pfx}-prompt-status`);
+
+    if (outBox) outBox.classList.remove('hidden');
+    if (taskIdEl) taskIdEl.textContent = taskID.substring(0, 8);
+
+    if (this.taskPollTimers[agentID]) {
+      clearInterval(this.taskPollTimers[agentID]);
+      delete this.taskPollTimers[agentID];
+    }
+
+    const startTime = Date.now();
+    const poll = async () => {
+      try {
+        const data = await this.apiCall(`/api/v1/tasks/${taskID}/progress`);
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+        if (badgeEl) {
+          badgeEl.className = `badge badge-${data.status}`;
+          badgeEl.textContent = data.status === 'RUNNING' ? '執行中' : (data.status === 'COMPLETED' ? '已完成' : data.status);
+        }
+        if (timeEl) {
+          timeEl.textContent = data.status === 'RUNNING' ? `耗時: ${elapsed}s` : `完成於: ${this.formatTime(data.completed_at || data.created_at)}`;
+        }
+        if (statusEl) {
+          statusEl.textContent = data.status === 'RUNNING' ? '⏳ 背景執行中...' : (data.status === 'COMPLETED' ? '✅ 任務已完成' : `狀態: ${data.status}`);
+        }
+
+        const convId = data.conversation_id || (data.execution && data.execution.conversation_id) || '';
+        const convIdEl = document.getElementById(`${pfx}-prompt-conv-id`);
+        if (convIdEl) {
+          convIdEl.textContent = convId ? convId.substring(0, 8) : '-';
+          convIdEl.title = convId || '等待 agy 對話 ID 分配中...';
+        }
+
+        let displayText = `【任務 ID】: ${data.task_id}\n【任務標題】: ${data.title}\n【當前狀態】: ${data.status}`;
+        if (convId) {
+          displayText += `\n【agy 對話 ID】: ${convId}`;
+        }
+        if (data.execution) {
+          displayText += `\n【執行 ID】: ${data.execution.id || ''}  |  【Result】: ${data.execution.result_status || '-'}  |  【Tokens】: ${data.execution.total_tokens || 0}`;
+          if (data.execution.error_message) displayText += `\n【Error】: ${data.execution.error_message}`;
+        }
+        if (data.output && data.output.trim() !== '') {
+          displayText += `\n\n--- 執行輸出與觀測日誌 ---\n${data.output}`;
+        } else if (data.status === 'RUNNING') {
+          displayText += `\n\n⏳ 任務正在沙盒工作區執行中，請稍候... (已運行 ${elapsed} 秒)`;
+        }
+        if (outPre) {
+          outPre.textContent = displayText;
+          outPre.scrollTop = outPre.scrollHeight;
+        }
+
+        if (data.status === 'COMPLETED' || data.status === 'FAILED' || data.status === 'CANCELLED') {
+          clearInterval(this.taskPollTimers[agentID]);
+          delete this.taskPollTimers[agentID];
+          localStorage.removeItem('aia_active_task_' + agentID);
+          if (data.status === 'COMPLETED') {
+            this.showToast(`任務 (${taskID.substring(0, 8)}) 已成功完成！`, 'success');
+          } else {
+            this.showToast(`任務 (${taskID.substring(0, 8)}) 結束: ${data.status}`, 'warning');
+          }
+          if (pfx === 'coding') this.loadCodingTasks();
+          else if (pfx === 'writing') this.loadWritingTasks();
+          else if (pfx === 'inv') this.loadInvestmentTasks();
+        }
+      } catch (e) {
+        console.error('Progress poll error:', e);
+      }
+    };
+
+    poll();
+    this.taskPollTimers[agentID] = setInterval(poll, 1500);
+  },
+
+  async viewTaskProgress(agentID, taskID) {
+    const prefixMap = { 'investment': 'inv', 'coding': 'coding', 'writing': 'writing' };
+    const pfx = prefixMap[agentID] || agentID;
+    const box = document.getElementById(`${pfx}-prompt-output-box`);
+    if (box) {
+      box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    this.trackTaskProgress(agentID, taskID);
   },
 
   // Helpers

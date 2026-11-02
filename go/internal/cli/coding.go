@@ -179,6 +179,9 @@ var codingPromptCmd = &cobra.Command{
 				exitCode = *latest.ExitCode
 			}
 			fmt.Printf("\n=== Execution Summary (Status: %s, ExitCode: %d, Result: %s) ===\n", latest.Status, exitCode, latest.ResultStatus)
+			if latest.ConversationID != "" {
+				fmt.Printf("agy Conversation ID: %s\n", latest.ConversationID)
+			}
 			if latest.ErrorMessage != "" {
 				fmt.Printf("Error: %s\n", latest.ErrorMessage)
 			}
@@ -228,6 +231,25 @@ var codingInfoCmd = &cobra.Command{
 	},
 }
 
+var codingRemoveCmd = &cobra.Command{
+	Use:     "remove <project-id>",
+	Aliases: []string{"rm", "delete", "deregister"},
+	Short:   "Remove / unregister a coding repository from AIA",
+	Args:    cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		projectID := args[0]
+		if err := appInst.ProjectSvc.Delete(ctx, projectID); err != nil {
+			return fmt.Errorf("failed to remove coding project %s: %w", projectID, err)
+		}
+		if appInst.CodingObserver != nil {
+			appInst.CodingObserver.UnregisterProjectDir(projectID)
+		}
+		fmt.Printf("✓ Successfully unregistered Coding repository %s from AIA (local files preserved).\n", projectID)
+		return nil
+	},
+}
+
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
@@ -244,6 +266,7 @@ func init() {
 
 	codingCmd.AddCommand(codingReposCmd)
 	codingCmd.AddCommand(codingRegisterCmd)
+	codingCmd.AddCommand(codingRemoveCmd)
 	codingCmd.AddCommand(codingScanCmd)
 	codingCmd.AddCommand(codingPromptCmd)
 	codingCmd.AddCommand(codingInfoCmd)

@@ -1,11 +1,13 @@
 package agents
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/wade/aia/internal/autonomy"
 	"github.com/wade/aia/internal/config"
@@ -16,6 +18,7 @@ import (
 	execService "github.com/wade/aia/internal/service/execution"
 	projectService "github.com/wade/aia/internal/service/project"
 	taskService "github.com/wade/aia/internal/service/task"
+	"github.com/wade/aia/internal/storage/sqlite/repository"
 	"github.com/wade/aia/internal/web/host"
 	"gopkg.in/yaml.v3"
 )
@@ -71,7 +74,51 @@ func (m *WritingWebModule) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/manifest", m.handleManifest)
 	mux.HandleFunc("/scan", m.handleScan)
 	mux.HandleFunc("/prompt", m.handlePrompt)
+	mux.HandleFunc("/tasks", m.handleTasks)
 	return nil
+}
+
+func (m *WritingWebModule) handleTasks(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	ctx := r.Context()
+	limit := 10
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
+		limit = l
+	}
+	tasks, err := m.taskSvc.List(ctx, repository.TaskFilter{
+		AgentID:     "writing-agent",
+		OrderByDesc: true,
+		Limit:       limit,
+	})
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+
+	items := make([]map[string]any, 0, len(tasks))
+	for _, t := range tasks {
+		item := map[string]any{
+			"id":           t.ID,
+			"title":        t.Title,
+			"description":  t.Description,
+			"agent_id":     t.AgentID,
+			"project_id":   t.ProjectID,
+			"status":       t.Status,
+			"created_at":   t.CreatedAt,
+			"started_at":   t.StartedAt,
+			"completed_at": t.CompletedAt,
+		}
+		if m.execSvc != nil {
+			execs, _ := m.execSvc.ListByTask(ctx, t.ID)
+			if len(execs) > 0 {
+				item["conversation_id"] = execs[0].ConversationID
+				item["execution_id"] = execs[0].ID
+				item["execution_status"] = execs[0].Status
+			}
+		}
+		items = append(items, item)
+	}
+	host.WriteJSON(w, http.StatusOK, items, reqID)
 }
 
 func (m *WritingWebModule) handleInfo(w http.ResponseWriter, r *http.Request) {
@@ -198,6 +245,42 @@ func (m *WritingWebModule) handleProjects(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if r.Method == http.MethodDelete {
+		projectID := r.URL.Query().Get("id")
+		if projectID == "" {
+			projectID = r.URL.Query().Get("project_id")
+		}
+		if projectID == "" {
+			var body struct {
+				ID        string `json:"id"`
+				ProjectID string `json:"project_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				projectID = body.ID
+				if projectID == "" {
+					projectID = body.ProjectID
+				}
+			}
+		}
+		if projectID == "" {
+			host.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "project id is required", reqID)
+			return
+		}
+
+		if err := m.projSvc.Delete(ctx, projectID); err != nil {
+			host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete writing project: "+err.Error(), reqID)
+			return
+		}
+		if m.writingObs != nil {
+			m.writingObs.UnregisterProjectPath(projectID)
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]any{
+			"message": "Writing project unregistered successfully",
+			"id":      projectID,
+		}, reqID)
+		return
+	}
+
 	host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not supported", reqID)
 }
 
@@ -291,6 +374,7 @@ func (m *WritingWebModule) handlePrompt(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		Prompt    string `json:"prompt"`
 		ProjectID string `json:"project_id"`
+		Async     bool   `json:"async"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Prompt == "" {
 		host.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "prompt is required", reqID)
@@ -324,6 +408,17 @@ func (m *WritingWebModule) handlePrompt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if req.Async {
+		go func() {
+			_ = m.sched.RunTask(context.Background(), t.ID)
+		}()
+		host.WriteJSON(w, http.StatusOK, map[string]any{
+			"task_id": t.ID,
+			"status":  "RUNNING",
+		}, reqID)
+		return
+	}
+
 	if err := m.sched.RunTask(ctx, t.ID); err != nil {
 		host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Task run error: "+err.Error(), reqID)
 		return
@@ -331,13 +426,16 @@ func (m *WritingWebModule) handlePrompt(w http.ResponseWriter, r *http.Request) 
 
 	execs, _ := m.execSvc.ListByTask(ctx, t.ID)
 	var latestExec any
+	var convID string
 	if len(execs) > 0 {
 		latestExec = execs[0]
+		convID = execs[0].ConversationID
 	}
 
 	host.WriteJSON(w, http.StatusOK, map[string]any{
-		"task_id":   t.ID,
-		"status":    "COMPLETED",
-		"execution": latestExec,
+		"task_id":         t.ID,
+		"status":          "COMPLETED",
+		"conversation_id": convID,
+		"execution":       latestExec,
 	}, reqID)
 }

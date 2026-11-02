@@ -2,8 +2,11 @@ package recovery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -67,6 +70,7 @@ func (m *Manager) Recover(ctx context.Context) (*Summary, error) {
 	for _, t := range runningTasks {
 		execs, err := m.executionRepo.ListByTask(ctx, t.ID)
 		alreadySucceeded := false
+		stillActive := false
 		if err == nil {
 			for _, ex := range execs {
 				// Case A: Execution already fully completed before crash
@@ -145,6 +149,12 @@ func (m *Manager) Recover(ctx context.Context) (*Summary, error) {
 
 				// Case C: Execution interrupted before completion
 				if ex.Status == execution.StatusRunning || ex.Status == execution.StatusStarting {
+					if ex.ProcessID > 0 && isProcessAlive(ex.ProcessID) && ex.ProcessID != os.Getpid() {
+						slog.Info("execution is actively running in background daemon process, skipping interruption", "task_id", t.ID, "execution_id", ex.ID, "pid", ex.ProcessID)
+						stillActive = true
+						break
+					}
+
 					ex.Status = execution.StatusInterrupted
 					ex.ErrorMessage = "Process interrupted by unexpected runtime shutdown"
 					now := time.Now().UTC()
@@ -153,6 +163,11 @@ func (m *Manager) Recover(ctx context.Context) (*Summary, error) {
 					summary.InterruptedExecutions++
 				}
 			}
+		}
+
+		if stillActive {
+			// Task has an active execution in a live daemon process. Do not reconcile or retry.
+			continue
 		}
 
 		if alreadySucceeded {
@@ -205,3 +220,16 @@ func (m *Manager) Recover(ctx context.Context) (*Summary, error) {
 
 	return summary, nil
 }
+
+func isProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+

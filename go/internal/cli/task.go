@@ -112,7 +112,11 @@ var taskShowCmd = &cobra.Command{
 		if len(execs) > 0 {
 			fmt.Println("Executions:")
 			for _, e := range execs {
-				fmt.Printf("  - [%s] Status: %s, Started: %v, Error: %s\n", e.ID[:8], e.Status, e.StartedAt, e.ErrorMessage)
+				conv := ""
+				if e.ConversationID != "" {
+					conv = fmt.Sprintf(", agy Conv: %s", e.ConversationID)
+				}
+				fmt.Printf("  - [%s] Status: %s%s, Started: %v, Error: %s\n", e.ID[:8], e.Status, conv, e.StartedAt, e.ErrorMessage)
 			}
 		}
 		return nil

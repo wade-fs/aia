@@ -36,6 +36,11 @@ func (o *CodeHealthObserver) RegisterProjectDir(projectID, dir string) {
 	o.projectDirs[projectID] = dir
 }
 
+func (o *CodeHealthObserver) UnregisterProjectDir(projectID string) {
+	delete(o.projectDirs, projectID)
+	delete(o.defectHistory, projectID)
+}
+
 func (o *CodeHealthObserver) SetScanner(scanner DefectScannerFunc) {
 	o.scanner = scanner
 }

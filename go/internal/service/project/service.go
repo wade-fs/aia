@@ -110,3 +110,10 @@ func (s *Service) ListByDomain(ctx context.Context, dt project.DomainType) ([]pr
 func (s *Service) Archive(ctx context.Context, id domain.ID) error {
 	return s.repo.UpdateStatus(ctx, id, project.StatusArchived)
 }
+
+func (s *Service) Delete(ctx context.Context, id domain.ID) error {
+	if string(id) == "default" {
+		return fmt.Errorf("cannot delete default project")
+	}
+	return s.repo.Delete(ctx, id)
+}

@@ -21,6 +21,7 @@ import (
 	agentService "github.com/wade/aia/internal/service/agent"
 	approvalService "github.com/wade/aia/internal/service/approval"
 	delegationService "github.com/wade/aia/internal/service/delegation"
+	execService "github.com/wade/aia/internal/service/execution"
 	goalService "github.com/wade/aia/internal/service/goal"
 	govService "github.com/wade/aia/internal/service/governance"
 	invService "github.com/wade/aia/internal/service/investment"
@@ -35,6 +36,7 @@ import (
 type ConsoleServices struct {
 	TaskSvc        *taskService.Service
 	AgentSvc       *agentService.Service
+	ExecSvc        *execService.Service
 	MemorySvc      *memoryService.Service
 	AuditRepo      *repository.AuditRepository
 	InvSvc         *invService.Service
@@ -262,12 +264,21 @@ func (s *ConsoleServices) handleTasks(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		agentFilter := domain.ID(r.URL.Query().Get("agent_id"))
+		projectFilter := domain.ID(r.URL.Query().Get("project_id"))
 		statusFilter := task.TaskStatus(r.URL.Query().Get("status"))
 		limit := 50
 		if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 {
 			limit = l
 		}
-		tasks, err := s.TaskSvc.List(ctx, repository.TaskFilter{Status: statusFilter, Limit: limit})
+		orderByDesc := r.URL.Query().Get("order") == "desc" || agentFilter != ""
+		tasks, err := s.TaskSvc.List(ctx, repository.TaskFilter{
+			AgentID:     agentFilter,
+			ProjectID:   projectFilter,
+			Status:      statusFilter,
+			OrderByDesc: orderByDesc,
+			Limit:       limit,
+		})
 		if err != nil {
 			host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
 			return
@@ -336,6 +347,73 @@ func (s *ConsoleServices) handleTaskSubroutes(w http.ResponseWriter, r *http.Req
 	}
 
 	action := parts[1]
+	if action == "progress" {
+		if r.Method != http.MethodGet {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		tk, err := s.TaskSvc.Get(ctx, taskID)
+		if err != nil {
+			host.WriteError(w, http.StatusNotFound, "TASK_NOT_FOUND", "Task not found", reqID)
+			return
+		}
+
+		var latestExec any
+		var outText string
+		var conversationID string
+		if s.ExecSvc != nil {
+			execs, _ := s.ExecSvc.ListByTask(ctx, taskID)
+			if len(execs) > 0 {
+				latest := execs[0]
+				latestExec = latest
+				conversationID = latest.ConversationID
+				events, _ := s.ExecSvc.ListEvents(ctx, latest.ID)
+				var sb strings.Builder
+				for _, ev := range events {
+					var pMap map[string]any
+					if err := json.Unmarshal(ev.Payload, &pMap); err == nil {
+						if conversationID == "" {
+							if cID, ok := pMap["conversation_id"].(string); ok && cID != "" {
+								conversationID = cID
+							}
+						}
+						if text, ok := pMap["text"].(string); ok && text != "" {
+							sb.WriteString(text)
+						} else if content, ok := pMap["content"].(string); ok && content != "" {
+							sb.WriteString(content)
+						} else if chunk, ok := pMap["chunk"].(string); ok && chunk != "" {
+							sb.WriteString(chunk)
+						} else if msg, ok := pMap["message"].(string); ok && msg != "" {
+							sb.WriteString(msg + "\n")
+						}
+					} else {
+						sb.Write(ev.Payload)
+					}
+				}
+				outText = sb.String()
+				if outText == "" && latest.ErrorMessage != "" {
+					outText = "Error: " + latest.ErrorMessage
+				}
+			}
+		}
+
+		host.WriteJSON(w, http.StatusOK, map[string]any{
+			"task_id":         tk.ID,
+			"title":           tk.Title,
+			"description":     tk.Description,
+			"agent_id":        tk.AgentID,
+			"project_id":      tk.ProjectID,
+			"status":          tk.Status,
+			"created_at":      tk.CreatedAt,
+			"started_at":      tk.StartedAt,
+			"completed_at":    tk.CompletedAt,
+			"execution":       latestExec,
+			"conversation_id": conversationID,
+			"output":          outText,
+		}, reqID)
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
 		return

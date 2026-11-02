@@ -15,7 +15,9 @@ import (
 type TaskFilter struct {
 	ProjectID    domain.ID
 	ParentTaskID domain.ID
+	AgentID      domain.ID
 	Status       task.TaskStatus
+	OrderByDesc  bool
 	Limit        int
 }
 
@@ -195,11 +197,19 @@ func (r *TaskRepository) List(ctx context.Context, filter TaskFilter) ([]task.Ta
 		query += " AND parent_task_id = ?"
 		args = append(args, filter.ParentTaskID)
 	}
+	if filter.AgentID != "" {
+		query += " AND agent_id = ?"
+		args = append(args, filter.AgentID)
+	}
 	if filter.Status != "" {
 		query += " AND status = ?"
 		args = append(args, string(filter.Status))
 	}
-	query += " ORDER BY priority DESC, created_at ASC"
+	if filter.OrderByDesc {
+		query += " ORDER BY created_at DESC"
+	} else {
+		query += " ORDER BY priority DESC, created_at ASC"
+	}
 	if filter.Limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", filter.Limit)
 	}

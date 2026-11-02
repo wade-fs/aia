@@ -45,8 +45,8 @@ func (s *Scheduler) RunTask(ctx context.Context, taskID domain.ID) error {
 		return err
 	}
 
-	if t.Status != task.StatusReady {
-		return fmt.Errorf("task %s is not in READY state (current: %s)", taskID, t.Status)
+	if t.Status != task.StatusReady && t.Status != task.StatusRunning {
+		return fmt.Errorf("task %s is not in READY or RUNNING state (current: %s)", taskID, t.Status)
 	}
 
 	// Verify agent

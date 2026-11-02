@@ -315,3 +315,13 @@ func (r *ExecutionRepository) ListEvents(ctx context.Context, executionID domain
 	}
 	return events, nil
 }
+
+func (r *ExecutionRepository) UpdateConversationID(ctx context.Context, id domain.ID, convID string) error {
+	query := `UPDATE executions SET conversation_id = ? WHERE id = ?`
+	_, err := r.db.RawDB().ExecContext(ctx, query, convID, id)
+	if err != nil {
+		return fmt.Errorf("failed to update conversation ID: %w", err)
+	}
+	return nil
+}
+

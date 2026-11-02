@@ -315,6 +315,9 @@ var invPromptCmd = &cobra.Command{
 				exitCode = *latest.ExitCode
 			}
 			fmt.Printf("\n=== Execution Summary (Status: %s, ExitCode: %d, Result: %s) ===\n", latest.Status, exitCode, latest.ResultStatus)
+			if latest.ConversationID != "" {
+				fmt.Printf("agy Conversation ID: %s\n", latest.ConversationID)
+			}
 			if latest.ErrorMessage != "" {
 				fmt.Printf("Error: %s\n", latest.ErrorMessage)
 			}

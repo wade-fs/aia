@@ -157,6 +157,30 @@ var projectArchiveCmd = &cobra.Command{
 	},
 }
 
+var projectDeleteCmd = &cobra.Command{
+	Use:     "delete <project-id>",
+	Aliases: []string{"rm", "remove", "deregister"},
+	Short:   "Delete / unregister a project from AIA",
+	Args:    cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		projectID := args[0]
+		if err := appInst.ProjectSvc.Delete(ctx, projectID); err != nil {
+			return err
+		}
+		if appInst != nil {
+			if appInst.WritingObserver != nil {
+				appInst.WritingObserver.UnregisterProjectPath(projectID)
+			}
+			if appInst.CodingObserver != nil {
+				appInst.CodingObserver.UnregisterProjectDir(projectID)
+			}
+		}
+		fmt.Printf("✓ Project %s deleted / unregistered successfully (local files preserved).\n", projectID)
+		return nil
+	},
+}
+
 func init() {
 	projectCreateCmd.Flags().StringVar(&projectName, "name", "", "project name")
 	projectCreateCmd.Flags().StringVar(&projectDesc, "description", "", "project description")
@@ -168,4 +192,5 @@ func init() {
 	projectCmd.AddCommand(projectListCmd)
 	projectCmd.AddCommand(projectShowCmd)
 	projectCmd.AddCommand(projectArchiveCmd)
+	projectCmd.AddCommand(projectDeleteCmd)
 }

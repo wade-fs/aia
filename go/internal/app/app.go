@@ -370,6 +370,7 @@ func (a *App) CreateWebHost() (*host.Host, string, error) {
 	console.RegisterConsoleRoutes(h.APIMux(), &console.ConsoleServices{
 		TaskSvc:        a.TaskSvc,
 		AgentSvc:       a.AgentSvc,
+		ExecSvc:        a.ExecutionSvc,
 		MemorySvc:      a.MemorySvc,
 		AuditRepo:      a.AuditRepo,
 		InvSvc:         a.InvSvc,

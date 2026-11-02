@@ -39,6 +39,11 @@ func (o *ManuscriptConsistencyObserver) RegisterProjectPath(projectID, path stri
 	o.projectPaths[projectID] = path
 }
 
+func (o *ManuscriptConsistencyObserver) UnregisterProjectPath(projectID string) {
+	delete(o.projectPaths, projectID)
+	delete(o.injectedAnoms, projectID)
+}
+
 func (o *ManuscriptConsistencyObserver) SetScanner(s ConsistencyScannerFunc) {
 	o.scanner = s
 }

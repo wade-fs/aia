@@ -170,3 +170,53 @@ func (r *ProjectRepository) UpdateContinuity(ctx context.Context, id domain.ID, 
 	}
 	return nil
 }
+
+// Delete removes a project record and safely unlinks all associated references
+// so foreign key constraints are preserved while maintaining audit trail entities.
+func (r *ProjectRepository) Delete(ctx context.Context, id domain.ID) error {
+	tx, err := r.db.RawDB().BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	nullifyQueries := []string{
+		`UPDATE tasks SET project_id = NULL WHERE project_id = ?`,
+		`UPDATE memories SET project_id = NULL WHERE project_id = ?`,
+		`UPDATE experiments SET project_id = NULL WHERE project_id = ?`,
+		`UPDATE delegation_requests SET source_project_id = NULL WHERE source_project_id = ?`,
+		`UPDATE decisions SET project_id = NULL WHERE project_id = ?`,
+		`UPDATE context_snapshots SET project_id = NULL WHERE project_id = ?`,
+		`UPDATE outcome_evaluations SET project_id = NULL WHERE project_id = ?`,
+		`UPDATE learning_records SET project_id = NULL WHERE project_id = ?`,
+		`UPDATE candidate_initiatives SET project_id = NULL WHERE project_id = ?`,
+	}
+	for _, q := range nullifyQueries {
+		if _, err := tx.ExecContext(ctx, q, id); err != nil {
+			return fmt.Errorf("failed to nullify project reference: %w", err)
+		}
+	}
+
+	deleteQueries := []string{
+		`DELETE FROM goal_project_links WHERE project_id = ?`,
+	}
+	for _, q := range deleteQueries {
+		if _, err := tx.ExecContext(ctx, q, id); err != nil {
+			return fmt.Errorf("failed to delete project link: %w", err)
+		}
+	}
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete project: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("project not found: %s", id)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit project deletion: %w", err)
+	}
+	return nil
+}

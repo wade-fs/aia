@@ -17,6 +17,7 @@ import (
 	"github.com/wade/aia/internal/domain/investment"
 	domainLearning "github.com/wade/aia/internal/domain/learning"
 	domainMemory "github.com/wade/aia/internal/domain/memory"
+	domainProblem "github.com/wade/aia/internal/domain/problem"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/experiment"
 	"github.com/wade/aia/internal/provider"
@@ -30,6 +31,7 @@ import (
 	govService "github.com/wade/aia/internal/service/governance"
 	invService "github.com/wade/aia/internal/service/investment"
 	memoryService "github.com/wade/aia/internal/service/memory"
+	problemService "github.com/wade/aia/internal/service/problem"
 	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
@@ -60,6 +62,7 @@ type ConsoleServices struct {
 	DelegationSvc  *delegationService.Service
 	BriefSvc       *briefService.Service
 	ClarifySvc     *clarifyService.Service
+	ProblemSvc     *problemService.Service
 }
 
 func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
@@ -118,6 +121,10 @@ func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
 	mux.HandleFunc("/api/v1/clarifications", s.handleClarifications)
 	mux.HandleFunc("/api/v1/clarifications/", s.handleClarificationSubroutes)
 	mux.HandleFunc("/api/v1/projects/", s.handleProjectSubroutes)
+
+	// 11. Problems & Epistemic Analysis (AIA-22 Stage 2)
+	mux.HandleFunc("/api/v1/problems", s.handleProblems)
+	mux.HandleFunc("/api/v1/problems/", s.handleProblemSubroutes)
 }
 
 func getReqID(r *http.Request) string {
@@ -1595,4 +1602,155 @@ func (s *ConsoleServices) handleProjectSubroutes(w http.ResponseWriter, r *http.
 	}
 
 	host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Unknown project subroute: "+path, reqID)
+}
+
+// -------------------------------------------------------------
+// Problem & Epistemic Analysis Handlers (AIA-22 Stage 2)
+// -------------------------------------------------------------
+
+func (s *ConsoleServices) handleProblems(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if s.ProblemSvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "problem service not available", reqID)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		projID := r.URL.Query().Get("project_id")
+		if projID == "" {
+			host.WriteError(w, http.StatusBadRequest, "MISSING_PARAM", "project_id is required", reqID)
+			return
+		}
+		problems, err := s.ProblemSvc.ListProblems(ctx, projID)
+		if err != nil {
+			host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), reqID)
+			return
+		}
+		if problems == nil {
+			problems = []*domainProblem.Problem{}
+		}
+		host.WriteJSON(w, http.StatusOK, problems, reqID)
+
+	case http.MethodPost:
+		var in struct {
+			ProjectID string `json:"project_id"`
+			ParentID  string `json:"parent_id"`
+			GoalID    string `json:"goal_id"`
+			Title     string `json:"title"`
+			Objective string `json:"objective"`
+			Scope     string `json:"scope"`
+			Priority  string `json:"priority"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "invalid request json: "+err.Error(), reqID)
+			return
+		}
+		p, err := s.ProblemSvc.CreateProblem(ctx, problemService.CreateProblemInput{
+			ProjectID: in.ProjectID,
+			ParentID:  in.ParentID,
+			GoalID:    in.GoalID,
+			Title:     in.Title,
+			Objective: in.Objective,
+			Scope:     in.Scope,
+			Priority:  domainProblem.ProblemPriority(in.Priority),
+		})
+		if err != nil {
+			host.WriteError(w, http.StatusBadRequest, "CREATE_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusCreated, p, reqID)
+
+	default:
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+	}
+}
+
+func (s *ConsoleServices) handleProblemSubroutes(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if s.ProblemSvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "problem service not available", reqID)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/problems/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_PATH", "Problem ID required", reqID)
+		return
+	}
+
+	probID := parts[0]
+
+	// GET /api/v1/problems/{id}
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		prob, err := s.ProblemSvc.GetProblem(ctx, probID)
+		if err != nil {
+			host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Problem not found", reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, prob, reqID)
+		return
+	}
+
+	// GET /api/v1/problems/{id}/models
+	if len(parts) == 2 && parts[1] == "models" {
+		if r.Method != http.MethodGet {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		models, err := s.ProblemSvc.ListModels(ctx, probID)
+		if err != nil {
+			host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), reqID)
+			return
+		}
+		if models == nil {
+			models = []*domainProblem.ProblemModel{}
+		}
+		host.WriteJSON(w, http.StatusOK, models, reqID)
+		return
+	}
+
+	// GET /api/v1/problems/{id}/prompt
+	if len(parts) == 2 && parts[1] == "prompt" {
+		if r.Method != http.MethodGet {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		prompt, err := s.ProblemSvc.BuildAnalysisPrompt(ctx, probID, r.URL.Query().Get("user_prompt"))
+		if err != nil {
+			host.WriteError(w, http.StatusNotFound, "NOT_FOUND", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, map[string]string{"prompt": prompt}, reqID)
+		return
+	}
+
+	// POST /api/v1/problems/{id}/analysis
+	if len(parts) == 2 && parts[1] == "analysis" {
+		if r.Method != http.MethodPost {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		var analysis domainProblem.AgentProblemAnalysis
+		if err := json.NewDecoder(r.Body).Decode(&analysis); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid problem analysis JSON: "+err.Error(), reqID)
+			return
+		}
+		model, err := s.ProblemSvc.ApplyAnalysis(ctx, probID, &analysis, "web-console", "")
+		if err != nil {
+			host.WriteError(w, http.StatusBadRequest, "APPLY_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, model, reqID)
+		return
+	}
+
+	host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Unknown problem subroute: "+path, reqID)
 }

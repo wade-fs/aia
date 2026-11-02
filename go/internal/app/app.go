@@ -31,6 +31,7 @@ import (
 	invService "github.com/wade/aia/internal/service/investment"
 	knowledgeService "github.com/wade/aia/internal/service/knowledge"
 	memoryService "github.com/wade/aia/internal/service/memory"
+	problemService "github.com/wade/aia/internal/service/problem"
 	projectService "github.com/wade/aia/internal/service/project"
 	scheduleService "github.com/wade/aia/internal/service/schedule"
 	selfmodService "github.com/wade/aia/internal/service/selfmod"
@@ -103,6 +104,7 @@ type App struct {
 	ClarificationSvc    *clarifyService.Service
 	ProblemRepo         *repository.ProblemRepository
 	PlanRepo            *repository.PlanRepository
+	ProblemSvc          *problemService.Service
 }
 
 func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
@@ -305,6 +307,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 
 	problemRepo := repository.NewProblemRepository(db)
 	planRepo := repository.NewPlanRepository(db)
+	problemSvc := problemService.NewService(problemRepo, projRepo, clarificationSvc)
+	problemSvc.SetAuditRepo(auditRepo)
 
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	contextAssembler := orchestrator.NewContextAssembler(projRepo, memRepo, writingWorkflowRepo)
@@ -382,6 +386,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		ClarificationSvc:    clarificationSvc,
 		ProblemRepo:         problemRepo,
 		PlanRepo:            planRepo,
+		ProblemSvc:          problemSvc,
 	}
 
 	// Seed default domain agents, default project & recurring schedules
@@ -450,6 +455,7 @@ func (a *App) CreateWebHost() (*host.Host, string, error) {
 		DelegationSvc:  a.DelegationSvc,
 		BriefSvc:       a.GenericBriefSvc,
 		ClarifySvc:     a.ClarificationSvc,
+		ProblemSvc:     a.ProblemSvc,
 	})
 
 	// 2. Register Agent Modules with isolated dedicated muxes

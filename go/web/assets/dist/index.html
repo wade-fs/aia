@@ -45,6 +45,8 @@
           <button class="nav-tab" data-tab="tasks">任務 <span id="tasks-badge" class="nav-badge hidden">0</span></button>
           <button class="nav-tab" data-tab="pending">待核准 <span id="pending-badge" class="nav-badge alert-badge hidden">0</span></button>
           <button class="nav-tab" data-tab="investment">投資 Agent</button>
+          <button class="nav-tab" data-tab="coding">Coding Agent</button>
+          <button class="nav-tab" data-tab="writing">Writing Agent</button>
           <button class="nav-tab" data-tab="memory">記憶庫</button>
           <button class="nav-tab" data-tab="agents">Agents</button>
           <button class="nav-tab" data-tab="audit">稽核紀錄</button>
@@ -529,6 +531,250 @@
             </table>
           </div>
         </div>
+
+        <!-- Investment Agent Prompt / Research Console -->
+        <div class="card mt-4">
+          <div class="card-header">
+            <h3>🤖 投資研究與指令提示詞 (Investment Agent Prompt)</h3>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <label for="inv-prompt-input">輸入市場分析、個股研究或策略指令：</label>
+              <textarea id="inv-prompt-input" class="form-control" rows="3" placeholder="例如：分析台積電 (2330) 近期營收成長趨勢與半導體週期評價..."></textarea>
+            </div>
+            <div class="d-flex justify-between align-center">
+              <button class="btn btn-primary" onclick="app.sendInvestmentPrompt()">🚀 提交並執行投資任務</button>
+              <span id="inv-prompt-status" class="text-muted"></span>
+            </div>
+            <div id="inv-prompt-output-box" class="mt-3 hidden">
+              <h4 class="mt-2">執行輸出：</h4>
+              <pre id="inv-prompt-output" class="code-block"></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Investment Agent Instructions / Prompt Config -->
+        <div class="card mt-4">
+          <div class="card-header d-flex justify-between">
+            <h3>Investment Agent 行為設定與系統提示詞 (System Instructions)</h3>
+            <span id="inv-agent-version" class="badge badge-subtle">v1</span>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <textarea id="inv-instructions-input" class="form-control" rows="4"></textarea>
+            </div>
+            <button class="btn btn-outline" onclick="app.saveInvestmentInstructions()">💾 儲存提示詞設定</button>
+            <span id="inv-instructions-status" class="text-muted ml-2"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4A. Coding Agent Tab -->
+      <section id="tab-coding" class="tab-pane">
+        <div class="section-header-row">
+          <div>
+            <h2>Coding Agent (代碼分析、缺陷修復與測試驗證)</h2>
+            <span class="text-muted">AIA-15 §24 規格：監控 Repository 健康度、語法與單元測試缺陷，並在沙盒工作區進行修復</span>
+          </div>
+          <div>
+            <button class="btn btn-primary" onclick="app.openRegisterCodingRepoModal()">➕ 註冊新 Repository</button>
+            <button class="btn btn-outline" onclick="app.runCodingScan()">🔍 執行代碼健康掃描</button>
+          </div>
+        </div>
+
+        <!-- Coding Repositories Grid -->
+        <div class="card mt-4">
+          <div class="card-header">
+            <h3>已註冊的代碼專案 (Coding Repositories)</h3>
+          </div>
+          <div class="table-responsive">
+            <table class="table" id="coding-repos-table">
+              <thead>
+                <tr>
+                  <th>專案 ID</th>
+                  <th>名稱</th>
+                  <th>狀態</th>
+                  <th>Workspace 目錄</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="5" class="text-center text-muted">載入中...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Defect & Diagnostic Observations -->
+        <div class="card mt-4">
+          <div class="card-header d-flex justify-between">
+            <h3>代碼缺陷與診斷報告 (Defects & Diagnostic Observations)</h3>
+            <span id="coding-scan-timestamp" class="text-muted text-sm"></span>
+          </div>
+          <div class="table-responsive">
+            <table class="table" id="coding-defects-table">
+              <thead>
+                <tr>
+                  <th>類別</th>
+                  <th>嚴重度</th>
+                  <th>問題摘要</th>
+                  <th>目標 Agent</th>
+                  <th>時間</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="5" class="text-center text-muted">尚未執行掃描或無缺陷</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Coding Prompt & Execution Console -->
+        <div class="card mt-4">
+          <div class="card-header">
+            <h3>💻 代碼任務提示詞終端 (Coding Agent Prompt & Task Console)</h3>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <label for="coding-prompt-project">選擇目標 Repository：</label>
+              <select id="coding-prompt-project" class="form-control"></select>
+            </div>
+            <div class="form-group">
+              <label for="coding-prompt-input">輸入開發、除錯或重構指令：</label>
+              <textarea id="coding-prompt-input" class="form-control" rows="3" placeholder="例如：檢查 internal/worker 的 recovery 邏輯，並為 task cancel 加入單元測試..."></textarea>
+            </div>
+            <div class="d-flex justify-between align-center">
+              <button class="btn btn-primary" onclick="app.sendCodingPrompt()">🚀 提交並執行代碼任務</button>
+              <span id="coding-prompt-status" class="text-muted"></span>
+            </div>
+            <div id="coding-prompt-output-box" class="mt-3 hidden">
+              <h4 class="mt-2">執行輸出：</h4>
+              <pre id="coding-prompt-output" class="code-block"></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Agent Instructions / Prompt Config -->
+        <div class="card mt-4">
+          <div class="card-header d-flex justify-between">
+            <h3>Coding Agent 行為設定與系統提示詞 (System Instructions)</h3>
+            <span id="coding-agent-version" class="badge badge-subtle">v1</span>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <textarea id="coding-instructions-input" class="form-control" rows="4"></textarea>
+            </div>
+            <button class="btn btn-outline" onclick="app.saveCodingInstructions()">💾 儲存提示詞設定</button>
+            <span id="coding-instructions-status" class="text-muted ml-2"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4B. Writing Agent Tab -->
+      <section id="tab-writing" class="tab-pane">
+        <div class="section-header-row">
+          <div>
+            <h2>Writing Agent (長篇小說、史實校勘與章節寫作)</h2>
+            <span class="text-muted">AIA-15 §23 規格：維護歷史小說素材、人物年表、三層知識體系與章節跨卷一致性</span>
+          </div>
+          <div>
+            <button class="btn btn-primary" onclick="app.openRegisterWritingProjectModal()">➕ 註冊小說目錄</button>
+            <button class="btn btn-outline" onclick="app.runWritingScan()">📖 執行史實一致性校勘</button>
+          </div>
+        </div>
+
+        <!-- Writing Projects Grid -->
+        <div class="card mt-4">
+          <div class="card-header">
+            <h3>已註冊的小說與寫作專案 (Writing Projects)</h3>
+          </div>
+          <div class="table-responsive">
+            <table class="table" id="writing-projects-table">
+              <thead>
+                <tr>
+                  <th>專案 ID</th>
+                  <th>書名</th>
+                  <th>Manifest 規格</th>
+                  <th>狀態</th>
+                  <th>書籍所在目錄</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="6" class="text-center text-muted">載入中...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Consistency & Anomaly Observations -->
+        <div class="card mt-4">
+          <div class="card-header d-flex justify-between">
+            <h3>時間線矛盾與史實校勘報告 (Manuscript Consistency Audit)</h3>
+            <span id="writing-scan-timestamp" class="text-muted text-sm"></span>
+          </div>
+          <div class="table-responsive">
+            <table class="table" id="writing-anomalies-table">
+              <thead>
+                <tr>
+                  <th>類別</th>
+                  <th>嚴重度</th>
+                  <th>矛盾內容與校勘摘要</th>
+                  <th>知識層級</th>
+                  <th>時間</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="5" class="text-center text-muted">尚未執行校勘或全書一致</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Book Manifest Viewer -->
+        <div class="card mt-4">
+          <div class="card-header d-flex justify-between">
+            <h3>專案入口規格 (book.yaml Manifest Viewer)</h3>
+            <span id="writing-manifest-path" class="text-muted text-sm"></span>
+          </div>
+          <div class="card-body">
+            <div id="writing-manifest-viewer">
+              <pre id="writing-manifest-content" class="code-block">點擊上方專案列表的「檢視 Manifest」以讀取 book.yaml...</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Writing Prompt & Chapter Console -->
+        <div class="card mt-4">
+          <div class="card-header">
+            <h3>✍️ 小說寫作與大綱提示詞終端 (Writing Agent Prompt & Chapter Console)</h3>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <label for="writing-prompt-project">選擇目標小說專案：</label>
+              <select id="writing-prompt-project" class="form-control"></select>
+            </div>
+            <div class="form-group">
+              <label for="writing-prompt-input">輸入創作、章節擴寫或校勘指令：</label>
+              <textarea id="writing-prompt-input" class="form-control" rows="3" placeholder="例如：為《長安秋暮》第一卷第三章撰寫大綱，校驗王維與裴旻在開元年間的長安交往情節..."></textarea>
+            </div>
+            <div class="d-flex justify-between align-center">
+              <button class="btn btn-primary" onclick="app.sendWritingPrompt()">🚀 提交並執行寫作任務</button>
+              <span id="writing-prompt-status" class="text-muted"></span>
+            </div>
+            <div id="writing-prompt-output-box" class="mt-3 hidden">
+              <h4 class="mt-2">執行輸出：</h4>
+              <pre id="writing-prompt-output" class="code-block"></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Agent Instructions / Prompt Config -->
+        <div class="card mt-4">
+          <div class="card-header d-flex justify-between">
+            <h3>Writing Agent 行為設定與系統提示詞 (System Instructions)</h3>
+            <span id="writing-agent-version" class="badge badge-subtle">v1</span>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <textarea id="writing-instructions-input" class="form-control" rows="4"></textarea>
+            </div>
+            <button class="btn btn-outline" onclick="app.saveWritingInstructions()">💾 儲存提示詞設定</button>
+            <span id="writing-instructions-status" class="text-muted ml-2"></span>
+          </div>
+        </div>
       </section>
 
       <!-- 5. Memory Tab -->
@@ -687,6 +933,60 @@
           <div class="modal-footer mt-4">
             <button type="button" class="btn btn-ghost" onclick="app.closeEditFundsModal()">取消</button>
             <button type="submit" class="btn btn-primary">儲存變更</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Register Coding Repo Modal -->
+  <div id="register-coding-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>註冊新代碼專案 (Coding Repository)</h3>
+        <button class="close-btn" onclick="app.closeRegisterCodingRepoModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-register-coding" onsubmit="app.submitRegisterCodingRepo(event)">
+          <div class="form-group">
+            <label for="reg-coding-name">專案名稱 (Project Name) *</label>
+            <input type="text" id="reg-coding-name" required placeholder="例如：AIA Core / My Go App">
+          </div>
+          <div class="form-group mt-3">
+            <label for="reg-coding-path">Workspace 目錄路徑 (可使用相對路徑或 ~/) *</label>
+            <input type="text" id="reg-coding-path" required placeholder="例如：. 或 ~/src/github/my-app">
+            <small class="text-muted" style="display:block; margin-top:4px;">留空或填 . 即代表當前 AIA 根目錄</small>
+          </div>
+          <div class="modal-footer mt-4">
+            <button type="button" class="btn btn-ghost" onclick="app.closeRegisterCodingRepoModal()">取消</button>
+            <button type="submit" class="btn btn-primary">確認註冊</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Register Writing Project Modal -->
+  <div id="register-writing-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>註冊新小說 / 寫作目錄 (Writing Project)</h3>
+        <button class="close-btn" onclick="app.closeRegisterWritingProjectModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-register-writing" onsubmit="app.submitRegisterWritingProject(event)">
+          <div class="form-group">
+            <label for="reg-writing-name">書名 / 專案名稱 (Project Name) *</label>
+            <input type="text" id="reg-writing-name" required placeholder="例如：長安秋暮 / 元朝系列小說">
+          </div>
+          <div class="form-group mt-3">
+            <label for="reg-writing-path">書籍所在目錄路徑 (可使用相對路徑或 ~/) *</label>
+            <input type="text" id="reg-writing-path" required placeholder="例如：novel/yuan 或 ~/books/changan">
+            <small class="text-muted" style="display:block; margin-top:4px;">此目錄下可包含 book.yaml、outline.md、characters.md 及章節檔案</small>
+          </div>
+          <div class="modal-footer mt-4">
+            <button type="button" class="btn btn-ghost" onclick="app.closeRegisterWritingProjectModal()">取消</button>
+            <button type="submit" class="btn btn-primary">確認註冊</button>
           </div>
         </form>
       </div>

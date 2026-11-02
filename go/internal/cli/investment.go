@@ -2,13 +2,15 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"text/tabwriter"
-	"os"
 
 	"github.com/spf13/cobra"
+	taskService "github.com/wade/aia/internal/service/task"
 )
 
 var investmentCmd = &cobra.Command{
@@ -246,6 +248,100 @@ var invSetCashCmd = &cobra.Command{
 	},
 }
 
+var invInfoCmd = &cobra.Command{
+	Use:   "info",
+	Short: "Show Investment Agent system instructions, model, and capabilities",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		ag, err := appInst.AgentSvc.Get(ctx, "investment-agent")
+		if err != nil {
+			ag, err = appInst.AgentSvc.Get(ctx, "investment")
+		}
+		if err != nil {
+			return fmt.Errorf("failed to get investment agent info: %w", err)
+		}
+
+		fmt.Println("=== Investment Agent Information ===")
+		fmt.Printf("ID:           %s\n", ag.ID)
+		fmt.Printf("Name:         %s\n", ag.Name)
+		fmt.Printf("Domain:       %s\n", ag.Domain)
+		fmt.Printf("Version:      %d\n", ag.Version)
+		fmt.Printf("Enabled:      %v\n", ag.Enabled)
+		fmt.Printf("Capabilities: %s\n", strings.Join(ag.Capabilities, ", "))
+		fmt.Printf("\nInstructions (Prompt):\n%s\n", ag.Instructions)
+		return nil
+	},
+}
+
+var invPromptCmd = &cobra.Command{
+	Use:   "prompt [instruction]",
+	Short: "Submit an investment research, stock evaluation, or strategy prompt to Investment Agent",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		promptText := strings.Join(args, " ")
+
+		targetProj := "default"
+		projects, err := appInst.ProjectSvc.ListByDomain(ctx, "investment")
+		if err == nil && len(projects) > 0 {
+			targetProj = string(projects[0].ID)
+		}
+
+		fmt.Printf("🚀 Dispatching task to Investment Agent (Project: %s)...\n", targetProj)
+		title := promptText
+		if len(title) > 50 {
+			title = title[:50] + "..."
+		}
+		t, err := appInst.TaskSvc.Create(ctx, taskService.CreateTaskRequest{
+			Title:       fmt.Sprintf("Investment Research: %s", title),
+			Description: promptText,
+			AgentID:     "investment-agent",
+			ProjectID:   targetProj,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create task: %w", err)
+		}
+
+		fmt.Printf("Task created: %s (Status: %s). Executing via Scheduler...\n", t.ID, t.Status)
+		if err := appInst.Scheduler.RunTask(ctx, t.ID); err != nil {
+			return fmt.Errorf("task execution encountered error: %w", err)
+		}
+
+		execs, _ := appInst.ExecutionSvc.ListByTask(ctx, t.ID)
+		if len(execs) > 0 {
+			latest := execs[0]
+			exitCode := 0
+			if latest.ExitCode != nil {
+				exitCode = *latest.ExitCode
+			}
+			fmt.Printf("\n=== Execution Summary (Status: %s, ExitCode: %d, Result: %s) ===\n", latest.Status, exitCode, latest.ResultStatus)
+			if latest.ErrorMessage != "" {
+				fmt.Printf("Error: %s\n", latest.ErrorMessage)
+			}
+			events, _ := appInst.ExecutionSvc.ListEvents(ctx, latest.ID)
+			if len(events) > 0 {
+				fmt.Println("--- Output Stream ---")
+				for _, ev := range events {
+					var payloadMap map[string]any
+					if err := json.Unmarshal(ev.Payload, &payloadMap); err == nil {
+						if text, ok := payloadMap["text"].(string); ok && text != "" {
+							fmt.Print(text)
+						} else if content, ok := payloadMap["content"].(string); ok && content != "" {
+							fmt.Print(content)
+						} else if chunk, ok := payloadMap["chunk"].(string); ok && chunk != "" {
+							fmt.Print(chunk)
+						}
+					}
+				}
+				fmt.Println()
+			}
+		} else {
+			fmt.Println("Task completed.")
+		}
+		return nil
+	},
+}
+
 func init() {
 	invSetCashCmd.Flags().StringVarP(&cashReason, "reason", "r", "Manual cash adjustment via CLI", "Reason for cash change")
 
@@ -258,6 +354,8 @@ func init() {
 	investmentCmd.AddCommand(invRejectCmd)
 	investmentCmd.AddCommand(invPredictionsCmd)
 	investmentCmd.AddCommand(invEvaluateCmd)
+	investmentCmd.AddCommand(invInfoCmd)
+	investmentCmd.AddCommand(invPromptCmd)
 }
 
 func formatMoney(n int64) string {

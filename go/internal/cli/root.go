@@ -58,6 +58,8 @@ func init() {
 	RootCmd.AddCommand(memoryCmd)
 	RootCmd.AddCommand(executionCmd)
 	RootCmd.AddCommand(investmentCmd)
+	RootCmd.AddCommand(codingCmd)
+	RootCmd.AddCommand(writingCmd)
 	RootCmd.AddCommand(scheduleCmd)
 	RootCmd.AddCommand(workerCmd)
 	RootCmd.AddCommand(monitorCmd)

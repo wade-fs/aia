@@ -390,13 +390,13 @@ func (a *App) CreateWebHost() (*host.Host, string, error) {
 	})
 
 	// 2. Register Agent Modules with isolated dedicated muxes
-	if err := h.RegisterAgentModule(agents.NewInvestmentWebModule(a.InvSvc)); err != nil {
+	if err := h.RegisterAgentModule(agents.NewInvestmentWebModuleWithDeps(a.InvSvc, a.AgentSvc, a.TaskSvc, a.Scheduler, a.ExecutionSvc)); err != nil {
 		return nil, "", fmt.Errorf("failed to register investment web module: %w", err)
 	}
-	if err := h.RegisterAgentModule(agents.NewCodingWebModule(a.AgentSvc)); err != nil {
+	if err := h.RegisterAgentModule(agents.NewCodingWebModuleWithDeps(a.AgentSvc, a.ProjectSvc, a.TaskSvc, a.Scheduler, a.ExecutionSvc, a.CodingObserver)); err != nil {
 		return nil, "", fmt.Errorf("failed to register coding web module: %w", err)
 	}
-	if err := h.RegisterAgentModule(agents.NewWritingWebModule(a.AgentSvc)); err != nil {
+	if err := h.RegisterAgentModule(agents.NewWritingWebModuleWithDeps(a.AgentSvc, a.ProjectSvc, a.TaskSvc, a.Scheduler, a.ExecutionSvc, a.WritingObserver)); err != nil {
 		return nil, "", fmt.Errorf("failed to register writing web module: %w", err)
 	}
 

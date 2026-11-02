@@ -2,21 +2,46 @@ package agents
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/wade/aia/internal/domain/investment"
+	"github.com/wade/aia/internal/orchestrator"
+	agentService "github.com/wade/aia/internal/service/agent"
+	execService "github.com/wade/aia/internal/service/execution"
 	invService "github.com/wade/aia/internal/service/investment"
+	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/web/host"
 )
 
 type InvestmentWebModule struct {
-	svc *invService.Service
+	svc      *invService.Service
+	agentSvc *agentService.Service
+	taskSvc  *taskService.Service
+	sched    *orchestrator.Scheduler
+	execSvc  *execService.Service
 }
 
 func NewInvestmentWebModule(svc *invService.Service) *InvestmentWebModule {
 	return &InvestmentWebModule{svc: svc}
+}
+
+func NewInvestmentWebModuleWithDeps(
+	svc *invService.Service,
+	agentSvc *agentService.Service,
+	taskSvc *taskService.Service,
+	sched *orchestrator.Scheduler,
+	execSvc *execService.Service,
+) *InvestmentWebModule {
+	return &InvestmentWebModule{
+		svc:      svc,
+		agentSvc: agentSvc,
+		taskSvc:  taskSvc,
+		sched:    sched,
+		execSvc:  execSvc,
+	}
 }
 
 func (m *InvestmentWebModule) AgentID() string {
@@ -51,6 +76,9 @@ func (m *InvestmentWebModule) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/predictions", m.handlePredictions)
 	mux.HandleFunc("/predictions/evaluate", m.handleEvaluatePredictions)
 	mux.HandleFunc("/evaluations", m.handleEvaluationResults)
+	mux.HandleFunc("/info", m.handleInfo)
+	mux.HandleFunc("/instructions", m.handleInstructions)
+	mux.HandleFunc("/prompt", m.handlePrompt)
 	return nil
 }
 
@@ -350,4 +378,124 @@ func (m *InvestmentWebModule) handleEvaluationResults(w http.ResponseWriter, r *
 		return
 	}
 	host.WriteJSON(w, http.StatusOK, results, reqID)
+}
+
+func (m *InvestmentWebModule) handleInfo(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	if m.agentSvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "AgentService not wired", reqID)
+		return
+	}
+	ag, err := m.agentSvc.Get(r.Context(), "investment-agent")
+	if err != nil {
+		ag, err = m.agentSvc.Get(r.Context(), "investment")
+	}
+	if err != nil {
+		host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Investment agent info unavailable", reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, ag, reqID)
+}
+
+func (m *InvestmentWebModule) handleInstructions(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Only PUT or POST allowed", reqID)
+		return
+	}
+	if m.agentSvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "AgentService not wired", reqID)
+		return
+	}
+
+	var req struct {
+		Instructions string `json:"instructions"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		host.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON payload", reqID)
+		return
+	}
+
+	ctx := r.Context()
+	ag, err := m.agentSvc.Get(ctx, "investment-agent")
+	if err != nil {
+		host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Investment agent not found", reqID)
+		return
+	}
+
+	ag.Instructions = req.Instructions
+	ag.Version++
+	if err := m.agentSvc.Upsert(ctx, ag); err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update instructions: "+err.Error(), reqID)
+		return
+	}
+
+	host.WriteJSON(w, http.StatusOK, map[string]any{
+		"message":      "Instructions updated successfully",
+		"version":      ag.Version,
+		"instructions": ag.Instructions,
+	}, reqID)
+}
+
+func (m *InvestmentWebModule) handlePrompt(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Only POST allowed", reqID)
+		return
+	}
+
+	if m.taskSvc == nil || m.sched == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "TaskService or Scheduler not wired", reqID)
+		return
+	}
+
+	var req struct {
+		Prompt    string `json:"prompt"`
+		ProjectID string `json:"project_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Prompt == "" {
+		host.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", "prompt is required", reqID)
+		return
+	}
+
+	ctx := r.Context()
+	targetProj := req.ProjectID
+	if targetProj == "" {
+		targetProj = "default"
+	}
+
+	title := req.Prompt
+	if len(title) > 50 {
+		title = title[:50] + "..."
+	}
+
+	t, err := m.taskSvc.Create(ctx, taskService.CreateTaskRequest{
+		Title:       fmt.Sprintf("Investment Research: %s", title),
+		Description: req.Prompt,
+		AgentID:     "investment-agent",
+		ProjectID:   targetProj,
+	})
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create task: "+err.Error(), reqID)
+		return
+	}
+
+	if err := m.sched.RunTask(ctx, t.ID); err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Task run error: "+err.Error(), reqID)
+		return
+	}
+
+	var latestExec any
+	if m.execSvc != nil {
+		execs, _ := m.execSvc.ListByTask(ctx, t.ID)
+		if len(execs) > 0 {
+			latestExec = execs[0]
+		}
+	}
+
+	host.WriteJSON(w, http.StatusOK, map[string]any{
+		"task_id":   t.ID,
+		"status":    "COMPLETED",
+		"execution": latestExec,
+	}, reqID)
 }

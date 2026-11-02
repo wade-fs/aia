@@ -230,6 +230,8 @@ const app = {
       case 'tasks': this.loadTasks(); break;
       case 'pending': this.loadPending(); break;
       case 'investment': this.loadInvestment(); break;
+      case 'coding': this.loadCoding(); break;
+      case 'writing': this.loadWriting(); break;
       case 'memory': this.loadMemory(); break;
       case 'agents': this.loadAgents(); break;
       case 'audit': this.loadAudit(); break;
@@ -649,6 +651,19 @@ const app = {
           document.getElementById('calib-brier').textContent = m.average_brier_score.toFixed(4);
         }
       }
+
+      // Info & Instructions
+      try {
+        const info = await this.apiCall('/api/v1/agents/investment/info');
+        if (info) {
+          const verEl = document.getElementById('inv-agent-version');
+          if (verEl) verEl.textContent = `v${info.version || 1}`;
+          const instEl = document.getElementById('inv-instructions-input');
+          if (instEl && !instEl.value) instEl.value = info.instructions || '';
+        }
+      } catch (e) {
+        console.warn('Investment agent info error:', e);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -947,6 +962,395 @@ const app = {
       }
     } catch (e) {
       console.error(e);
+    }
+  },
+
+  // ----------------------------------------------------------------
+  // Investment Prompt
+  // ----------------------------------------------------------------
+  async sendInvestmentPrompt() {
+    const input = document.getElementById('inv-prompt-input');
+    const status = document.getElementById('inv-prompt-status');
+    const outBox = document.getElementById('inv-prompt-output-box');
+    const outPre = document.getElementById('inv-prompt-output');
+    const prompt = input.value.trim();
+    if (!prompt) return this.showToast('請輸入投資研究指令', 'error');
+
+    status.textContent = '⏳ 執行任務中...';
+    try {
+      const res = await this.apiCall('/api/v1/agents/investment/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
+      status.textContent = '✅ 任務完成';
+      outBox.classList.remove('hidden');
+      let outText = `任務 ID: ${res.task_id}\n狀態: ${res.status}`;
+      if (res.execution) {
+        outText += `\n執行 ID: ${res.execution.id || ''}\nResult: ${res.execution.result_status || ''}\nTokens: ${res.execution.total_tokens || 0}`;
+        if (res.execution.error_message) outText += `\nError: ${res.execution.error_message}`;
+      }
+      outPre.textContent = outText;
+      this.showToast('投資任務已成功執行', 'success');
+      this.loadInvestment();
+    } catch (e) {
+      status.textContent = '❌ 執行失敗: ' + e.message;
+      this.showToast(e.message, 'error');
+    }
+  },
+
+  async saveInvestmentInstructions() {
+    const inst = document.getElementById('inv-instructions-input').value;
+    const status = document.getElementById('inv-instructions-status');
+    status.textContent = '儲存中...';
+    try {
+      const res = await this.apiCall('/api/v1/agents/investment/instructions', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instructions: inst })
+      });
+      status.textContent = '✅ 已儲存 (v' + (res.version || '') + ')';
+      const verEl = document.getElementById('inv-agent-version');
+      if (verEl && res.version) verEl.textContent = `v${res.version}`;
+      this.showToast('Investment Agent 提示詞設定已更新', 'success');
+    } catch (e) {
+      status.textContent = '❌ 儲存失敗';
+      this.showToast('儲存失敗: ' + e.message, 'error');
+    }
+  },
+
+  // ----------------------------------------------------------------
+  // Coding Agent Tab
+  // ----------------------------------------------------------------
+  async loadCoding() {
+    try {
+      // 1. Projects
+      const projects = await this.apiCall('/api/v1/agents/coding/projects');
+      const tbody = document.querySelector('#coding-repos-table tbody');
+      const select = document.getElementById('coding-prompt-project');
+      select.innerHTML = '';
+      if (projects && projects.length > 0) {
+        tbody.innerHTML = projects.map(p => `
+          <tr>
+            <td><code>${this.escape(p.id)}</code></td>
+            <td><strong>${this.escape(p.name)}</strong></td>
+            <td><span class="badge ${p.status === 'ACTIVE' ? 'badge-COMPLETED' : 'badge-FAILED'}">${p.status}</span></td>
+            <td><code>${this.escape(p.workspace)}</code></td>
+            <td>
+              <button class="btn btn-sm btn-outline" onclick="app.runCodingScan('${this.escape(p.id)}')">🔍 掃描代碼</button>
+            </td>
+          </tr>
+        `).join('');
+
+        projects.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = `${p.name} (${p.workspace})`;
+          select.appendChild(opt);
+        });
+      } else {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">尚未註冊任何 Coding Repository</td></tr>';
+      }
+
+      // 2. Info & Instructions
+      const info = await this.apiCall('/api/v1/agents/coding/info');
+      if (info) {
+        const verEl = document.getElementById('coding-agent-version');
+        if (verEl) verEl.textContent = `v${info.version || 1}`;
+        const instEl = document.getElementById('coding-instructions-input');
+        if (instEl && !instEl.value) instEl.value = info.instructions || '';
+      }
+    } catch (e) {
+      console.error('Failed to load coding agent data:', e);
+    }
+  },
+
+  openRegisterCodingRepoModal() {
+    document.getElementById('register-coding-modal').classList.remove('hidden');
+  },
+
+  closeRegisterCodingRepoModal() {
+    document.getElementById('register-coding-modal').classList.add('hidden');
+  },
+
+  async submitRegisterCodingRepo(event) {
+    event.preventDefault();
+    const name = document.getElementById('reg-coding-name').value.trim();
+    const path = document.getElementById('reg-coding-path').value.trim();
+    try {
+      await this.apiCall('/api/v1/agents/coding/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, path })
+      });
+      this.closeRegisterCodingRepoModal();
+      this.showToast('Coding Repository 註冊成功！', 'success');
+      this.loadCoding();
+    } catch (e) {
+      this.showToast('註冊失敗: ' + e.message, 'error');
+    }
+  },
+
+  async runCodingScan(projectID) {
+    const timestampEl = document.getElementById('coding-scan-timestamp');
+    const tbody = document.querySelector('#coding-defects-table tbody');
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">掃描中...</td></tr>';
+    try {
+      const res = await this.apiCall('/api/v1/agents/coding/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectID || '' })
+      });
+      timestampEl.textContent = `掃描於: ${new Date().toLocaleTimeString()} (專案: ${res.project_id})`;
+      const obs = res.observations || [];
+      if (obs.length > 0) {
+        tbody.innerHTML = obs.map(o => `
+          <tr>
+            <td><code>${this.escape(o.category)}</code></td>
+            <td><span class="badge ${o.severity >= 8 ? 'badge-FAILED' : (o.severity >= 5 ? 'badge-RUNNING' : 'badge-COMPLETED')}">等級 ${o.severity}</span></td>
+            <td>${this.escape(o.summary)}</td>
+            <td><code>${this.escape(o.target_agent_id || 'coding-agent')}</code></td>
+            <td>${this.formatTime(o.timestamp)}</td>
+          </tr>
+        `).join('');
+        this.showToast(`掃描完成：檢測到 ${obs.length} 項觀測結果`, 'info');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-accent">✅ 零缺陷！代碼庫與測試套件健康</td></tr>';
+        this.showToast('代碼庫完全健康，無缺陷！', 'success');
+      }
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">掃描失敗: ${this.escape(e.message)}</td></tr>`;
+      this.showToast('掃描失敗: ' + e.message, 'error');
+    }
+  },
+
+  async sendCodingPrompt() {
+    const projectSelect = document.getElementById('coding-prompt-project');
+    const input = document.getElementById('coding-prompt-input');
+    const status = document.getElementById('coding-prompt-status');
+    const outBox = document.getElementById('coding-prompt-output-box');
+    const outPre = document.getElementById('coding-prompt-output');
+    const prompt = input.value.trim();
+    if (!prompt) return this.showToast('請輸入代碼指令', 'error');
+
+    status.textContent = '⏳ 執行代碼任務中...';
+    try {
+      const res = await this.apiCall('/api/v1/agents/coding/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          project_id: projectSelect.value || ''
+        })
+      });
+      status.textContent = '✅ 任務完成';
+      outBox.classList.remove('hidden');
+      let outText = `任務 ID: ${res.task_id}\n狀態: ${res.status}`;
+      if (res.execution) {
+        outText += `\n執行 ID: ${res.execution.id || ''}\nResult: ${res.execution.result_status || ''}\nTokens: ${res.execution.total_tokens || 0}`;
+        if (res.execution.error_message) outText += `\nError: ${res.execution.error_message}`;
+      }
+      outPre.textContent = outText;
+      this.showToast('代碼任務已成功執行', 'success');
+    } catch (e) {
+      status.textContent = '❌ 執行失敗: ' + e.message;
+      this.showToast(e.message, 'error');
+    }
+  },
+
+  async saveCodingInstructions() {
+    const inst = document.getElementById('coding-instructions-input').value;
+    const status = document.getElementById('coding-instructions-status');
+    status.textContent = '儲存中...';
+    try {
+      const res = await this.apiCall('/api/v1/agents/coding/instructions', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instructions: inst })
+      });
+      status.textContent = '✅ 已儲存 (v' + (res.version || '') + ')';
+      const verEl = document.getElementById('coding-agent-version');
+      if (verEl && res.version) verEl.textContent = `v${res.version}`;
+      this.showToast('Coding Agent 提示詞設定已更新', 'success');
+    } catch (e) {
+      status.textContent = '❌ 儲存失敗';
+      this.showToast('儲存失敗: ' + e.message, 'error');
+    }
+  },
+
+  // ----------------------------------------------------------------
+  // Writing Agent Tab
+  // ----------------------------------------------------------------
+  async loadWriting() {
+    try {
+      // 1. Projects
+      const projects = await this.apiCall('/api/v1/agents/writing/projects');
+      const tbody = document.querySelector('#writing-projects-table tbody');
+      const select = document.getElementById('writing-prompt-project');
+      select.innerHTML = '';
+      if (projects && projects.length > 0) {
+        tbody.innerHTML = projects.map(p => `
+          <tr>
+            <td><code>${this.escape(p.id)}</code></td>
+            <td><strong>${this.escape(p.name)}</strong></td>
+            <td><span class="badge ${p.has_manifest ? 'badge-COMPLETED' : 'badge-FAILED'}">${p.has_manifest ? 'book.yaml' : '無'}</span></td>
+            <td><span class="badge ${p.status === 'ACTIVE' ? 'badge-COMPLETED' : 'badge-FAILED'}">${p.status}</span></td>
+            <td><code>${this.escape(p.workspace)}</code></td>
+            <td>
+              <button class="btn btn-sm btn-primary" onclick="app.runWritingScan('${this.escape(p.id)}')">📖 史實校勘</button>
+              <button class="btn btn-sm btn-outline ml-1" onclick="app.viewWritingManifest('${this.escape(p.id)}')">📋 檢視 Manifest</button>
+            </td>
+          </tr>
+        `).join('');
+
+        projects.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = `${p.name} (${p.workspace})`;
+          select.appendChild(opt);
+        });
+      } else {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">尚未註冊任何小說寫作專案</td></tr>';
+      }
+
+      // 2. Info & Instructions
+      const info = await this.apiCall('/api/v1/agents/writing/info');
+      if (info) {
+        const verEl = document.getElementById('writing-agent-version');
+        if (verEl) verEl.textContent = `v${info.version || 1}`;
+        const instEl = document.getElementById('writing-instructions-input');
+        if (instEl && !instEl.value) instEl.value = info.instructions || '';
+      }
+    } catch (e) {
+      console.error('Failed to load writing agent data:', e);
+    }
+  },
+
+  openRegisterWritingProjectModal() {
+    document.getElementById('register-writing-modal').classList.remove('hidden');
+  },
+
+  closeRegisterWritingProjectModal() {
+    document.getElementById('register-writing-modal').classList.add('hidden');
+  },
+
+  async submitRegisterWritingProject(event) {
+    event.preventDefault();
+    const name = document.getElementById('reg-writing-name').value.trim();
+    const path = document.getElementById('reg-writing-path').value.trim();
+    try {
+      await this.apiCall('/api/v1/agents/writing/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, path })
+      });
+      this.closeRegisterWritingProjectModal();
+      this.showToast('小說專案註冊成功！', 'success');
+      this.loadWriting();
+    } catch (e) {
+      this.showToast('註冊失敗: ' + e.message, 'error');
+    }
+  },
+
+  async runWritingScan(projectID) {
+    const timestampEl = document.getElementById('writing-scan-timestamp');
+    const tbody = document.querySelector('#writing-anomalies-table tbody');
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">校勘掃描中...</td></tr>';
+    try {
+      const res = await this.apiCall('/api/v1/agents/writing/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectID || '' })
+      });
+      timestampEl.textContent = `校勘於: ${new Date().toLocaleTimeString()} (專案: ${res.project_id})`;
+      const obs = res.observations || [];
+      if (obs.length > 0) {
+        tbody.innerHTML = obs.map(o => `
+          <tr>
+            <td><code>${this.escape(o.category)}</code></td>
+            <td><span class="badge ${o.severity >= 8 ? 'badge-FAILED' : (o.severity >= 5 ? 'badge-RUNNING' : 'badge-COMPLETED')}">等級 ${o.severity}</span></td>
+            <td>${this.escape(o.summary)}</td>
+            <td><span class="badge badge-subtle">${this.escape(o.data && o.data.knowledge_tier ? o.data.knowledge_tier : '史實/推演')}</span></td>
+            <td>${this.formatTime(o.timestamp)}</td>
+          </tr>
+        `).join('');
+        this.showToast(`校勘完成：檢測到 ${obs.length} 項史實或時間線紀錄`, 'info');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-accent">✅ 全書一致！無年代錯置或人物衝突</td></tr>';
+        this.showToast('全書時間線與人物設定一致，無矛盾！', 'success');
+      }
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">校勘失敗: ${this.escape(e.message)}</td></tr>`;
+      this.showToast('校勘失敗: ' + e.message, 'error');
+    }
+  },
+
+  async viewWritingManifest(projectID) {
+    const pathEl = document.getElementById('writing-manifest-path');
+    const contentEl = document.getElementById('writing-manifest-content');
+    contentEl.textContent = '讀取中...';
+    try {
+      const res = await this.apiCall(`/api/v1/agents/writing/manifest?project_id=${encodeURIComponent(projectID || '')}`);
+      pathEl.textContent = res.manifest_file || '';
+      contentEl.textContent = JSON.stringify(res.manifest, null, 2);
+    } catch (e) {
+      pathEl.textContent = '';
+      contentEl.textContent = '此小說目錄尚未建立 book.yaml 入口規格。';
+      this.showToast('未找到 book.yaml', 'warning');
+    }
+  },
+
+  async sendWritingPrompt() {
+    const projectSelect = document.getElementById('writing-prompt-project');
+    const input = document.getElementById('writing-prompt-input');
+    const status = document.getElementById('writing-prompt-status');
+    const outBox = document.getElementById('writing-prompt-output-box');
+    const outPre = document.getElementById('writing-prompt-output');
+    const prompt = input.value.trim();
+    if (!prompt) return this.showToast('請輸入寫作指令', 'error');
+
+    status.textContent = '⏳ 執行寫作任務中...';
+    try {
+      const res = await this.apiCall('/api/v1/agents/writing/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          project_id: projectSelect.value || ''
+        })
+      });
+      status.textContent = '✅ 任務完成';
+      outBox.classList.remove('hidden');
+      let outText = `任務 ID: ${res.task_id}\n狀態: ${res.status}`;
+      if (res.execution) {
+        outText += `\n執行 ID: ${res.execution.id || ''}\nResult: ${res.execution.result_status || ''}\nTokens: ${res.execution.total_tokens || 0}`;
+        if (res.execution.error_message) outText += `\nError: ${res.execution.error_message}`;
+      }
+      outPre.textContent = outText;
+      this.showToast('寫作任務已成功執行', 'success');
+    } catch (e) {
+      status.textContent = '❌ 執行失敗: ' + e.message;
+      this.showToast(e.message, 'error');
+    }
+  },
+
+  async saveWritingInstructions() {
+    const inst = document.getElementById('writing-instructions-input').value;
+    const status = document.getElementById('writing-instructions-status');
+    status.textContent = '儲存中...';
+    try {
+      const res = await this.apiCall('/api/v1/agents/writing/instructions', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instructions: inst })
+      });
+      status.textContent = '✅ 已儲存 (v' + (res.version || '') + ')';
+      const verEl = document.getElementById('writing-agent-version');
+      if (verEl && res.version) verEl.textContent = `v${res.version}`;
+      this.showToast('Writing Agent 提示詞設定已更新', 'success');
+    } catch (e) {
+      status.textContent = '❌ 儲存失敗';
+      this.showToast('儲存失敗: ' + e.message, 'error');
     }
   },
 

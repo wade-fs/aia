@@ -390,3 +390,93 @@ func TestWeb_Audit_QueryWithMetadataAndSource(t *testing.T) {
 		t.Errorf("expected source WEB, got %s", res.Data[0].Source)
 	}
 }
+
+func TestWeb_CodingAndWritingAgentModules(t *testing.T) {
+	appInst, handler, token := setupTestWeb(t)
+	defer appInst.Close()
+
+	// Login
+	loginBody, _ := json.Marshal(map[string]string{"token": token})
+	reqLogin := httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(loginBody))
+	recLogin := httptest.NewRecorder()
+	handler.ServeHTTP(recLogin, reqLogin)
+	cookie := recLogin.Result().Cookies()[0]
+
+	// 1. Coding Agent Info
+	reqCodingInfo := httptest.NewRequest("GET", "/api/v1/agents/coding/info", nil)
+	reqCodingInfo.AddCookie(cookie)
+	recCodingInfo := httptest.NewRecorder()
+	handler.ServeHTTP(recCodingInfo, reqCodingInfo)
+	if recCodingInfo.Code != http.StatusOK {
+		t.Fatalf("expected 200 from coding/info, got %d: %s", recCodingInfo.Code, recCodingInfo.Body.String())
+	}
+
+	// 2. Coding Register Project
+	codingRegBody, _ := json.Marshal(map[string]string{
+		"name": "Test Coding Repo",
+		"path": ".",
+	})
+	reqCodingReg := httptest.NewRequest("POST", "/api/v1/agents/coding/projects", bytes.NewReader(codingRegBody))
+	reqCodingReg.AddCookie(cookie)
+	reqCodingReg.Header.Set("Content-Type", "application/json")
+	recCodingReg := httptest.NewRecorder()
+	handler.ServeHTTP(recCodingReg, reqCodingReg)
+	if recCodingReg.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from coding/projects, got %d: %s", recCodingReg.Code, recCodingReg.Body.String())
+	}
+
+	// 3. Coding Scan
+	codingScanBody, _ := json.Marshal(map[string]string{})
+	reqCodingScan := httptest.NewRequest("POST", "/api/v1/agents/coding/scan", bytes.NewReader(codingScanBody))
+	reqCodingScan.AddCookie(cookie)
+	reqCodingScan.Header.Set("Content-Type", "application/json")
+	recCodingScan := httptest.NewRecorder()
+	handler.ServeHTTP(recCodingScan, reqCodingScan)
+	if recCodingScan.Code != http.StatusOK {
+		t.Fatalf("expected 200 from coding/scan, got %d: %s", recCodingScan.Code, recCodingScan.Body.String())
+	}
+
+	// 4. Writing Agent Info
+	reqWritingInfo := httptest.NewRequest("GET", "/api/v1/agents/writing/info", nil)
+	reqWritingInfo.AddCookie(cookie)
+	recWritingInfo := httptest.NewRecorder()
+	handler.ServeHTTP(recWritingInfo, reqWritingInfo)
+	if recWritingInfo.Code != http.StatusOK {
+		t.Fatalf("expected 200 from writing/info, got %d: %s", recWritingInfo.Code, recWritingInfo.Body.String())
+	}
+
+	// 5. Writing Register Novel Project
+	writingRegBody, _ := json.Marshal(map[string]string{
+		"name": "Test Novel",
+		"path": ".",
+	})
+	reqWritingReg := httptest.NewRequest("POST", "/api/v1/agents/writing/projects", bytes.NewReader(writingRegBody))
+	reqWritingReg.AddCookie(cookie)
+	reqWritingReg.Header.Set("Content-Type", "application/json")
+	recWritingReg := httptest.NewRecorder()
+	handler.ServeHTTP(recWritingReg, reqWritingReg)
+	if recWritingReg.Code != http.StatusCreated {
+		t.Fatalf("expected 201 from writing/projects, got %d: %s", recWritingReg.Code, recWritingReg.Body.String())
+	}
+
+	// 6. Investment Agent Info and Instructions Update
+	reqInvInfo := httptest.NewRequest("GET", "/api/v1/agents/investment/info", nil)
+	reqInvInfo.AddCookie(cookie)
+	recInvInfo := httptest.NewRecorder()
+	handler.ServeHTTP(recInvInfo, reqInvInfo)
+	if recInvInfo.Code != http.StatusOK {
+		t.Fatalf("expected 200 from investment/info, got %d: %s", recInvInfo.Code, recInvInfo.Body.String())
+	}
+
+	invInstBody, _ := json.Marshal(map[string]string{
+		"instructions": "Be ultra conservative with capital.",
+	})
+	reqInvInst := httptest.NewRequest("PUT", "/api/v1/agents/investment/instructions", bytes.NewReader(invInstBody))
+	reqInvInst.AddCookie(cookie)
+	reqInvInst.Header.Set("Content-Type", "application/json")
+	recInvInst := httptest.NewRecorder()
+	handler.ServeHTTP(recInvInst, reqInvInst)
+	if recInvInst.Code != http.StatusOK {
+		t.Fatalf("expected 200 from investment/instructions, got %d: %s", recInvInst.Code, recInvInst.Body.String())
+	}
+}

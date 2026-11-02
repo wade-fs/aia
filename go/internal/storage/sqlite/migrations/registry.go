@@ -26,6 +26,7 @@ func All() []Migration {
 		{Version: 11, Name: "learning_and_correction", SQL: LearningAndCorrection},
 		{Version: 12, Name: "experiments_and_collaboration", SQL: ExperimentsAndCollaboration},
 		{Version: 13, Name: "project_domain_type", SQL: ProjectDomainType},
+		{Version: 14, Name: "self_modification_and_evolution", SQL: SelfModificationAndEvolution},
 	}
 }
 

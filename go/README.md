@@ -63,7 +63,7 @@ go test -count=1 ./...
 
 ## 3. Architectural References
 
-- Master Plan: [docs/Plan.md](file:///home/wade/src/github/aia/docs/Plan.md)
+- Master Roadmap: [docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md)
 - Implementation Status: [docs/development/implementation-status.md](file:///home/wade/src/github/aia/docs/development/implementation-status.md)
 - Unified Data Model: [docs/architecture/data-model.md](file:///home/wade/src/github/aia/docs/architecture/data-model.md)
 - Security & Subprocess Sandbox: [docs/architecture/security-model.md](file:///home/wade/src/github/aia/docs/architecture/security-model.md)

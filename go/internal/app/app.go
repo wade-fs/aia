@@ -31,6 +31,7 @@ import (
 	memoryService "github.com/wade/aia/internal/service/memory"
 	projectService "github.com/wade/aia/internal/service/project"
 	scheduleService "github.com/wade/aia/internal/service/schedule"
+	selfmodService "github.com/wade/aia/internal/service/selfmod"
 	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
@@ -87,6 +88,9 @@ type App struct {
 	DelegationSvc    *delegationService.Service
 	CodingObserver   *autonomy.CodeHealthObserver
 	WritingObserver  *autonomy.ManuscriptConsistencyObserver
+	SelfModRepo      *repository.SelfModRepository
+	SelfModPipeline  *selfmodService.Pipeline
+	SelfEvolutionEng *autonomy.SelfEvolutionEngine
 }
 
 func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
@@ -124,6 +128,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	autonomyRepo := repository.NewAutonomyRepository(db)
 	learningRepo := repository.NewLearningRepository(db)
 	experimentRepo := repository.NewExperimentRepository(db)
+	selfmodRepo := repository.NewSelfModRepository(db)
 
 	taskRepo.SetChangeHook(func(ctx context.Context, taskID domain.ID, status task.TaskStatus, created bool) {
 		if bus != nil {
@@ -261,6 +266,9 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		DefaultLLMDec:    experiment.NewAgyLLMGenerationDecider(prov, cfg.Runtime.WorkspaceDir),
 	})
 
+	selfmodPipeline := selfmodService.NewPipeline(cfg.Runtime.WorkspaceDir, selfmodRepo, approvalSvc, auditRepo, decisionRepo, bus)
+	selfEvolutionEng := autonomy.NewSelfEvolutionEngine(selfmodPipeline)
+
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	pa := orchestrator.NewPersonalAgent(prov, retriever, taskSvc, scheduler, evaluator)
 	pa.SetAutonomyEngine(autonomyEng)
@@ -322,6 +330,9 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		DelegationSvc:    delegationSvc,
 		CodingObserver:   codingObs,
 		WritingObserver:  writingObs,
+		SelfModRepo:      selfmodRepo,
+		SelfModPipeline:  selfmodPipeline,
+		SelfEvolutionEng: selfEvolutionEng,
 	}
 
 	// Seed default domain agents, default project & recurring schedules

@@ -17,7 +17,7 @@
 |:---:|---|---|
 | **Tier 1（最高）** | AIA-00 ～ AIA-19（共 20 份原始規格） | 系統性質、能力邊界與設計意圖的最終定義來源 |
 | **Tier 2** | **本文件（AIA-SPEC-AUDIT-01）** | 記錄跨規格衝突的正式裁決結果；不新增原始規格未涵蓋的能力 |
-| **Tier 3** | [docs/Plan.md](file:///home/wade/src/github/aia/docs/Plan.md)（Master Implementation Plan） | 以 Tier 1+2 為依據，規劃具體實作路線與驗收標準 |
+| **Tier 3** | [docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md)（Master Implementation Roadmap） | 以 Tier 1+2 為依據，規劃具體實作路線與驗收標準 |
 
 > [!IMPORTANT]
 > 本文件的每一項裁決**僅解決跨規格之間的矛盾與工程落地歧異**，所有裁決均以 Tier 1 原始規格的設計意圖為根本依據。若未來 Tier 1 規格修訂，本文件須同步更新。
@@ -129,7 +129,7 @@ AIA 規格體系（AIA-00 至 AIA-19，共計 20 份文件、27,500+ 行）完�
    - **`G1 (Owner Governance)`**：系統擁有者（人類使用者）的顯式授權、配置與審批。
    - **`G2 (Autonomy Governance)`**：Autonomy Core 在產生候選工作與深思決策時的策略邊界。
    - **`G3 (Execution Governance)`**：Worker 與 Task 執行期間的並行槽位、資源消耗配額 (Token/CPU Budget) 與逾時控制。
-2. 系統實作階段一律統一遵循 [docs/Plan.md](file:///home/wade/src/github/aia/docs/Plan.md) 的 **Phase 0 至 Phase 6**。
+2. 系統實作階段一律統一遵循 [docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md) 的 **Phase 0 至 Phase 6**。
 
 ---
 

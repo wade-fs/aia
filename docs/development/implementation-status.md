@@ -1,17 +1,17 @@
 # AIA Development: Implementation Status
 
 **Project:** Autonomous Intelligence Architecture (AIA)  
-**Active Implementation Status:** **Phase 0 ～ Phase 5 Completed** (Phase 5A Generational Investment Experiment + Phase 5B Multi-Domain MVA & Entry Gate, Migrations `001` ～ `013` active)  
-**Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Baseline [`0e189d9`](file:///home/wade/src/github/aia) ➔ Phase 5A Baseline [`29d1cb3`](file:///home/wade/src/github/aia) ➔ Phase 5B Active Workspace  
+**Active Implementation Status:** **Phase 0 ～ Phase 6 Completed** (Phase 6 Safe Self-Modification & Autonomous System Evolution, Migrations `001` ～ `014` active)  
+**Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Baseline [`0e189d9`](file:///home/wade/src/github/aia) ➔ Phase 5A Baseline [`29d1cb3`](file:///home/wade/src/github/aia) ➔ Phase 5B Baseline ➔ Phase 6 Active Baseline  
 **Specification Baseline:** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-19) v2.0  
 **Audit Report:** [docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)  
 **Last Updated:** 2026-11-02  
 
 ---
 
-## 1. Current Architecture Overview (Phase 5 Active Baseline)
+## 1. Current Architecture Overview (Phase 6 Active Baseline)
 
-The physical Go codebase implements Phases 0 through 5 (Runtime, Continuity & Provenance, Governance, 11-Step Shared Autonomy Core across 3 Domains, Phase 3.5 Hardening, Phase 4 Verifiable Self-Correction & Goal Evolution, Phase 5A Generational Experimentation, and Phase 5B Multi-Domain MVA & Cross-Domain Delegation):
+The physical Go codebase implements Phases 0 through 6 (Runtime, Continuity & Provenance, Governance, 11-Step Shared Autonomy Core across 3 Domains, Phase 3.5 Hardening, Phase 4 Verifiable Self-Correction & Goal Evolution, Phase 5A Generational Experimentation, Phase 5B Multi-Domain MVA & Cross-Domain Delegation, and Phase 6 Governed Safe Self-Modification & System Evolution):
 
 ```text
 go/
@@ -20,21 +20,23 @@ go/
 ├── internal/
 │   ├── app/                  # Application bootstrap & dependency wiring
 │   ├── audit/                # Audit context helper
-│   ├── autonomy/             # 11-step Autonomy Core (Phase 3 ~ Phase 4)
+│   ├── autonomy/             # 11-step Autonomy Core & Evolution Engine (Phase 3 ~ Phase 6)
 │   │   ├── clock/            # Point-in-Time (AsOf) Clock & zero-look-ahead replay guard
 │   │   ├── cycle/            # 11-step Coordinator, budget pre-flight, Step 10/11 learning hook
 │   │   ├── deliberation/     # EV trade-off matrix, L2/L3 bonus & negative constraint suppression
 │   │   ├── initiative/       # Multi-source CandidateInitiative generator & deduplicator
 │   │   ├── learning/         # Outcome eval, RCA, 3-Tier Correction, L0~L3 maturity & rollback
 │   │   ├── observation/      # Multi-domain observation collector
-│   │   └── recall/           # L1~L5 working memory + Point-in-Time L2/L3 & negative learnings
+│   │   ├── recall/           # L1~L5 working memory + Point-in-Time L2/L3 & negative learnings
+│   │   └── self_evolution_engine.go # Autonomous system evolution coordinator (Phase 6)
 │   ├── cli/                  # CLI commands (agent, task, exec, decision, approval, stop/resume,
 │   │                         #               cycle [--as-of --replay], goal [evolve], learning)
 │   ├── collector/            # TWSE, TPEx, SEC, FRED, RSS collectors
 │   ├── config/               # YAML configuration loader (incl. Budget & Sandbox configs)
 │   ├── continuity/           # ContextReconstructor & sanitized snapshot manager
-│   ├── domain/               # Core domain entities (continuity, knowledge, governance, goal,
-│   │                         #                       decision, autonomy, learning, experiment, investment)
+│   ├── domain/               # Core domain entities (continuity, knowledge, consistency, governance,
+│   │                         #                       goal, decision, autonomy, learning, experiment,
+│   │                         #                       selfmod, investment, coding, writing, project)
 │   ├── eventbus/             # In-memory pub/sub event bus
 │   ├── experiment/           # Generational Experiment Controller (G1 frozen rules vs G2/G2.x LLM)
 │   ├── orchestrator/         # Scheduler & PersonalAgent Strangler-Fig coordinator
@@ -43,8 +45,9 @@ go/
 │   │                         # mount-namespace sandbox) & mock provider
 │   ├── recovery/             # Process restart recovery manager
 │   ├── service/              # Application services (agent, task, exec, inv, mem, knowledge,
-│   │                         #                       approval, governance, goal + evolution)
-│   ├── storage/sqlite/       # SQLite WAL driver, migrations 001~012, repositories
+│   │                         #                       approval, governance, goal + evolution, delegation,
+│   │                         #                       selfmod pipeline)
+│   ├── storage/sqlite/       # SQLite WAL driver, migrations 001~014, repositories
 │   ├── validation/           # Hardened execution validator (output/artifact/fatal-marker checks)
 │   ├── web/                  # Port 7777 host, OTT/session auth, Console REST API (/api/v1/*)
 │   ├── worker/               # Background ScheduleWorker (15s), TaskWorker (5s, 3 slots)
@@ -53,8 +56,8 @@ go/
 │   └── service.sh            # systemd --user service management utility
 ├── Makefile                  # Root and go/ build automation
 └── tests/
-    ├── integration/          # End-to-end integration suites (incl. real agy CLI & Phase 4 A~E)
-    └── unit/                 # Unit suites (incl. Migration 011 & Phase 3.5 hardening)
+    ├── integration/          # End-to-end integration suites (incl. real agy CLI, Phase 4 & Phase 6)
+    └── unit/                 # Unit suites (incl. Migrations 001~014 & Phase 6 selfmod)
 ```
 
 ---
@@ -89,12 +92,15 @@ go/
 | **`internal/service/delegation`** | **Production Ready (Phase 5B)** | Cross-Domain Agent Delegation (AIA-12 §21) | Lifecycle contract state machine (`PENDING` -> `IN_PROGRESS` -> `DELIVERED` -> `VERIFIED`), automatic task spawning, and acceptance verification. |
 | **`internal/domain/coding`** | **Production Ready (Phase 5B)** | Coding Agent MVA (AIA-15 §24) | Code defect detection (`CodeHealthObserver`), sandboxed patch application & test re-run (`CodingPilotExecutor`), and deterministic test verification reaching `L2_VERIFIED`. |
 | **`internal/domain/writing`** | **Production Ready (Phase 5B)** | Writing Agent MVA (AIA-15 §23) | 3-tier knowledge (`FACT_HISTORY`, `PLAUSIBLE_INFERENCE`, `FICTION`), manuscript consistency observer referencing `~/src/github/novel/yuan/`, intentional fiction license (`NO_ACTION`) vs chronological contradiction (`L2_VERIFIED`). |
+| **`internal/domain/knowledge` & `consistency`** | **Production Ready (Phase 6)** | Universal Knowledge & Consistency Core | Universal `Entity`, `Relation`, `TemporalReference`, `SpatialReference`, `EpistemicStatus`, `Assertion`, and cross-domain `ConsistencyEngine`. |
+| **`internal/domain/selfmod` & `service/selfmod`** | **Production Ready (Phase 6)** | Safe Self-Modification Pipeline (AIA-14) | Tri-level `ScopeClassifier` (Level A domain, Level B core with human approval gate, Level C fail-closed immutable governance), sandbox worktree execution, multi-level verification (V1 compile, V2 unit, V3 integration), and zero-residual rollback. |
+| **`internal/autonomy (SelfEvolutionEngine)`** | **Production Ready (Phase 6)** | Autonomous Evolution Coordinator (AIA-14) | Periodic autonomous inspection, hypothesis generation, modification proposal creation, sandbox verification, and end-to-end evolution cycles. |
 
 ---
 
 ## 3. Database Schema Status
 
-### Active Tables (Migrations 001 ~ 013)
+### Active Tables (Migrations 001 ~ 014)
 - `agents`: Registered agents, capabilities, configurations.
 - `tasks`: Work units, status machine (`READY`, `RUNNING`, `COMPLETED`, `WAITING_APPROVAL`).
 - `task_dependencies`: Inter-task DAG dependencies.
@@ -129,6 +135,9 @@ go/
 - `experiment_generations`: Generational cohorts (`G1` frozen rule baseline vs `G2` / `G2.1` / `G2.2` LLM cohorts) with isolated portfolio profile bindings and SQLite triggers (`trg_exp_gen_freeze_update`, `trg_exp_gen_freeze_delete`) blocking mutation/deletion of frozen `G1` (Migration 012).
 - `experiment_comparisons`: Point-in-time Track A (performance + Brier/LogLoss & decision confidence calibration) and Track B (autonomy + 5-regime verdict) comparison snapshots (Migration 012).
 - `delegation_requests`: Cross-agent delegation contract records with acceptance gates (Migration 012).
+- `self_modification_proposals`: Self-modification proposal tracking with scope levels (`LEVEL_A`, `LEVEL_B`, `LEVEL_C`), patch diff, status machine (`PROPOSED`, `VERIFYING`, `VERIFIED`, `PENDING_APPROVAL`, `APPLIED`, `MERGED`, `FAILED`, `REJECTED`, `ROLLED_BACK`), verification test logs, and approval binding (Migration 014).
 
-### Next Milestone: Phase 6 Safe Self-Modification
-- Level A/B/C OS-isolated sandbox code modification pipeline ── *Phase 6*
+---
+
+## 4. Phase Completion Status (Phases 0 ～ 6 Complete)
+All 7 master development phases (Phase 0 Baseline, Phase 1 Continuity & Provenance, Phase 2 Governance & Emergency Stop, Phase 3 & 3.5 Autonomy Core & Hardening, Phase 4 Verifiable Self-Correction & Learning, Phase 5 Multi-Domain Experiments & Delegation, Phase 6 Governed Safe Self-Modification & Evolution) are 100% completed and verified via automated test suites.

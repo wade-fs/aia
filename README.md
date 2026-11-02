@@ -50,7 +50,7 @@ AIA 是一個以研究與實證 AI Agent 長期自主行為為目標的本機優
 
 ## 2. Architecture
 
-AIA 採用五層職責分離架構（詳見 [docs/Plan.md](file:///home/wade/src/github/aia/docs/Plan.md)）：
+AIA 採用五層職責分離架構（詳見 [docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md) 與 [docs/architecture/overview.md](file:///home/wade/src/github/aia/docs/architecture/overview.md)）：
 
 ```text
 AIA
@@ -96,7 +96,6 @@ aia/
 ├── README.md
 ├── Makefile
 ├── docs/
-│   ├── Plan.md                         # 七階段總體實作規劃書 (Master Plan)
 │   ├── memory.md                       # L1~L5 一致性記憶與認知架構
 │   ├── architecture/                   # 系統架構、統一資料模型 (data-model.md)、安全模型 (security-model.md)
 │   ├── development/                    # 路線圖 (roadmap.md)、實作現況 (implementation-status.md)、遷移計畫
@@ -172,7 +171,7 @@ aia investment evaluate
 
 ## 6. Seven-Phase Development Roadmap
 
-詳見 [docs/Plan.md](file:///home/wade/src/github/aia/docs/Plan.md) 與 [docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md)：
+詳見 [docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md) 與 [docs/development/implementation-status.md](file:///home/wade/src/github/aia/docs/development/implementation-status.md)：
 
 | Phase | Focus | Status |
 |---|---|---|
@@ -181,8 +180,8 @@ aia investment evaluate
 | **Phase 2** | Operational Governance, Approvals & Controlled Emergency Stop (`009`) | **COMPLETED** |
 | **Phase 3 & 3.5** | 11-Step Autonomy Core, Initiative, Budget Gate, OS Sandbox & PiT Replay (`010`) | **COMPLETED** |
 | **Phase 4** | Verifiable Self-Correction, Learning Mechanism (`L0`–`L3`) & Governed Goal Evolution (`011`) | **COMPLETED** |
-| **Phase 5** | Longitudinal Domain Experiments (`5A` Investment `G1` vs `G2`/`G2.x` **READY**; `5B` Coding, Writing & Delegation) (`012`) | **IN PROGRESS** |
-| **Phase 6** | Isolated Sandbox Safe Code Self-Modification & Autonomous System Evolution | **PLANNED** |
+| **Phase 5** | Longitudinal Domain Experiments (`5A` Investment `G1` vs `G2`/`G2.x`; `5B` Coding, Writing & Delegation) (`012`–`013`) | **COMPLETED** |
+| **Phase 6** | Isolated Sandbox Safe Code Self-Modification & Autonomous System Evolution (`014`) | **COMPLETED** |
 
 ---
 
@@ -196,6 +195,6 @@ aia investment evaluate
 
 ## 8. Documentation Index
 
-- **總體規劃與記憶架構**：[docs/Plan.md](file:///home/wade/src/github/aia/docs/Plan.md) · [docs/memory.md](file:///home/wade/src/github/aia/docs/memory.md)
+- **總體藍圖與記憶架構**：[docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md) · [docs/memory.md](file:///home/wade/src/github/aia/docs/memory.md)
 - **實作現況與資料模型**：[implementation-status.md](file:///home/wade/src/github/aia/docs/development/implementation-status.md) · [data-model.md](file:///home/wade/src/github/aia/docs/architecture/data-model.md) · [security-model.md](file:///home/wade/src/github/aia/docs/architecture/security-model.md)
 - **正式規格書（v2.0）**：[docs/specifications/](file:///home/wade/src/github/aia/docs/specifications)（`AIA-00` 至 `AIA-19`）

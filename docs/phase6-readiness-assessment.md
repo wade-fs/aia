@@ -1,7 +1,7 @@
 # AIA Phase 6 准入成熟度評估報告 (Phase 6 Readiness Assessment)
 
 - **評估日期**：2026-11-02
-- **評估版本**：v1.0 (基於 Phase 1–5b 與 Plan2.md 抽象化架構)
+- **評估版本**：v1.0 (基於 Phase 1–5b 與通用 Knowledge / Consistency 核心抽象化架構)
 - **目標階段**：Phase 6 — 受治理之安全自我修改 (Governed Safe Self-Modification)
 - **當前判定**：**准入門檻全面達成 (G1–G5 ALL PASSED / L2_VERIFIED)**
 

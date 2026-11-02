@@ -7,7 +7,7 @@
 **最後更新：** 2026-11-01  
 
 > [!NOTE]
-> **歷史快照說明**：本文件完整保留 **Phase 0（Commit `7597902`）啟動前的歷史差距盤點基準**，用以對照既有資產保護邊界。目前系統已完成 **Phase 0 ～ Phase 4（含 Phase 3.5 加固，Migrations `001`～`011`）**，最新模組與資料表實作狀態請參閱 [implementation-status.md](file:///home/wade/src/github/aia/docs/development/implementation-status.md) 與 [roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md)。  
+> **歷史快照說明**：本文件完整保留 **Phase 0（Commit `7597902`）啟動前的歷史差距盤點基準**，用以對照既有資產保護邊界。目前系統已完成 **Phase 0 ～ Phase 6（含 Phase 3.5 加固、Phase 5 多領域 MVA、Phase 6 安全自我修改，Migrations `001`～`014`）**，最新模組與資料表實作狀態請參閱 [implementation-status.md](file:///home/wade/src/github/aia/docs/development/implementation-status.md) 與 [roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md)。  
 
 ---
 
@@ -42,7 +42,7 @@
 
 | 規格編號與名稱 | 規格核心要求 | 現有實作位置 (Commit 7597902) | 實作成熟度 | 具體缺口與待實作重點 |
 |---|---|---|:---:|---|
-| **AIA-00 總體架構與演進藍圖** | 系統定位、6層架構、R1~R6能力演進模型。 | [docs/Plan.md](file:///home/wade/src/github/aia/docs/Plan.md) | 待實作 | 代碼層缺少共用 Autonomy Core 頂層容器；目前 PersonalAgent 僅為薄轉發。 |
+| **AIA-00 總體架構與演進藍圖** | 系統定位、6層架構、R1~R6能力演進模型。 | [docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md) | 待實作 | 代碼層缺少共用 Autonomy Core 頂層容器；目前 PersonalAgent 僅為薄轉發。 |
 | **AIA-01 產品需求規格** | Local-First、Single User、Task 狀態機、四項自主能力。 | [`go/internal/domain/task`](file:///home/wade/src/github/aia/go/internal/domain/task), [`storage/sqlite`](file:///home/wade/src/github/aia/go/internal/storage/sqlite) | 雛形就緒 | 基礎單人本機與 Task 狀態機完備；缺少自主性評估與長期目標演化。 |
 | **AIA-02 系統架構規格** | Runtime、Autonomy Core、Core Services、Domain Agents 分層。 | [`go/internal/app/app.go`](file:///home/wade/src/github/aia/go/internal/app/app.go), [`internal/service/`](file:///home/wade/src/github/aia/go/internal/service) | 部分具備 | 服務皆已接上 EventBus 與 SQLite；但 Autonomy Core 尚未抽離為獨立層。 |
 | **AIA-03 Go Runtime 實作** | Manager 生命週期、Schedule/Task Worker、Recovery、SQLite WAL。 | [`go/internal/worker/`](file:///home/wade/src/github/aia/go/internal/worker), [`internal/recovery/`](file:///home/wade/src/github/aia/go/internal/recovery) | 雛形就緒 (65%) | Worker 並行控制與重啟恢復良好；缺 GoalService、EvidenceRepo 與受控停止。 |

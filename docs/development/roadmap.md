@@ -2,8 +2,8 @@
 
 **Project:** Autonomous Intelligence Architecture (AIA)  
 **Version:** v2.0 (Official Baseline)  
-**Master Plan:** [docs/Plan.md](file:///home/wade/src/github/aia/docs/Plan.md)  
-**Last Updated:** 2026-11-01  
+**Baseline Roadmap:** Master Implementation Plan fulfilled across Phases 0–6  
+**Last Updated:** 2026-11-02  
 
 ---
 
@@ -32,7 +32,8 @@ AIA executes a **Dual-Track Evolution Model**:
 │ Autonomy & Harden │ Learning & Goal   │ MVA & Cross-Domain Delegation  │
 │    [COMPLETED]    │    [COMPLETED]    │          [COMPLETED]           │
 ├───────────────────┴───────────────────┴────────────────────────────────┤
-│ Phase 6: Safe Self-Modification & Autonomous System Evolution [PLANNED]│
+│ Phase 6: Safe Self-Modification & Autonomous System Evolution          │
+│                              [COMPLETED]                               │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -49,8 +50,8 @@ Progress is evaluated by verifiable, computable autonomous behavior rather than 
 - **M4: Autonomous Closed Loop** ── Execution of the 11-step loop (`Observe` to `Reassess`) under hard daily token/cycle budget gates and Point-in-Time (`AsOf` Clock) zero-look-ahead replay. *(Completed — Phase 3 / 3.5)*
 - **M5: Verifiable Self-Correction & Learning Mechanism** ── Discrepancy detection, testable RCA hypotheses, table-driven 3-tier runtime profile (`TIER1_AUTO`, `TIER2_APPROVAL`, `TIER3_BLOCKED`), 4 learning maturity levels (`L0_RECORDED` ～ `L3_GENERALIZED`), 7 epistemic comparison fields, regression rollback, and `INCONCLUSIVE` / `<= 0.45` confidence caps. *(Completed — Phase 4)*
 - **M6: Governed Goal Evolution** ── 3-way goal evolution taxonomy (`PERSISTENCE`, `OPTIMIZATION`, `REVISION`) with Anti-Goalpost-Moving guard preventing unapproved metric weakening on `STRATEGIC` goals. *(Completed — Phase 4)*
-- **M7: Domain Experiments & Longitudinal Validation** ── Longitudinal validation of `L3_GENERALIZED` learning across Investment (NT$100,000 virtual capital + historical PiT replay), Coding, and Writing experiments, plus cross-domain `DelegationRequest`. *(Next Target — Phase 5)*
-- **M8: Safe Self-Modification** ── OS-isolated sandbox code modification, automated multi-level test verification, human approval gate, and automatic rollback. *(Planned — Phase 6)*
+- **M7: Domain Experiments & Longitudinal Validation** ── Longitudinal validation of `L3_GENERALIZED` learning across Investment (NT$100,000 virtual capital + historical PiT replay), Coding, and Writing experiments, plus cross-domain `DelegationRequest`. *(Completed — Phase 5)*
+- **M8: Safe Self-Modification** ── OS-isolated sandbox code modification, automated multi-level test verification, human approval gate, and automatic rollback. *(Completed — Phase 6)*
 
 ---
 
@@ -96,6 +97,16 @@ Progress is evaluated by verifiable, computable autonomous behavior rather than 
   - **Cross-Domain Delegation (AIA-12 §21)**: `DelegationService` managing `delegation_requests` lifecycle state machine (`PENDING` -> `IN_PROGRESS` -> `DELIVERED` -> `VERIFIED`) with CLI commands (`aia delegation ...`) and Web Console API routes (`/api/v1/delegations`).
   - **Phase 5 Entry Gate (AIA-15 §22)**: All 7 criteria verified green in integration acceptance suite (`TestPhase5B_EntryGate_*`).
 
-### Phase 6: Safe Self-Modification & Autonomous System Evolution *(Planned)*
-- Scope isolation: Level A (Domain), Level B (AIA Core - Human Approval Required), Level C (Governance - Locked via OS namespace & immutable storage protections).
-- Automated self-modification pipeline: Proposal ➔ Sandbox ➔ Multi-level Tests ➔ Diff Review ➔ Approval ➔ Deployment ➔ Verification ➔ Rollback.
+### Phase 6: Safe Self-Modification & Autonomous System Evolution *(Completed)*
+- **Scope Isolation & Tri-Level Governance (AIA-14 §2)**:
+  - **Level A (Domain Scope)**: Domain tools, collectors, scripts, and prompts; autonomous branch creation, sandbox test verification, L2 regression check, and autonomous merge.
+  - **Level B (AIA Core Non-Governance Scope)**: Core services, workers, domain models, and autonomy runtime; verified in isolated sandbox, followed by a mandatory **Human Approval Gate** (`WAITING_APPROVAL`); agent self-approval is strictly forbidden and rejected (`ErrAgentSelfApprovalForbidden`).
+  - **Level C (Governance, Policy, Security & Migration Scope)**: Core policy (`internal/policy/`), approval rules (`internal/service/approval/`, `internal/domain/governance/`), database schema migrations (`internal/storage/sqlite/migrations/`), environment config, and system databases. Strictly immutable and locked; any agent self-modification attempt fails closed immediately with high-severity audit logging (`ErrGovernanceImmutable`).
+- **Migration `014` (`self_modification_proposals`)**: Persists proposals, diff content, scope level (`LEVEL_A`, `LEVEL_B`, `LEVEL_C`), lifecycle status (`PROPOSED` -> `VERIFYING` -> `VERIFIED` / `PENDING_APPROVAL` -> `MERGED` / `REJECTED`), test logs, target branch, and worktree path.
+- **Self-Modification Pipeline (`internal/service/selfmod/pipeline.go`)**:
+  - `Propose`: Validates, sanitizes, and classifies modification level via `ScopeClassifier`.
+  - `ExecuteSandboxVerification`: Clones isolated branch/worktree, applies patch, executes multi-level validation suite (V1 compile, V2 unit, V3 integration), and captures verification artifacts.
+  - `SubmitForApproval`: Creates decision & approval record for Level B changes, transitioning to `PENDING_APPROVAL`.
+  - `ApplyMerge`: Merges verified changes into target branch (strictly enforcing human ownership for Level B).
+  - **Zero-Residual Rollback**: Automatic clean teardown of worktrees, branch pruning, and zero workspace pollution on verification failure.
+- **Autonomous System Evolution Engine (`internal/autonomy/self_evolution_engine.go`)**: Coordinates periodic autonomous inspection, hypothesis generation, modification proposal creation, sandbox verification, and end-to-end evolution cycles.

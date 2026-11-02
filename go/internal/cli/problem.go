@@ -337,6 +337,151 @@ var problemMaterializeCmd = &cobra.Command{
 	},
 }
 
+var (
+	reassessTrigger    string
+	reassessCause      string
+	reassessEvidence   string
+	reassessRationale  string
+	reassessAction     string
+	reassessFindings   []string
+	reassessContradict []string
+)
+
+var problemTreeCmd = &cobra.Command{
+	Use:   "tree <problem-id>",
+	Short: "Display recursive problem decomposition hierarchy (AIA-22 §5.1)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		if appInst.ProblemSvc == nil {
+			return fmt.Errorf("ProblemSvc is not initialized")
+		}
+
+		tree, err := appInst.ProblemSvc.GetProblemTree(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("failed to get problem tree: %w", err)
+		}
+
+		fmt.Printf("=== Problem Decomposition Tree: %s ===\n", tree.Problem.Title)
+		printProblemTreeNode(tree, "", true)
+		return nil
+	},
+}
+
+func printProblemTreeNode(node *domainProblem.ProblemTreeNode, indent string, isLast bool) {
+	marker := "├── "
+	if isLast {
+		marker = "└── "
+	}
+	if indent == "" {
+		marker = "• "
+	}
+	fmt.Printf("%s%s[%s] %s (%s, Depth: %d, Model: v%d, Plan: v%d)\n",
+		indent, marker, node.Problem.ID, node.Problem.Title, node.Problem.Status,
+		node.Depth, node.Problem.CurrentModelVersion, node.Problem.CurrentPlanVersion)
+
+	childIndent := indent
+	if indent != "" {
+		if isLast {
+			childIndent += "    "
+		} else {
+			childIndent += "│   "
+		}
+	} else {
+		childIndent = "  "
+	}
+
+	for i, ch := range node.Children {
+		printProblemTreeNode(ch, childIndent, i == len(node.Children)-1)
+	}
+}
+
+var problemDecomposeCmd = &cobra.Command{
+	Use:   "decompose <parent-id>",
+	Short: "Decompose a problem into child sub-problems with depth/budget bounds (AIA-22 §5.1, §5.2)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		if appInst.ProblemSvc == nil {
+			return fmt.Errorf("ProblemSvc is not initialized")
+		}
+		if problemFile == "" {
+			return fmt.Errorf("--file <subproblems.json> is required")
+		}
+
+		bytes, err := os.ReadFile(problemFile)
+		if err != nil {
+			return fmt.Errorf("failed to read subproblems file: %w", err)
+		}
+
+		var subProblems []problemService.CreateProblemInput
+		if err := json.Unmarshal(bytes, &subProblems); err != nil {
+			return fmt.Errorf("invalid subproblems JSON: %w", err)
+		}
+
+		created, err := appInst.ProblemSvc.DecomposeProblem(ctx, args[0], subProblems)
+		if err != nil {
+			return fmt.Errorf("failed to decompose problem: %w", err)
+		}
+
+		fmt.Printf("✓ Successfully decomposed problem %s into %d sub-problem(s):\n", args[0], len(created))
+		for _, sp := range created {
+			fmt.Printf("  - [%s] %s (Priority: %s)\n", sp.ID, sp.Title, sp.Priority)
+		}
+		return nil
+	},
+}
+
+var problemReassessCmd = &cobra.Command{
+	Use:   "reassess <problem-id>",
+	Short: "Trigger dynamic plan re-evaluation under new evidence or failure (AIA-22 §8)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		if appInst.ProblemSvc == nil {
+			return fmt.Errorf("ProblemSvc is not initialized")
+		}
+
+		if reassessTrigger == "" {
+			return fmt.Errorf("--trigger is required (e.g. HYPOTHESIS_CONTRADICTED, RULE_CONFLICT, TASK_FAILURE)")
+		}
+		if reassessCause == "" {
+			return fmt.Errorf("--cause is required (e.g. MODEL_ERROR, ASSUMPTION_INVALID, PLAN_UNREASONABLE)")
+		}
+		if reassessEvidence == "" {
+			return fmt.Errorf("--evidence is required")
+		}
+		if reassessRationale == "" {
+			return fmt.Errorf("--reason is required")
+		}
+
+		req := domainProblem.ReassessmentRequest{
+			ProblemID:              args[0],
+			Trigger:                domainProblem.ReassessmentTriggerType(reassessTrigger),
+			TriggerEvidence:        reassessEvidence,
+			RootCause:              domainProblem.RootCauseCategory(reassessCause),
+			NewFindings:            reassessFindings,
+			ContradictedHypotheses: reassessContradict,
+			SuggestedAction:        domainProblem.ReassessmentAction(reassessAction),
+			Rationale:              reassessRationale,
+			AgentID:                "cli-operator",
+		}
+
+		res, err := appInst.ProblemSvc.TriggerReassessment(ctx, req)
+		if err != nil {
+			return fmt.Errorf("failed to trigger reassessment: %w", err)
+		}
+
+		fmt.Printf("✓ Triggered Reassessment for Problem %s:\n", res.ProblemID)
+		fmt.Printf("  - Action Taken:        %s\n", res.ActionTaken)
+		fmt.Printf("  - Model Advanced:      v%d -> v%d\n", res.PreviousModelVer, res.NewModelVer)
+		fmt.Printf("  - Contradicted Hypo:   %d marked CONTRADICTED\n", res.ContradictedCount)
+		fmt.Printf("  - Requires New Plan:   %t\n", res.RequiresNewPlan)
+		fmt.Printf("  - Analysis Record:     %s\n", res.AnalysisRecordID)
+		return nil
+	},
+}
+
 func init() {
 	problemCreateCmd.Flags().StringVarP(&problemProjectID, "project", "p", "", "Target project ID")
 	problemCreateCmd.Flags().StringVarP(&problemTitle, "title", "t", "", "Problem title")
@@ -346,6 +491,15 @@ func init() {
 
 	problemListCmd.Flags().StringVarP(&problemProjectID, "project", "p", "", "Target project ID")
 	problemApplyAnalysisCmd.Flags().StringVarP(&problemFile, "file", "f", "", "Path to AgentProblemAnalysis JSON file")
+	problemDecomposeCmd.Flags().StringVarP(&problemFile, "file", "f", "", "Path to SubProblems JSON file")
+
+	problemReassessCmd.Flags().StringVar(&reassessTrigger, "trigger", "", "Trigger type (HYPOTHESIS_CONTRADICTED, RULE_CONFLICT, TASK_FAILURE, etc.)")
+	problemReassessCmd.Flags().StringVar(&reassessCause, "cause", "", "Root cause (MODEL_ERROR, ASSUMPTION_INVALID, PLAN_UNREASONABLE, etc.)")
+	problemReassessCmd.Flags().StringVar(&reassessEvidence, "evidence", "", "Factual evidence leading to reassessment")
+	problemReassessCmd.Flags().StringVar(&reassessRationale, "reason", "", "Explanation and reasoning for plan adaptation")
+	problemReassessCmd.Flags().StringVar(&reassessAction, "action", "MODIFY_PLAN", "Action (MODIFY_PLAN, REBUILD_PLAN, REQUEST_CLARIFICATION, PAUSE)")
+	problemReassessCmd.Flags().StringSliceVar(&reassessFindings, "findings", nil, "New findings discovered")
+	problemReassessCmd.Flags().StringSliceVar(&reassessContradict, "contradict", nil, "Assumption IDs contradicted by new evidence")
 
 	problemCmd.AddCommand(problemCreateCmd)
 	problemCmd.AddCommand(problemListCmd)
@@ -355,6 +509,9 @@ func init() {
 	problemCmd.AddCommand(problemPlanCmd)
 	problemCmd.AddCommand(problemPlanApproveCmd)
 	problemCmd.AddCommand(problemMaterializeCmd)
+	problemCmd.AddCommand(problemTreeCmd)
+	problemCmd.AddCommand(problemDecomposeCmd)
+	problemCmd.AddCommand(problemReassessCmd)
 
 	RootCmd.AddCommand(problemCmd)
 }

@@ -26,12 +26,13 @@ type ClarificationDispatcher interface {
 
 // Service manages the problem analysis and planning lifecycle (AIA-22 §4, §15).
 type Service struct {
-	problemRepo domainProblem.Repository
-	planRepo    domainPlan.Repository
-	projectRepo *repository.ProjectRepository
-	taskSvc     *taskService.Service
-	clarifySvc  ClarificationDispatcher
-	auditRepo   *repository.AuditRepository
+	problemRepo  domainProblem.Repository
+	planRepo     domainPlan.Repository
+	projectRepo  *repository.ProjectRepository
+	taskSvc      *taskService.Service
+	clarifySvc   ClarificationDispatcher
+	auditRepo    *repository.AuditRepository
+	decompConfig domainProblem.DecompositionConfig
 }
 
 // NewService creates a new Problem Service instance.
@@ -42,11 +43,17 @@ func NewService(
 	clarifySvc ClarificationDispatcher,
 ) *Service {
 	return &Service{
-		problemRepo: problemRepo,
-		planRepo:    planRepo,
-		projectRepo: projectRepo,
-		clarifySvc:  clarifySvc,
+		problemRepo:  problemRepo,
+		planRepo:     planRepo,
+		projectRepo:  projectRepo,
+		clarifySvc:   clarifySvc,
+		decompConfig: domainProblem.DefaultDecompositionConfig(),
 	}
+}
+
+// SetDecompositionConfig adjusts maximum depth and subproblem limits (AIA-22 §5.2).
+func (s *Service) SetDecompositionConfig(cfg domainProblem.DecompositionConfig) {
+	s.decompConfig = cfg
 }
 
 // SetTaskService attaches the TaskService for work item materialization.
@@ -660,6 +667,253 @@ func (s *Service) ListPlanChanges(ctx context.Context, planID string) ([]*domain
 		return nil, errors.New("plan repository is not configured")
 	}
 	return s.planRepo.ListChanges(ctx, planID)
+}
+
+// GetProblemDepth calculates the nesting depth of a problem in the hierarchy (root = 1) (AIA-22 §5.1, §5.2).
+func (s *Service) GetProblemDepth(ctx context.Context, problemID string) (int, error) {
+	depth := 1
+	currentID := problemID
+	visited := make(map[string]bool)
+
+	for {
+		if visited[currentID] {
+			return 0, errors.New("cycle detected in problem hierarchy")
+		}
+		visited[currentID] = true
+
+		p, err := s.problemRepo.Get(ctx, currentID)
+		if err != nil {
+			return 0, err
+		}
+		if p.ParentID == "" {
+			break
+		}
+		depth++
+		currentID = p.ParentID
+	}
+	return depth, nil
+}
+
+// GetProblemTree recursively retrieves the complete decomposition tree starting from rootID (AIA-22 §5.1).
+func (s *Service) GetProblemTree(ctx context.Context, rootID string) (*domainProblem.ProblemTreeNode, error) {
+	p, err := s.problemRepo.Get(ctx, rootID)
+	if err != nil {
+		return nil, err
+	}
+	depth, err := s.GetProblemDepth(ctx, rootID)
+	if err != nil {
+		return nil, err
+	}
+	node := &domainProblem.ProblemTreeNode{
+		Problem: p,
+		Depth:   depth,
+	}
+	children, err := s.problemRepo.ListChildren(ctx, rootID)
+	if err != nil {
+		return nil, err
+	}
+	for _, child := range children {
+		childNode, err := s.GetProblemTree(ctx, child.ID)
+		if err != nil {
+			return nil, err
+		}
+		node.Children = append(node.Children, childNode)
+	}
+	return node, nil
+}
+
+func (s *Service) countSubTreeProblems(ctx context.Context, rootID string) (int, error) {
+	children, err := s.problemRepo.ListChildren(ctx, rootID)
+	if err != nil {
+		return 0, err
+	}
+	count := len(children)
+	for _, ch := range children {
+		subCount, err := s.countSubTreeProblems(ctx, ch.ID)
+		if err != nil {
+			return 0, err
+		}
+		count += subCount
+	}
+	return count, nil
+}
+
+// DecomposeProblem decomposes a problem into child sub-problems with depth and budget enforcement (AIA-22 §5.1, §5.2).
+func (s *Service) DecomposeProblem(ctx context.Context, parentID string, subProblems []CreateProblemInput) ([]*domainProblem.Problem, error) {
+	parent, err := s.problemRepo.Get(ctx, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("parent problem not found: %w", err)
+	}
+	parentDepth, err := s.GetProblemDepth(ctx, parentID)
+	if err != nil {
+		return nil, err
+	}
+	if parentDepth+1 > s.decompConfig.MaxDepth {
+		return nil, fmt.Errorf("%w: depth %d exceeds max %d", domainProblem.ErrMaxDepthExceeded, parentDepth+1, s.decompConfig.MaxDepth)
+	}
+
+	// Trace root problem of this tree
+	rootID := parentID
+	cur := parent
+	for cur.ParentID != "" {
+		p, err := s.problemRepo.Get(ctx, cur.ParentID)
+		if err != nil {
+			break
+		}
+		rootID = p.ID
+		cur = p
+	}
+
+	totalExisting, err := s.countSubTreeProblems(ctx, rootID)
+	if err != nil {
+		return nil, err
+	}
+	if totalExisting+len(subProblems) > s.decompConfig.MaxSubProblems {
+		return nil, fmt.Errorf("%w: total %d would exceed max limit %d", domainProblem.ErrMaxSubProblemsExceeded, totalExisting+len(subProblems), s.decompConfig.MaxSubProblems)
+	}
+
+	var created []*domainProblem.Problem
+	for _, in := range subProblems {
+		in.ParentID = parentID
+		if in.ProjectID == "" {
+			in.ProjectID = parent.ProjectID
+		}
+		p, err := s.CreateProblem(ctx, in)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create subproblem: %w", err)
+		}
+		created = append(created, p)
+	}
+	return created, nil
+}
+
+// TriggerReassessment initiates dynamic plan re-evaluation under new evidence or failure triggers (AIA-22 §8.1, §8.2, §8.3).
+func (s *Service) TriggerReassessment(ctx context.Context, req domainProblem.ReassessmentRequest) (*domainProblem.ReassessmentResult, error) {
+	if err := domainProblem.ValidateReassessmentRequest(&req); err != nil {
+		return nil, fmt.Errorf("invalid reassessment request: %w", err)
+	}
+
+	prob, err := s.problemRepo.Get(ctx, req.ProblemID)
+	if err != nil {
+		return nil, fmt.Errorf("problem %s not found: %w", req.ProblemID, err)
+	}
+
+	prevModelVer := prob.CurrentModelVersion
+	newModelVer := prevModelVer
+	contradictedCount := 0
+
+	// 1. Inspect current model and update contradicted hypotheses (AIA-22 §8.2)
+	if prevModelVer > 0 {
+		currentModel, err := s.problemRepo.GetModel(ctx, prob.ID, prevModelVer)
+		if err == nil && currentModel != nil {
+			newModelVer = prevModelVer + 1
+			newModel := &domainProblem.ProblemModel{
+				ID:              fmt.Sprintf("%s-model-v%d", prob.ID, newModelVer),
+				ProblemID:       prob.ID,
+				Version:         newModelVer,
+				Objectives:      currentModel.Objectives,
+				Constraints:     currentModel.Constraints,
+				KnownFacts:      currentModel.KnownFacts,
+				Assumptions:     make([]domainProblem.ModelItem, len(currentModel.Assumptions)),
+				Unknowns:        currentModel.Unknowns,
+				Dependencies:    currentModel.Dependencies,
+				Risks:           currentModel.Risks,
+				SuccessCriteria: currentModel.SuccessCriteria,
+				CreatedAt:       time.Now().UTC(),
+			}
+
+			// Copy assumptions and mark contradicted ones
+			copy(newModel.Assumptions, currentModel.Assumptions)
+			contraMap := make(map[string]bool)
+			for _, cid := range req.ContradictedHypotheses {
+				contraMap[cid] = true
+			}
+
+			for i, a := range newModel.Assumptions {
+				if contraMap[a.ID] {
+					newModel.Assumptions[i].Status = domainProblem.ItemStatusContradicted
+					contradictedCount++
+				}
+			}
+
+			// Integrate new findings into KnownFacts
+			for i, f := range req.NewFindings {
+				newModel.KnownFacts = append(newModel.KnownFacts, domainProblem.ModelItem{
+					ID:          fmt.Sprintf("fact-reassess-v%d-%d", newModelVer, i+1),
+					Category:    domainProblem.CategoryKnownFact,
+					Statement:   f,
+					Source:      fmt.Sprintf("reassessment_trigger:%s", req.Trigger),
+					Confidence:  1.0,
+					Status:      domainProblem.ItemStatusConfirmed,
+					CreatedBy:   req.AgentID,
+					CreatedAt:   time.Now().UTC(),
+				})
+			}
+
+			// Persist updated model
+			_ = s.problemRepo.SaveModel(ctx, newModel)
+		}
+	}
+
+	// 2. Create immutable AnalysisRecord for Reassessment (AIA-22 §6.3, §8.2)
+	conclusions := []string{
+		fmt.Sprintf("Trigger: %s", req.Trigger),
+		fmt.Sprintf("Trigger Evidence: %s", req.TriggerEvidence),
+		fmt.Sprintf("Root Cause Attribution: %s", req.RootCause),
+		fmt.Sprintf("Decided Action: %s", req.SuggestedAction),
+		fmt.Sprintf("Rationale: %s", req.Rationale),
+	}
+	recordID := fmt.Sprintf("ar-%s-reassess-%s", prob.ID, uuid.New().String()[:6])
+	analysisRec := &domainProblem.AnalysisRecord{
+		ID:           recordID,
+		ProblemID:    prob.ID,
+		ModelVersion: newModelVer,
+		AnalysisType: "REASSESSMENT",
+		InputRefs:    []string{fmt.Sprintf("trigger:%s", req.Trigger), fmt.Sprintf("cause:%s", req.RootCause)},
+		Findings:     req.NewFindings,
+		Conclusions:  conclusions,
+		AgentID:      req.AgentID,
+		CreatedAt:    time.Now().UTC(),
+	}
+	_ = s.problemRepo.CreateAnalysisRecord(ctx, analysisRec)
+
+	// 3. Update Problem status
+	prob.CurrentModelVersion = newModelVer
+	requiresNewPlan := false
+	switch req.SuggestedAction {
+	case domainProblem.ActionModifyPlan, domainProblem.ActionRebuildPlan:
+		prob.Status = domainProblem.StatusReassessing
+		requiresNewPlan = true
+	case domainProblem.ActionPause:
+		prob.Status = domainProblem.StatusClosed
+	default:
+		prob.Status = domainProblem.StatusExecuting
+	}
+	_ = s.problemRepo.Update(ctx, prob)
+
+	if s.auditRepo != nil {
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:           domain.ID("audit-" + uuid.New().String()[:8]),
+			ActorType:    "SYSTEM",
+			ActorID:      req.AgentID,
+			Action:       "TRIGGER_REASSESSMENT",
+			ResourceType: "PROBLEM",
+			ResourceID:   prob.ID,
+			Outcome:      "SUCCESS",
+			CreatedAt:    time.Now().UTC(),
+		})
+	}
+
+	return &domainProblem.ReassessmentResult{
+		ProblemID:         prob.ID,
+		PreviousModelVer:  prevModelVer,
+		NewModelVer:       newModelVer,
+		ActionTaken:       req.SuggestedAction,
+		AnalysisRecordID:  recordID,
+		ContradictedCount: contradictedCount,
+		RequiresNewPlan:   requiresNewPlan,
+		ExecutedAt:        time.Now().UTC(),
+	}, nil
 }
 
 // Ensure interface compatibility

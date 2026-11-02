@@ -1823,6 +1823,65 @@ func (s *ConsoleServices) handleProblemSubroutes(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// GET /api/v1/problems/{id}/tree
+	if len(parts) == 2 && parts[1] == "tree" {
+		if r.Method != http.MethodGet {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		tree, err := s.ProblemSvc.GetProblemTree(ctx, probID)
+		if err != nil {
+			host.WriteError(w, http.StatusNotFound, "NOT_FOUND", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, tree, reqID)
+		return
+	}
+
+	// POST /api/v1/problems/{id}/decompose
+	if len(parts) == 2 && parts[1] == "decompose" {
+		if r.Method != http.MethodPost {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		var subProblems []problemService.CreateProblemInput
+		if err := json.NewDecoder(r.Body).Decode(&subProblems); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid subproblems JSON: "+err.Error(), reqID)
+			return
+		}
+		created, err := s.ProblemSvc.DecomposeProblem(ctx, probID, subProblems)
+		if err != nil {
+			host.WriteError(w, http.StatusBadRequest, "DECOMPOSE_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusCreated, created, reqID)
+		return
+	}
+
+	// POST /api/v1/problems/{id}/reassess
+	if len(parts) == 2 && parts[1] == "reassess" {
+		if r.Method != http.MethodPost {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		var req domainProblem.ReassessmentRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid reassessment JSON: "+err.Error(), reqID)
+			return
+		}
+		req.ProblemID = probID
+		if req.AgentID == "" {
+			req.AgentID = "web-operator"
+		}
+		res, err := s.ProblemSvc.TriggerReassessment(ctx, req)
+		if err != nil {
+			host.WriteError(w, http.StatusBadRequest, "REASSESS_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, res, reqID)
+		return
+	}
+
 	host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Unknown problem subroute: "+path, reqID)
 }
 

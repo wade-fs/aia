@@ -162,7 +162,19 @@ var writingManifestCmd = &cobra.Command{
 
 		p, err := appInst.ProjectSvc.Get(ctx, targetID)
 		if err != nil {
-			return fmt.Errorf("project not found: %w", err)
+			projects, lErr := appInst.ProjectSvc.ListByDomain(ctx, domainProject.DomainWriting)
+			if lErr == nil {
+				for i := range projects {
+					if strings.HasPrefix(string(projects[i].ID), targetID) || strings.EqualFold(projects[i].Name, targetID) {
+						p = &projects[i]
+						err = nil
+						break
+					}
+				}
+			}
+			if err != nil {
+				return fmt.Errorf("project not found: %w", err)
+			}
 		}
 
 		manifestFile := filepath.Join(p.Workspace, "book.yaml")
@@ -178,19 +190,141 @@ var writingManifestCmd = &cobra.Command{
 
 		fmt.Printf("=== Book Manifest: %s (%s) ===\n", manifest.Project.Name, manifest.Project.ID)
 		fmt.Printf("Path:             %s\n", manifestFile)
+		if manifest.Project.Subtitle != "" {
+			fmt.Printf("Subtitle:         %s\n", manifest.Project.Subtitle)
+		}
+		if manifest.Project.Series != "" {
+			fmt.Printf("Series:           %s\n", manifest.Project.Series)
+		}
 		fmt.Printf("Type:             %s\n", manifest.Project.Type)
+		if manifest.Project.Era != "" {
+			fmt.Printf("Era:              %s\n", manifest.Project.Era)
+		}
 		fmt.Printf("Language:         %s\n", manifest.Project.Language)
+		if manifest.Project.Status != "" {
+			fmt.Printf("Status:           %s\n", manifest.Project.Status)
+		}
+
+		if manifest.Scale != nil {
+			fmt.Println("\n--- Scale & Layout ---")
+			if manifest.Scale.TotalVolumes > 0 {
+				fmt.Printf("Total Volumes:    %d\n", manifest.Scale.TotalVolumes)
+			}
+			if manifest.Scale.TotalChapters > 0 {
+				fmt.Printf("Total Chapters:   %d\n", manifest.Scale.TotalChapters)
+			}
+			if manifest.Scale.ChaptersPerVolume > 0 {
+				fmt.Printf("Chaps / Volume:   %d\n", manifest.Scale.ChaptersPerVolume)
+			}
+			if manifest.Scale.VolumeStructure != "" {
+				fmt.Printf("Vol. Structure:   %s\n", manifest.Scale.VolumeStructure)
+			}
+		}
+
+		if manifest.Laboratory != nil && manifest.Laboratory.Enabled {
+			fmt.Println("\n--- Dual World / Laboratory ---")
+			fmt.Printf("Perspective:      %s\n", manifest.Laboratory.Perspective)
+			if manifest.Laboratory.Specification != "" {
+				fmt.Printf("Specification:    %s\n", manifest.Laboratory.Specification)
+			}
+			if manifest.Laboratory.Guidelines != "" {
+				fmt.Printf("Guidelines:       %s\n", manifest.Laboratory.Guidelines)
+			}
+			if manifest.Laboratory.VolumeMap != "" {
+				fmt.Printf("Volume Map:       %s\n", manifest.Laboratory.VolumeMap)
+			}
+		}
+
+		if manifest.Worldview != nil && manifest.Worldview.SystemType != "" {
+			fmt.Println("\n--- Worldview System ---")
+			fmt.Printf("System Type:      %s\n", manifest.Worldview.SystemType)
+			if len(manifest.Worldview.EntryStages) > 0 {
+				fmt.Printf("Entry Stages:     %s\n", strings.Join(manifest.Worldview.EntryStages, " -> "))
+			}
+			if len(manifest.Worldview.FormalRealms) > 0 {
+				fmt.Printf("Formal Realms:    %s\n", strings.Join(manifest.Worldview.FormalRealms, " -> "))
+			}
+		}
+
 		fmt.Println("\n--- Structure ---")
 		fmt.Printf("Outline:          %s\n", manifest.Structure.Outline)
-		fmt.Printf("Characters:       %s\n", manifest.Structure.Characters)
-		fmt.Printf("Volumes:          %s\n", manifest.Structure.Volumes)
-		fmt.Printf("Chapters:         %s\n", manifest.Structure.Chapters)
+		if manifest.Structure.VolumesPlan != "" {
+			fmt.Printf("Volumes Plan:     %s\n", manifest.Structure.VolumesPlan)
+		}
+		if manifest.Structure.Volumes != "" {
+			fmt.Printf("Volumes:          %s\n", manifest.Structure.Volumes)
+		}
+		if manifest.Structure.Chapters != "" {
+			fmt.Printf("Chapters:         %s\n", manifest.Structure.Chapters)
+		}
+		if manifest.Structure.Timeline != "" {
+			fmt.Printf("Timeline:         %s\n", manifest.Structure.Timeline)
+		}
+		if manifest.Structure.TimelineAudit != "" {
+			fmt.Printf("Timeline Audit:   %s\n", manifest.Structure.TimelineAudit)
+		}
+		if manifest.Structure.ChapterLedger != "" {
+			fmt.Printf("Chapter Ledger:   %s\n", manifest.Structure.ChapterLedger)
+		}
+		if manifest.Structure.NarrativeValidation != "" {
+			fmt.Printf("Narrative Valid.: %s\n", manifest.Structure.NarrativeValidation)
+		}
+		if manifest.Structure.ResearchQA != "" {
+			fmt.Printf("Research QA:      %s\n", manifest.Structure.ResearchQA)
+		}
+		if manifest.Structure.Characters != "" {
+			fmt.Printf("Characters:       %s\n", manifest.Structure.Characters)
+		}
+		if manifest.Structure.CharacterNetwork != "" {
+			fmt.Printf("Char. Network:    %s\n", manifest.Structure.CharacterNetwork)
+		}
+		if manifest.Structure.CharacterLifecycle != "" {
+			fmt.Printf("Char. Lifecycle:  %s\n", manifest.Structure.CharacterLifecycle)
+		}
+		if manifest.Structure.Geography != "" {
+			fmt.Printf("Geography:        %s\n", manifest.Structure.Geography)
+		}
+		if manifest.Structure.SocialSystems != "" {
+			fmt.Printf("Social Systems:   %s\n", manifest.Structure.SocialSystems)
+		}
+		if manifest.Structure.MilitaryReference != "" {
+			fmt.Printf("Military Ref.:    %s\n", manifest.Structure.MilitaryReference)
+		}
+		if manifest.Structure.Bibliography != "" {
+			fmt.Printf("Bibliography:     %s\n", manifest.Structure.Bibliography)
+		}
+		if manifest.Structure.EvidenceReview != "" {
+			fmt.Printf("Evidence Review:  %s\n", manifest.Structure.EvidenceReview)
+		}
+		if manifest.Structure.MasterBible != "" {
+			fmt.Printf("Master Bible:     %s\n", manifest.Structure.MasterBible)
+		}
+		if manifest.Structure.Rules != "" {
+			fmt.Printf("Rules:            %s\n", manifest.Structure.Rules)
+		}
+		if manifest.Structure.Guidelines != "" {
+			fmt.Printf("Guidelines:       %s\n", manifest.Structure.Guidelines)
+		}
+
 		fmt.Println("\n--- Writing Policy & Authority ---")
 		fmt.Printf("Historical Acc.:  %s\n", manifest.WritingPolicy.HistoricalAccuracy)
+		fmt.Printf("Battle Tactics:   %v\n", manifest.WritingPolicy.BattleTacticsFocus)
 		fmt.Printf("Preserve Figures: %v\n", manifest.WritingPolicy.PreserveHistoricalFigures)
 		fmt.Printf("Req Consistency:  %v\n", manifest.WritingPolicy.RequireConsistencyCheck)
+		if manifest.WritingPolicy.AntiAnachronism {
+			fmt.Printf("Anti-Anachronism: %v\n", manifest.WritingPolicy.AntiAnachronism)
+		}
+		if manifest.WritingPolicy.AntiTeleportation {
+			fmt.Printf("Anti-Teleport:    %v\n", manifest.WritingPolicy.AntiTeleportation)
+		}
+		if len(manifest.WritingPolicy.NarrativeDimensions) > 0 {
+			fmt.Printf("Narrative Dim.:   %s\n", strings.Join(manifest.WritingPolicy.NarrativeDimensions, ", "))
+		}
 		fmt.Printf("Confirmed Set.:   %s\n", manifest.Authority.ConfirmedSettings)
 		fmt.Printf("Historical Facts: %s\n", manifest.Authority.HistoricalFacts)
+		if len(manifest.Authority.Adjudications) > 0 {
+			fmt.Printf("Adjudications:    %s\n", strings.Join(manifest.Authority.Adjudications, "; "))
+		}
 		return nil
 	},
 }
@@ -286,6 +420,25 @@ var writingInfoCmd = &cobra.Command{
 	},
 }
 
+var writingRemoveCmd = &cobra.Command{
+	Use:     "remove <project-id>",
+	Aliases: []string{"rm", "delete", "deregister"},
+	Short:   "Remove / unregister a novel project from AIA",
+	Args:    cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		projectID := args[0]
+		if err := appInst.ProjectSvc.Delete(ctx, projectID); err != nil {
+			return fmt.Errorf("failed to remove writing project %s: %w", projectID, err)
+		}
+		if appInst.WritingObserver != nil {
+			appInst.WritingObserver.UnregisterProjectPath(projectID)
+		}
+		fmt.Printf("✓ Successfully unregistered Writing project %s from AIA (local files preserved).\n", projectID)
+		return nil
+	},
+}
+
 func init() {
 	writingRegisterCmd.Flags().StringVar(&writingBookName, "name", "", "novel project name")
 	writingRegisterCmd.Flags().StringVar(&writingBookPath, "path", "", "novel directory path (default: current directory)")
@@ -296,6 +449,7 @@ func init() {
 
 	writingCmd.AddCommand(writingBooksCmd)
 	writingCmd.AddCommand(writingRegisterCmd)
+	writingCmd.AddCommand(writingRemoveCmd)
 	writingCmd.AddCommand(writingScanCmd)
 	writingCmd.AddCommand(writingManifestCmd)
 	writingCmd.AddCommand(writingPromptCmd)

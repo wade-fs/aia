@@ -15,6 +15,7 @@ import (
 	domainProject "github.com/wade/aia/internal/domain/project"
 	"github.com/wade/aia/internal/domain/writing"
 	taskService "github.com/wade/aia/internal/service/task"
+	writingService "github.com/wade/aia/internal/service/writing"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,6 +23,10 @@ var (
 	writingProjectID string
 	writingBookPath  string
 	writingBookName  string
+	writingIntent    string
+	writingGenre     string
+	writingEra       string
+	writingAnswer    string
 )
 
 var writingCmd = &cobra.Command{
@@ -442,14 +447,313 @@ var writingRemoveCmd = &cobra.Command{
 	},
 }
 
+var writingInitCmd = &cobra.Command{
+	Use:   "init [workspace-path]",
+	Short: "Initialize a writing project from creative intent with Brief gap analysis (Node A ➔ F)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		ws := "."
+		if len(args) > 0 {
+			ws = args[0]
+		} else if writingBookPath != "" {
+			ws = writingBookPath
+		}
+		absWS, err := filepath.Abs(config.ExpandPath(ws))
+		if err != nil {
+			return err
+		}
+
+		if writingIntent == "" {
+			return fmt.Errorf("--intent is required (使用者創作意圖)")
+		}
+
+		title := writingBookName
+		if title == "" {
+			title = filepath.Base(absWS)
+		}
+
+		genre := writingGenre
+		if genre == "" {
+			genre = "historical_fiction"
+		}
+
+		projID := writingProjectID
+		if projID == "" {
+			projID = filepath.Base(absWS)
+		}
+
+		req := writingService.InitiateProjectRequest{
+			ProjectID: projID,
+			Title:     title,
+			RawIntent: writingIntent,
+			Genre:     genre,
+			Era:       writingEra,
+			Workspace: absWS,
+		}
+
+		resp, err := appInst.WritingWorkflowSvc.InitiateProject(ctx, req)
+		if err != nil {
+			return fmt.Errorf("failed to initiate writing project: %w", err)
+		}
+
+		fmt.Printf("=== 創作專案初始化完成: %s (%s) ===\n", resp.Brief.Title, resp.Brief.ProjectID)
+		fmt.Printf("狀態:       %s\n", resp.Status)
+		fmt.Printf("類型:       %s\n", resp.Brief.Genre)
+		if resp.Brief.Era != "" {
+			fmt.Printf("年代:       %s\n", resp.Brief.Era)
+		}
+		fmt.Printf("Workspace:  %s\n", absWS)
+
+		if len(resp.ValidationResult.MissingFields) > 0 {
+			fmt.Println("\n🔍 程式檢驗缺漏欄位 (Node E):")
+			for _, mf := range resp.ValidationResult.MissingFields {
+				fmt.Printf("  - %s\n", mf)
+			}
+		}
+
+		if len(resp.ClarificationRequests) > 0 {
+			fmt.Printf("\n❓ 待釐清關鍵事項 (Node G / ASK_HUMAN) [%d 項]:\n", len(resp.ClarificationRequests))
+			for i, cr := range resp.ClarificationRequests {
+				fmt.Printf("  [%d] %s (%s)\n      問題: %s\n      成因: %s\n", i+1, cr.ID, cr.Category, cr.Question, cr.Rationale)
+				if len(cr.Options) > 0 {
+					fmt.Println("      建議選項:")
+					for _, opt := range cr.Options {
+						fmt.Printf("        • %s\n", opt)
+					}
+				}
+			}
+			fmt.Println("\n👉 請使用 `aia writing clarify answer <id> --answer \"...\"` 進行回覆。")
+		} else {
+			fmt.Println("\n✅ 創作綱要完整無缺口，已自動建立創作定位與全書大綱 (Node K)！")
+		}
+		return nil
+	},
+}
+
+var writingBriefCmd = &cobra.Command{
+	Use:   "brief [project-id]",
+	Short: "View the creative brief, scale, and validation status",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		targetID := writingProjectID
+		if len(args) > 0 {
+			targetID = args[0]
+		}
+		if targetID == "" {
+			projects, err := appInst.ProjectSvc.ListByDomain(ctx, domainProject.DomainWriting)
+			if err == nil && len(projects) > 0 {
+				targetID = string(projects[0].ID)
+			} else {
+				targetID = "yuan"
+			}
+		}
+
+		brief, err := appInst.WritingWorkflowRepo.GetBriefByProjectID(ctx, targetID)
+		if err != nil {
+			return fmt.Errorf("failed to get brief: %w", err)
+		}
+		if brief == nil {
+			return fmt.Errorf("no creative brief found for project %s (run `aia writing init` first)", targetID)
+		}
+
+		fmt.Printf("=== Creative Brief: %s (%s) ===\n", brief.Title, brief.ProjectID)
+		fmt.Printf("狀態:             %s\n", brief.Status)
+		fmt.Printf("類型:             %s\n", brief.Genre)
+		if brief.Era != "" {
+			fmt.Printf("年代背景:         %s\n", brief.Era)
+		}
+		fmt.Printf("篇幅規模:         %d 卷共 %d 章 (每卷 %d 章)\n", brief.Scale.TotalVolumes, brief.Scale.TotalChapters, brief.Scale.ChaptersPerVolume)
+		fmt.Printf("待釐清事項數:     %d\n", brief.PendingQuestions)
+		fmt.Printf("\n--- 原始創作意圖 ---\n%s\n", brief.RawIntent)
+
+		if len(brief.ThemeAndPhilosophy) > 0 {
+			fmt.Println("\n--- 核心哲學原則與主旨 ---")
+			for _, th := range brief.ThemeAndPhilosophy {
+				fmt.Printf("  • %s\n", th)
+			}
+		}
+		if len(brief.CoreProtagonists) > 0 {
+			fmt.Println("\n--- 主要人物群像 ---")
+			for _, cp := range brief.CoreProtagonists {
+				fmt.Printf("  • %s\n", cp)
+			}
+		}
+		return nil
+	},
+}
+
+var writingClarifyCmd = &cobra.Command{
+	Use:   "clarify",
+	Short: "Manage clarification requests and interactive Q&A (Node G/H/I/J)",
+}
+
+var writingClarifyListCmd = &cobra.Command{
+	Use:   "list [project-id]",
+	Short: "List clarification requests for a project",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		targetID := writingProjectID
+		if len(args) > 0 {
+			targetID = args[0]
+		}
+		if targetID == "" {
+			projects, err := appInst.ProjectSvc.ListByDomain(ctx, domainProject.DomainWriting)
+			if err == nil && len(projects) > 0 {
+				targetID = string(projects[0].ID)
+			} else {
+				targetID = "yuan"
+			}
+		}
+
+		reqs, err := appInst.WritingWorkflowRepo.ListClarificationsByProjectID(ctx, targetID)
+		if err != nil {
+			return fmt.Errorf("failed to list clarifications: %w", err)
+		}
+		if len(reqs) == 0 {
+			fmt.Printf("No clarification requests found for project '%s'.\n", targetID)
+			return nil
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+		fmt.Fprintln(w, "ID\tCATEGORY\tSTATUS\tQUESTION")
+		for _, cr := range reqs {
+			qShort := cr.Question
+			if len(qShort) > 50 {
+				qShort = qShort[:47] + "..."
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", cr.ID, cr.Category, cr.Status, qShort)
+		}
+		_ = w.Flush()
+		return nil
+	},
+}
+
+var writingClarifyAskCmd = &cobra.Command{
+	Use:   "ask <clarification-id>",
+	Short: "Inspect a single clarification question with rationale and options",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		id := args[0]
+
+		cr, err := appInst.WritingWorkflowRepo.GetClarificationByID(ctx, id)
+		if err != nil {
+			return fmt.Errorf("failed to get clarification: %w", err)
+		}
+		if cr == nil {
+			return fmt.Errorf("clarification request '%s' not found", id)
+		}
+
+		fmt.Printf("=== Clarification Request: %s ===\n", cr.ID)
+		fmt.Printf("Project:    %s\n", cr.ProjectID)
+		fmt.Printf("Category:   %s\n", cr.Category)
+		fmt.Printf("Status:     %s\n", cr.Status)
+		fmt.Printf("\n問題:       %s\n", cr.Question)
+		fmt.Printf("成因說明:   %s\n", cr.Rationale)
+
+		if len(cr.Options) > 0 {
+			fmt.Println("\n建議選項:")
+			for _, opt := range cr.Options {
+				fmt.Printf("  • %s\n", opt)
+			}
+		}
+		if cr.UserAnswer != "" {
+			fmt.Printf("\n使用者回答: %s\n", cr.UserAnswer)
+		}
+		return nil
+	},
+}
+
+var writingClarifyAnswerCmd = &cobra.Command{
+	Use:   "answer <clarification-id>",
+	Short: "Answer a clarification request and update Brief/Memory (Node I ➔ J ➔ D)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		id := args[0]
+
+		if writingAnswer == "" {
+			return fmt.Errorf("--answer is required")
+		}
+
+		resp, err := appInst.WritingWorkflowSvc.AnswerClarification(ctx, id, writingAnswer, "")
+		if err != nil {
+			return fmt.Errorf("failed to record clarification answer: %w", err)
+		}
+
+		fmt.Printf("✓ Answer recorded for %s.\n", id)
+		fmt.Printf("Current Brief Status: %s\n", resp.Brief.Status)
+		fmt.Printf("Pending Questions:    %d\n", len(resp.RemainingPending))
+
+		if resp.OutlineEstablished {
+			fmt.Println("\n🎉 全部關鍵問題已釐清！系統已自動生成全書大綱與定位 (Node K):")
+			fmt.Println("  - book.yaml (專案配置)")
+			fmt.Println("  - outline.md (全書總綱與分卷)")
+			fmt.Println("  - master_bible.md (寫作指南與防雷規範)")
+			fmt.Println("  - characters.md (人物群像與年表約束)")
+		} else if resp.AllClarified {
+			fmt.Println("\n✅ 當前問題皆已回覆，Brief 驗證完畢！")
+		} else {
+			fmt.Printf("\n👉 尚有 %d 個待釐清事項，請繼續使用 `aia writing clarify list` 查看。\n", len(resp.RemainingPending))
+		}
+		return nil
+	},
+}
+
+var writingOutlineCmd = &cobra.Command{
+	Use:   "outline [project-id]",
+	Short: "Establish or refresh full-book outline and master bible from approved Brief (Node K)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		targetID := writingProjectID
+		if len(args) > 0 {
+			targetID = args[0]
+		}
+		if targetID == "" {
+			projects, err := appInst.ProjectSvc.ListByDomain(ctx, domainProject.DomainWriting)
+			if err == nil && len(projects) > 0 {
+				targetID = string(projects[0].ID)
+			} else {
+				targetID = "yuan"
+			}
+		}
+
+		if err := appInst.WritingWorkflowSvc.EstablishCreativeOutline(ctx, targetID, ""); err != nil {
+			return fmt.Errorf("failed to establish outline: %w", err)
+		}
+
+		fmt.Printf("✓ Successfully established outline and master bible for project '%s'.\n", targetID)
+		return nil
+	},
+}
+
 func init() {
 	writingRegisterCmd.Flags().StringVar(&writingBookName, "name", "", "novel project name")
 	writingRegisterCmd.Flags().StringVar(&writingBookPath, "path", "", "novel directory path (default: current directory)")
+
+	writingInitCmd.Flags().StringVarP(&writingIntent, "intent", "i", "", "creative intent statement (必填)")
+	writingInitCmd.Flags().StringVarP(&writingBookName, "title", "t", "", "book/project title")
+	writingInitCmd.Flags().StringVarP(&writingGenre, "genre", "g", "historical_fiction", "genre / profile")
+	writingInitCmd.Flags().StringVarP(&writingEra, "era", "e", "", "historical era")
+	writingInitCmd.Flags().StringVarP(&writingProjectID, "project", "p", "", "project ID")
+
+	writingBriefCmd.Flags().StringVarP(&writingProjectID, "project", "p", "", "project ID")
+	writingClarifyListCmd.Flags().StringVarP(&writingProjectID, "project", "p", "", "project ID")
+	writingClarifyAnswerCmd.Flags().StringVarP(&writingAnswer, "answer", "a", "", "user's clarification response (必填)")
+	writingOutlineCmd.Flags().StringVarP(&writingProjectID, "project", "p", "", "project ID")
 
 	writingScanCmd.Flags().StringVarP(&writingProjectID, "project", "p", "", "target project ID")
 	writingManifestCmd.Flags().StringVarP(&writingProjectID, "project", "p", "", "target project ID")
 	writingPromptCmd.Flags().StringVarP(&writingProjectID, "project", "p", "", "target project ID")
 
+	writingClarifyCmd.AddCommand(writingClarifyListCmd)
+	writingClarifyCmd.AddCommand(writingClarifyAskCmd)
+	writingClarifyCmd.AddCommand(writingClarifyAnswerCmd)
+
+	writingCmd.AddCommand(writingInitCmd)
+	writingCmd.AddCommand(writingBriefCmd)
+	writingCmd.AddCommand(writingClarifyCmd)
+	writingCmd.AddCommand(writingOutlineCmd)
 	writingCmd.AddCommand(writingBooksCmd)
 	writingCmd.AddCommand(writingRegisterCmd)
 	writingCmd.AddCommand(writingRemoveCmd)

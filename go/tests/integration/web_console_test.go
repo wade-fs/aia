@@ -480,6 +480,41 @@ func TestWeb_CodingAndWritingAgentModules(t *testing.T) {
 	}
 	_ = json.Unmarshal(recWritingReg.Body.Bytes(), &writingCreated)
 
+	// 6.1 Writing Workflow Initiate & Brief Query
+	initBody, _ := json.Marshal(map[string]string{
+		"project_id": writingCreated.Data.ID,
+		"title":      "Test Novel",
+		"raw_intent": "歷史小說創作意圖測試",
+		"genre":      "historical_fiction",
+		"workspace":  t.TempDir(),
+	})
+	reqInit := httptest.NewRequest("POST", "/api/v1/agents/writing/initiate", bytes.NewReader(initBody))
+	reqInit.AddCookie(cookie)
+	reqInit.Header.Set("Content-Type", "application/json")
+	recInit := httptest.NewRecorder()
+	handler.ServeHTTP(recInit, reqInit)
+	if recInit.Code != http.StatusOK {
+		t.Fatalf("expected 200 from writing/initiate, got %d: %s", recInit.Code, recInit.Body.String())
+	}
+
+	// 6.2 Writing Brief Query
+	reqBrief := httptest.NewRequest("GET", "/api/v1/agents/writing/brief?project_id="+writingCreated.Data.ID, nil)
+	reqBrief.AddCookie(cookie)
+	recBrief := httptest.NewRecorder()
+	handler.ServeHTTP(recBrief, reqBrief)
+	if recBrief.Code != http.StatusOK {
+		t.Fatalf("expected 200 from writing/brief, got %d: %s", recBrief.Code, recBrief.Body.String())
+	}
+
+	// 6.3 Writing Clarifications Query
+	reqClarify := httptest.NewRequest("GET", "/api/v1/agents/writing/clarifications?project_id="+writingCreated.Data.ID, nil)
+	reqClarify.AddCookie(cookie)
+	recClarify := httptest.NewRecorder()
+	handler.ServeHTTP(recClarify, reqClarify)
+	if recClarify.Code != http.StatusOK {
+		t.Fatalf("expected 200 from writing/clarifications, got %d: %s", recClarify.Code, recClarify.Body.String())
+	}
+
 	// 7. Writing Delete Project
 	reqWritingDel := httptest.NewRequest("DELETE", "/api/v1/agents/writing/projects?id="+writingCreated.Data.ID, nil)
 	reqWritingDel.AddCookie(cookie)

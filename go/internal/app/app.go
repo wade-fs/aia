@@ -33,6 +33,7 @@ import (
 	scheduleService "github.com/wade/aia/internal/service/schedule"
 	selfmodService "github.com/wade/aia/internal/service/selfmod"
 	taskService "github.com/wade/aia/internal/service/task"
+	writingService "github.com/wade/aia/internal/service/writing"
 	"github.com/wade/aia/internal/storage/sqlite"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 	"github.com/wade/aia/internal/validation"
@@ -91,6 +92,8 @@ type App struct {
 	SelfModRepo      *repository.SelfModRepository
 	SelfModPipeline  *selfmodService.Pipeline
 	SelfEvolutionEng *autonomy.SelfEvolutionEngine
+	WritingWorkflowRepo *repository.WritingWorkflowRepository
+	WritingWorkflowSvc  *writingService.WorkflowService
 }
 
 func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
@@ -129,6 +132,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	learningRepo := repository.NewLearningRepository(db)
 	experimentRepo := repository.NewExperimentRepository(db)
 	selfmodRepo := repository.NewSelfModRepository(db)
+	writingWorkflowRepo := repository.NewWritingWorkflowRepository(db)
 
 	taskRepo.SetChangeHook(func(ctx context.Context, taskID domain.ID, status task.TaskStatus, created bool) {
 		if bus != nil {
@@ -269,6 +273,14 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	selfmodPipeline := selfmodService.NewPipeline(cfg.Runtime.WorkspaceDir, selfmodRepo, approvalSvc, auditRepo, decisionRepo, bus)
 	selfEvolutionEng := autonomy.NewSelfEvolutionEngine(selfmodPipeline)
 
+	writingGapAnalyzer := writingService.NewGapAnalyzer(prov)
+	writingWorkflowSvc := writingService.NewWorkflowService(
+		writingWorkflowRepo,
+		projRepo,
+		memRepo,
+		writingGapAnalyzer,
+	)
+
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	pa := orchestrator.NewPersonalAgent(prov, retriever, taskSvc, scheduler, evaluator)
 	pa.SetAutonomyEngine(autonomyEng)
@@ -333,6 +345,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		SelfModRepo:      selfmodRepo,
 		SelfModPipeline:  selfmodPipeline,
 		SelfEvolutionEng: selfEvolutionEng,
+		WritingWorkflowRepo: writingWorkflowRepo,
+		WritingWorkflowSvc:  writingWorkflowSvc,
 	}
 
 	// Seed default domain agents, default project & recurring schedules
@@ -408,7 +422,9 @@ func (a *App) CreateWebHost() (*host.Host, string, error) {
 	if err := h.RegisterAgentModule(agents.NewCodingWebModuleWithDeps(a.AgentSvc, a.ProjectSvc, a.TaskSvc, a.Scheduler, a.ExecutionSvc, a.CodingObserver)); err != nil {
 		return nil, "", fmt.Errorf("failed to register coding web module: %w", err)
 	}
-	if err := h.RegisterAgentModule(agents.NewWritingWebModuleWithDeps(a.AgentSvc, a.ProjectSvc, a.TaskSvc, a.Scheduler, a.ExecutionSvc, a.WritingObserver)); err != nil {
+	writingMod := agents.NewWritingWebModuleWithDeps(a.AgentSvc, a.ProjectSvc, a.TaskSvc, a.Scheduler, a.ExecutionSvc, a.WritingObserver)
+	writingMod.SetWorkflowDeps(a.WritingWorkflowSvc, a.WritingWorkflowRepo)
+	if err := h.RegisterAgentModule(writingMod); err != nil {
 		return nil, "", fmt.Errorf("failed to register writing web module: %w", err)
 	}
 

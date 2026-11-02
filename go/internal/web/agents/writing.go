@@ -18,18 +18,26 @@ import (
 	execService "github.com/wade/aia/internal/service/execution"
 	projectService "github.com/wade/aia/internal/service/project"
 	taskService "github.com/wade/aia/internal/service/task"
+	writingService "github.com/wade/aia/internal/service/writing"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 	"github.com/wade/aia/internal/web/host"
 	"gopkg.in/yaml.v3"
 )
 
 type WritingWebModule struct {
-	agentSvc   *agentService.Service
-	projSvc    *projectService.Service
-	taskSvc    *taskService.Service
-	sched      *orchestrator.Scheduler
-	execSvc    *execService.Service
-	writingObs *autonomy.ManuscriptConsistencyObserver
+	agentSvc     *agentService.Service
+	projSvc      *projectService.Service
+	taskSvc      *taskService.Service
+	sched        *orchestrator.Scheduler
+	execSvc      *execService.Service
+	writingObs   *autonomy.ManuscriptConsistencyObserver
+	workflowSvc  *writingService.WorkflowService
+	workflowRepo *repository.WritingWorkflowRepository
+}
+
+func (m *WritingWebModule) SetWorkflowDeps(svc *writingService.WorkflowService, repo *repository.WritingWorkflowRepository) {
+	m.workflowSvc = svc
+	m.workflowRepo = repo
 }
 
 func NewWritingWebModuleWithDeps(
@@ -75,6 +83,10 @@ func (m *WritingWebModule) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/scan", m.handleScan)
 	mux.HandleFunc("/prompt", m.handlePrompt)
 	mux.HandleFunc("/tasks", m.handleTasks)
+	mux.HandleFunc("/brief", m.handleBrief)
+	mux.HandleFunc("/clarifications", m.handleClarifications)
+	mux.HandleFunc("/clarifications/answer", m.handleAnswerClarification)
+	mux.HandleFunc("/initiate", m.handleInitiate)
 	return nil
 }
 
@@ -438,4 +450,108 @@ func (m *WritingWebModule) handlePrompt(w http.ResponseWriter, r *http.Request) 
 		"conversation_id": convID,
 		"execution":       latestExec,
 	}, reqID)
+}
+
+func (m *WritingWebModule) handleBrief(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	ctx := r.Context()
+	projectID := r.URL.Query().Get("project_id")
+	if projectID == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "project_id query parameter is required", reqID)
+		return
+	}
+	if m.workflowRepo == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Workflow repository not wired", reqID)
+		return
+	}
+	brief, err := m.workflowRepo.GetBriefByProjectID(ctx, projectID)
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+	if brief == nil {
+		host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "creative brief not found", reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, brief, reqID)
+}
+
+func (m *WritingWebModule) handleClarifications(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	ctx := r.Context()
+	projectID := r.URL.Query().Get("project_id")
+	if projectID == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "project_id query parameter is required", reqID)
+		return
+	}
+	if m.workflowRepo == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Workflow repository not wired", reqID)
+		return
+	}
+	reqs, err := m.workflowRepo.ListClarificationsByProjectID(ctx, projectID)
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, reqs, reqID)
+}
+
+func (m *WritingWebModule) handleAnswerClarification(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	ctx := r.Context()
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required", reqID)
+		return
+	}
+	var req struct {
+		ClarificationID string `json:"clarification_id"`
+		Answer          string `json:"answer"`
+		Workspace       string `json:"workspace"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_BODY", err.Error(), reqID)
+		return
+	}
+	if req.ClarificationID == "" || req.Answer == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "clarification_id and answer are required", reqID)
+		return
+	}
+	if m.workflowSvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Workflow service not wired", reqID)
+		return
+	}
+	resp, err := m.workflowSvc.AnswerClarification(ctx, req.ClarificationID, req.Answer, req.Workspace)
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "WORKFLOW_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, resp, reqID)
+}
+
+func (m *WritingWebModule) handleInitiate(w http.ResponseWriter, r *http.Request) {
+	reqID := r.Header.Get("X-Request-ID")
+	ctx := r.Context()
+	if r.Method != http.MethodPost {
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required", reqID)
+		return
+	}
+	var req writingService.InitiateProjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_BODY", err.Error(), reqID)
+		return
+	}
+	if req.RawIntent == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "raw_intent is required", reqID)
+		return
+	}
+	if m.workflowSvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Workflow service not wired", reqID)
+		return
+	}
+	resp, err := m.workflowSvc.InitiateProject(ctx, req)
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "WORKFLOW_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, resp, reqID)
 }

@@ -208,7 +208,9 @@ func (e *ConsistencyEngine) ParseCharacters(content string) []HistoricalCharacte
 			if idx := strings.IndexAny(cleanName, "（("); idx != -1 {
 				cleanName = strings.TrimSpace(cleanName[:idx])
 			}
-			if cleanName == "" {
+			if cleanName == "" || cleanName == "生卒年" || cleanName == "生年" || cleanName == "卒年" ||
+				cleanName == "身分" || cleanName == "身份" || cleanName == "標記" || cleanName == "時地" ||
+				cleanName == "視角" || cleanName == "別稱" {
 				continue
 			}
 

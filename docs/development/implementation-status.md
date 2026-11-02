@@ -1,7 +1,7 @@
 # AIA Development: Implementation Status
 
 **Project:** Autonomous Intelligence Architecture (AIA)  
-**Active Implementation Status:** **Phase 0 ～ Phase 6 Completed** (Phase 6 Safe Self-Modification & Autonomous System Evolution, Migrations `001` ～ `014` active)  
+**Active Implementation Status:** **Phase 0 ～ Phase 6 Completed** (Phase 6 Safe Self-Modification, Multi-Domain MVA & Writing Dual-Loop Workflow, Migrations `001` ～ `015` active)  
 **Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Baseline [`0e189d9`](file:///home/wade/src/github/aia) ➔ Phase 5A Baseline [`29d1cb3`](file:///home/wade/src/github/aia) ➔ Phase 5B Baseline ➔ Phase 6 Active Baseline  
 **Specification Baseline:** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-19) v2.0  
 **Audit Report:** [docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)  
@@ -92,6 +92,7 @@ go/
 | **`internal/service/delegation`** | **Production Ready (Phase 5B)** | Cross-Domain Agent Delegation (AIA-12 §21) | Lifecycle contract state machine (`PENDING` -> `IN_PROGRESS` -> `DELIVERED` -> `VERIFIED`), automatic task spawning, and acceptance verification. |
 | **`internal/domain/coding`** | **Production Ready (Phase 5B)** | Coding Agent MVA (AIA-15 §24) | Code defect detection (`CodeHealthObserver`), sandboxed patch application & test re-run (`CodingPilotExecutor`), and deterministic test verification reaching `L2_VERIFIED`. |
 | **`internal/domain/writing`** | **Production Ready (Phase 5B)** | Writing Agent MVA (AIA-15 §23) | 3-tier knowledge (`FACT_HISTORY`, `PLAUSIBLE_INFERENCE`, `FICTION`), manuscript consistency observer referencing `~/src/github/novel/yuan/`, intentional fiction license (`NO_ACTION`) vs chronological contradiction (`L2_VERIFIED`). |
+| **`internal/service/writing` & `domain/writing`** | **Production Ready (Phase 6+)** | Writing Dual-Loop Workflow & Brief Alignment | `CreativeBrief`, deterministic `BriefValidator`, `GapAnalyzer`, `ClarificationRequest` (`ASK_HUMAN` Q&A loop), automatic `BookManifest` / `outline.md` / `master_bible.md` / `characters.md` generation, and `ConsistencyEngine` integration. |
 | **`internal/domain/knowledge` & `consistency`** | **Production Ready (Phase 6)** | Universal Knowledge & Consistency Core | Universal `Entity`, `Relation`, `TemporalReference`, `SpatialReference`, `EpistemicStatus`, `Assertion`, and cross-domain `ConsistencyEngine`. |
 | **`internal/domain/selfmod` & `service/selfmod`** | **Production Ready (Phase 6)** | Safe Self-Modification Pipeline (AIA-14) | Tri-level `ScopeClassifier` (Level A domain, Level B core with human approval gate, Level C fail-closed immutable governance), sandbox worktree execution, multi-level verification (V1 compile, V2 unit, V3 integration), and zero-residual rollback. |
 | **`internal/autonomy (SelfEvolutionEngine)`** | **Production Ready (Phase 6)** | Autonomous Evolution Coordinator (AIA-14) | Periodic autonomous inspection, hypothesis generation, modification proposal creation, sandbox verification, and end-to-end evolution cycles. |
@@ -100,7 +101,7 @@ go/
 
 ## 3. Database Schema Status
 
-### Active Tables (Migrations 001 ~ 014)
+### Active Tables (Migrations 001 ~ 015)
 - `agents`: Registered agents, capabilities, configurations.
 - `tasks`: Work units, status machine (`READY`, `RUNNING`, `COMPLETED`, `WAITING_APPROVAL`).
 - `task_dependencies`: Inter-task DAG dependencies.
@@ -136,6 +137,8 @@ go/
 - `experiment_comparisons`: Point-in-time Track A (performance + Brier/LogLoss & decision confidence calibration) and Track B (autonomy + 5-regime verdict) comparison snapshots (Migration 012).
 - `delegation_requests`: Cross-agent delegation contract records with acceptance gates (Migration 012).
 - `self_modification_proposals`: Self-modification proposal tracking with scope levels (`LEVEL_A`, `LEVEL_B`, `LEVEL_C`), patch diff, status machine (`PROPOSED`, `VERIFYING`, `VERIFIED`, `PENDING_APPROVAL`, `APPLIED`, `MERGED`, `FAILED`, `REJECTED`, `ROLLED_BACK`), verification test logs, and approval binding (Migration 014).
+- `writing_briefs`: Creative brief tracking with genre, era, scale, protagonists, worldview, status, and pending questions (Migration 015).
+- `writing_clarifications`: Human clarification requests (`ASK_HUMAN` / `WAITING_FOR_INPUT`) with category, options, user answer, and status (Migration 015).
 
 ---
 

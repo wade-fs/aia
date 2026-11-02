@@ -191,3 +191,43 @@ memory:
    Writing Observer 與 CLI 解析 Manifest 時，所有相對路徑皆以專案根目錄 (`Workspace`) 為基準錨定。
 3. **一致性稽核整合 (Autonomy Consistency Audit)**：
    `ManuscriptConsistencyObserver` 自動讀取 `writing_policy` 中的分類與防錯開關，對照正史骨架 (`timeline_audit.md`) 執行卒後登場、時代錯置與行蹤瞬移驗證。
+
+---
+
+## 5. 創作起草、釐清與生產閉環工作流 (Inception, Clarification & Production Loop)
+
+系統針對 Writing Domain 實現了完整的雙閉環自治工作流：
+
+```mermaid
+flowchart TD
+    A["使用者提出創作意圖"] --> B["建立 Project"]
+    B --> C["載入 Project Manifest / Brief"]
+    C --> D["agy 分析需求缺口"]
+    D --> E["程式驗證 Brief 欄位"]
+    E --> F{"是否有重要待釐清事項？"}
+    F -->|有| G["建立 Clarification Requests"]
+    G --> H["ASK_HUMAN / WAITING_FOR_INPUT"]
+    H --> I["使用者回答"]
+    I --> J["更新 Brief / Project Memory"]
+    J --> D
+    F -->|沒有| K["建立創作定位與全書大綱"]
+    K --> L["分段研究與事實查證"]
+    L --> M["產生初稿"]
+    M --> N["一致性檢查與修訂"]
+    N --> O["評估進度與下一步"]
+    O --> P{"是否需要重新討論？"}
+    P -->|需要| D
+    P -->|繼續創作| L
+```
+
+### 核心子系統職責
+1. **前置需求與對齊閉環 (Inception & Clarification Loop, A ➔ J)**：
+   - **`CreativeBrief` (創作企劃綱要)**：持久化於 SQLite `writing_briefs` (Migration 015) 與本地 `brief.md`，承載使用者原始意圖、篇幅規模、主旨哲學、主角群像與世界觀設定。
+   - **`BriefValidator` (確定性規則驗證, Node E)**：零 Token 開銷檢驗篇幅算術（總卷數 × 每卷章數 = 總章數）、時代起訖與題材特化規則。
+   - **`GapAnalyzer` (缺口分析器, Node D)**：結合程式檢驗與語意分析，將結構模糊處提煉為具體選擇題。
+   - **`ClarificationRequest` (釐清工單, Node G)**：持久化於 `writing_clarifications`，包含問題、選項與成因說明。
+   - **`ASK_HUMAN / WAITING_FOR_INPUT` (Node H)**：阻斷派發，等待人類透過 CLI (`aia writing clarify answer <id> --answer "..."`) 或 Web Console (`/api/v1/agents/writing/clarifications/answer`) 回答。
+   - **`Project Memory & Brief Sync` (Node J)**：回答寫回 Brief 並記錄至 L1~L5 記憶中，自動重新觸發驗證。
+2. **生產與一致性閉環 (Production & Consistency Closed-Loop, K ➔ P)**：
+   - **全書總綱與規格確立 (Node K)**：Brief 批准後自動建立 `book.yaml`、`outline.md`、`master_bible.md` 與 `characters.md`。
+   - **一致性稽核 (Node N)**：調用 `ConsistencyEngine` 對照正史年表與人物壽命約束，即時捕捉卒後登場（`POST_MORTEM_APPEARANCE`）或時代錯置，生成修訂提案（`ErratumProposal`）。

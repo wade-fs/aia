@@ -1,6 +1,7 @@
 package writing
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wade/aia/internal/domain/consistency"
+	"github.com/wade/aia/internal/domain/knowledge"
 	"gopkg.in/yaml.v3"
 )
 
@@ -449,4 +452,104 @@ func (e *ConsistencyEngine) ScanProject(wsRoot string, manifest *BookManifest) (
 	}
 
 	return anomalies, nil
+}
+
+// BuildKnowledgeSnapshot converts parsed characters and chapter chronologies into universal Knowledge Core models (Plan2.md §6).
+func (e *ConsistencyEngine) BuildKnowledgeSnapshot(characters []HistoricalCharacter, chapters []ChapterChronology) *consistency.KnowledgeSnapshot {
+	snapshot := consistency.NewKnowledgeSnapshot()
+
+	for _, c := range characters {
+		ent := knowledge.NewEntity(c.ID, c.Name, knowledge.EntityCharacter, "writing")
+		ent.Aliases = c.Aliases
+		ent.Description = c.HistoricalRole
+		ent.Attributes["death_year"] = c.DeathYear
+		ent.Attributes["birth_year"] = c.BirthYear
+		ent.Attributes["is_fiction"] = (c.KnowledgeTier == TierFiction)
+
+		snapshot.Entities[c.Name] = ent
+		for _, a := range c.Aliases {
+			snapshot.Entities[a] = ent
+		}
+
+		for _, ev := range c.KeyEvents {
+			for _, ym := range reSingleYear.FindAllStringSubmatch(ev, -1) {
+				if len(ym) > 1 {
+					y, _ := strconv.Atoi(ym[1])
+					snapshot.Assertions = append(snapshot.Assertions, knowledge.Assertion{
+						ID:              fmt.Sprintf("asrt-%s-%d", c.Name, y),
+						SubjectEntityID: c.Name,
+						Predicate:       "active_in_key_event",
+						ObjectValue:     ev,
+						Epistemic:       knowledge.StatusSourced,
+						DomainClass:     knowledge.ClassFactHistory,
+						Temporal:        &knowledge.TemporalReference{AnchorYear: &y},
+						SourceFile:      "characters.md",
+					})
+				}
+			}
+		}
+	}
+
+	for _, chap := range chapters {
+		y := chap.StatedYear
+		for _, charName := range chap.MentionedCharacters {
+			snapshot.Assertions = append(snapshot.Assertions, knowledge.Assertion{
+				ID:                  fmt.Sprintf("asrt-chap-%s-%s", chap.ChapterRef, charName),
+				SubjectEntityID:     charName,
+				Predicate:           "appears_in_chapter",
+				ObjectValue:         chap.Title,
+				Temporal:            &knowledge.TemporalReference{AnchorYear: &y},
+				SourceFile:          fmt.Sprintf("%s (%s)", chap.ChapterRef, chap.Title),
+				IsDeliberateFiction: (chap.KnowledgeTier == TierFiction),
+			})
+		}
+	}
+
+	return snapshot
+}
+
+// ScanProjectSnapshot scans a project and returns both universal KnowledgeSnapshot and Findings (Plan2.md §4, §6).
+func (e *ConsistencyEngine) ScanProjectSnapshot(ctx context.Context, wsRoot string, manifest *BookManifest) (*consistency.KnowledgeSnapshot, []consistency.Finding, error) {
+	if manifest == nil {
+		manifestPath := filepath.Join(wsRoot, "book.yaml")
+		data, err := os.ReadFile(manifestPath)
+		if err == nil {
+			var m BookManifest
+			if yErr := yaml.Unmarshal(data, &m); yErr == nil {
+				manifest = &m
+			}
+		}
+	}
+
+	charRelPath := "characters.md"
+	if manifest != nil && manifest.Structure.Characters != "" {
+		charRelPath = manifest.Structure.Characters
+	}
+	charPath := filepath.Join(wsRoot, charRelPath)
+	charData, err := os.ReadFile(charPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("characters file not accessible: %w", err)
+	}
+
+	characters := e.ParseCharacters(string(charData))
+
+	var allChapters []ChapterChronology
+	for v := 1; v <= 20; v++ {
+		vFile := filepath.Join(wsRoot, fmt.Sprintf("volume%d.md", v))
+		vData, err := os.ReadFile(vFile)
+		if err != nil {
+			continue
+		}
+		chaps := e.ParseChapterChronology(string(vData), v)
+		allChapters = append(allChapters, chaps...)
+	}
+
+	snapshot := e.BuildKnowledgeSnapshot(characters, allChapters)
+	universalEngine := consistency.NewEngine()
+	findings, err := universalEngine.Evaluate(ctx, snapshot)
+	if err != nil {
+		return snapshot, nil, err
+	}
+
+	return snapshot, findings, nil
 }

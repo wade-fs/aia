@@ -1,5 +1,5 @@
 scenario_id: scenario_a
-executed_at: "2026-11-02T13:13:42Z"
+executed_at: "2026-11-02T13:26:29Z"
 status: PASSED
 target_domain: writing
 target_project: novel/yuan
@@ -36,5 +36,5 @@ steps_executed:
 verification:
     gate: G1
     level: L2_VERIFIED
-    evidence_hash: sha256-82f39e0cfcefcb69e699c0ae641c4d0b7d111bb2fea78695ec013604d1f12eb1
+    evidence_hash: sha256-0acaf13826d5ce0367cf956a1e55dedbda0c37e41698ea82f20a5b01790fdee3
 rca_or_notes: Novel novel/yuan fully understood without hardcoded strings; 6 volumes (540 chapters) mapped; character lifespans aligned.

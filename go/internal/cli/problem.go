@@ -242,6 +242,101 @@ var problemApplyAnalysisCmd = &cobra.Command{
 	},
 }
 
+var problemPlanCmd = &cobra.Command{
+	Use:   "plan <problem-id>",
+	Short: "Show latest plan and work items for a problem (AIA-22 §4.7)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		if appInst.ProblemSvc == nil {
+			return fmt.Errorf("ProblemSvc is not initialized")
+		}
+
+		probID := args[0]
+		p, err := appInst.ProblemSvc.GetLatestPlan(ctx, probID)
+		if err != nil {
+			return fmt.Errorf("no plan found for problem %s: %w", probID, err)
+		}
+
+		fmt.Printf("=== Plan: %s (v%d) ===\n", p.ID, p.Version)
+		fmt.Printf("Status:               %s\n", p.Status)
+		fmt.Printf("Objective:            %s\n", p.Objective)
+		if p.Strategy != "" {
+			fmt.Printf("Strategy:             %s\n", p.Strategy)
+		}
+		if p.SupersedesPlanID != "" {
+			fmt.Printf("Supersedes:           %s\n", p.SupersedesPlanID)
+		}
+
+		if len(p.WorkItems) > 0 {
+			fmt.Printf("\n--- Work Items (%d total) ---\n", len(p.WorkItems))
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+			fmt.Fprintln(w, "ID\tSTAGE\tSTATUS\tTASK_ID\tTITLE")
+			for _, wi := range p.WorkItems {
+				taskIDStr := "-"
+				if wi.LinkedTaskID != "" {
+					taskIDStr = wi.LinkedTaskID
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", wi.ID, wi.Stage, wi.Status, taskIDStr, wi.Title)
+			}
+			_ = w.Flush()
+		}
+
+		changes, _ := appInst.ProblemSvc.ListPlanChanges(ctx, p.ID)
+		if len(changes) > 0 {
+			fmt.Printf("\n--- Plan Change History (%d changes) ---\n", len(changes))
+			for _, c := range changes {
+				fmt.Printf("• v%d -> v%d: %s\n", c.FromVersion, c.ToVersion, c.Reason)
+			}
+		}
+		return nil
+	},
+}
+
+var problemPlanApproveCmd = &cobra.Command{
+	Use:   "plan-approve <plan-id>",
+	Short: "Formally approve a proposed plan (AIA-22 §9.2)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		if appInst.ProblemSvc == nil {
+			return fmt.Errorf("ProblemSvc is not initialized")
+		}
+
+		planID := args[0]
+		p, err := appInst.ProblemSvc.ApprovePlan(ctx, planID, "cli-operator")
+		if err != nil {
+			return fmt.Errorf("failed to approve plan: %w", err)
+		}
+		fmt.Printf("✓ Plan %s (v%d) approved by cli-operator. Ready for execution.\n", p.ID, p.Version)
+		return nil
+	},
+}
+
+var problemMaterializeCmd = &cobra.Command{
+	Use:   "materialize <plan-id>",
+	Short: "Materialize plan work items into executable AIA Tasks (AIA-22 §4.7)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		if appInst.ProblemSvc == nil {
+			return fmt.Errorf("ProblemSvc is not initialized")
+		}
+
+		planID := args[0]
+		tasks, err := appInst.ProblemSvc.MaterializeAllWorkItems(ctx, planID)
+		if err != nil {
+			return fmt.Errorf("failed to materialize work items: %w", err)
+		}
+
+		fmt.Printf("✓ Materialized %d work items from Plan %s into Tasks:\n", len(tasks), planID)
+		for _, t := range tasks {
+			fmt.Printf("  - Task %s: %s (Status: %s)\n", t.ID, t.Title, t.Status)
+		}
+		return nil
+	},
+}
+
 func init() {
 	problemCreateCmd.Flags().StringVarP(&problemProjectID, "project", "p", "", "Target project ID")
 	problemCreateCmd.Flags().StringVarP(&problemTitle, "title", "t", "", "Problem title")
@@ -257,6 +352,9 @@ func init() {
 	problemCmd.AddCommand(problemShowCmd)
 	problemCmd.AddCommand(problemPromptCmd)
 	problemCmd.AddCommand(problemApplyAnalysisCmd)
+	problemCmd.AddCommand(problemPlanCmd)
+	problemCmd.AddCommand(problemPlanApproveCmd)
+	problemCmd.AddCommand(problemMaterializeCmd)
 
 	RootCmd.AddCommand(problemCmd)
 }

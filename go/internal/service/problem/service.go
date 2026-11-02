@@ -4,14 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/wade/aia/internal/domain"
 	domainClarify "github.com/wade/aia/internal/domain/clarification"
+	domainPlan "github.com/wade/aia/internal/domain/plan"
 	domainProblem "github.com/wade/aia/internal/domain/problem"
 	domainProject "github.com/wade/aia/internal/domain/project"
+	domainTask "github.com/wade/aia/internal/domain/task"
 	clarifyService "github.com/wade/aia/internal/service/clarification"
+	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 )
 
@@ -22,23 +26,32 @@ type ClarificationDispatcher interface {
 
 // Service manages the problem analysis and planning lifecycle (AIA-22 §4, §15).
 type Service struct {
-	problemRepo  domainProblem.Repository
-	projectRepo  *repository.ProjectRepository
-	clarifySvc   ClarificationDispatcher
-	auditRepo    *repository.AuditRepository
+	problemRepo domainProblem.Repository
+	planRepo    domainPlan.Repository
+	projectRepo *repository.ProjectRepository
+	taskSvc     *taskService.Service
+	clarifySvc  ClarificationDispatcher
+	auditRepo   *repository.AuditRepository
 }
 
 // NewService creates a new Problem Service instance.
 func NewService(
 	problemRepo domainProblem.Repository,
+	planRepo domainPlan.Repository,
 	projectRepo *repository.ProjectRepository,
 	clarifySvc ClarificationDispatcher,
 ) *Service {
 	return &Service{
 		problemRepo: problemRepo,
+		planRepo:    planRepo,
 		projectRepo: projectRepo,
 		clarifySvc:  clarifySvc,
 	}
+}
+
+// SetTaskService attaches the TaskService for work item materialization.
+func (s *Service) SetTaskService(ts *taskService.Service) {
+	s.taskSvc = ts
 }
 
 // SetAuditRepo attaches an audit repository for operational logging.
@@ -150,7 +163,6 @@ func (s *Service) ApplyAnalysis(
 		case domainProblem.CategorySuccessCriteria:
 			model.SuccessCriteria = append(model.SuccessCriteria, item)
 		default:
-			// Fallback to assumption if uncategorized
 			model.Assumptions = append(model.Assumptions, item)
 		}
 	}
@@ -161,7 +173,6 @@ func (s *Service) ApplyAnalysis(
 	}
 
 	// 4. Record Analysis Logs (Immutable append-only, AIA-22 §6.3)
-	// Phase A/B/C Record
 	var conclusions []string
 	conclusions = append(conclusions, fmt.Sprintf("Goal: %s", analysis.Intent.UserGoal))
 	if analysis.Intent.AnalysisOnly {
@@ -188,7 +199,6 @@ func (s *Service) ApplyAnalysis(
 	}
 	_ = s.problemRepo.CreateAnalysisRecord(ctx, analysisRec)
 
-	// If Gaps or Conflicts were discovered, record explicit GAP_CONFLICT record (AIA-22 §4.5)
 	if len(analysis.GapsAndConflicts) > 0 {
 		var gapFindings []string
 		for _, g := range analysis.GapsAndConflicts {
@@ -238,6 +248,340 @@ func (s *Service) ApplyAnalysis(
 	return model, nil
 }
 
+// ExploreSolutions processes candidate solution alternatives and records trade-off rationale (AIA-22 §4.6).
+func (s *Service) ExploreSolutions(
+	ctx context.Context,
+	problemID string,
+	exp *domainPlan.SolutionExplorationResult,
+	agentID string,
+) (*domainProblem.AnalysisRecord, error) {
+	if err := domainPlan.ValidateSolutionExploration(exp); err != nil {
+		return nil, fmt.Errorf("solution exploration validation failed: %w", err)
+	}
+
+	prob, err := s.problemRepo.Get(ctx, problemID)
+	if err != nil {
+		return nil, fmt.Errorf("problem %s not found: %w", problemID, err)
+	}
+
+	var findings []string
+	var selectedAlt domainPlan.SolutionAlternative
+	for _, alt := range exp.Alternatives {
+		isSel := alt.ID == exp.SelectedAlternativeID
+		if isSel {
+			selectedAlt = alt
+		}
+		findings = append(findings, fmt.Sprintf(
+			"[%s] %s | Feasibility: %s | Reversibility: %s | Cost: %s | Duration: %s | Selected: %t",
+			alt.ID, alt.Title, alt.TechnicalFeasibility, alt.Reversibility, alt.EstimatedCost, alt.EstimatedDuration, isSel,
+		))
+	}
+
+	conclusions := []string{
+		fmt.Sprintf("Selected Alternative: %s (%s)", selectedAlt.ID, selectedAlt.Title),
+		fmt.Sprintf("Rationale: %s", exp.OverallRationale),
+	}
+	if exp.RequiresHumanApproval {
+		conclusions = append(conclusions, "Governance: Alternative involves irreversible or high-risk actions; requires explicit human approval before execution (AIA-17, AIA-22 §9.2)")
+	}
+
+	rec := &domainProblem.AnalysisRecord{
+		ID:           fmt.Sprintf("ar-%s-sol-%s", prob.ID, uuid.New().String()[:6]),
+		ProblemID:    prob.ID,
+		ModelVersion: prob.CurrentModelVersion,
+		AnalysisType: "SOLUTION_EXPLORATION",
+		Findings:     findings,
+		Conclusions:  conclusions,
+		AgentID:      agentID,
+		CreatedAt:    time.Now().UTC(),
+	}
+
+	if err := s.problemRepo.CreateAnalysisRecord(ctx, rec); err != nil {
+		return nil, fmt.Errorf("failed to record solution exploration: %w", err)
+	}
+	return rec, nil
+}
+
+// GeneratePlanInput defines the specification for generating a new Plan version (AIA-22 §4.7, §6.4).
+type GeneratePlanInput struct {
+	ProblemID             string
+	Objective             string
+	Strategy              string
+	WorkItems             []domainPlan.WorkItemDef
+	Dependencies          []string
+	AcceptanceCriteria    []string
+	SupersedesPlanID      string
+	ChangeReason          string
+	RequiresHumanApproval bool
+	ApprovedBy            string
+}
+
+// GeneratePlan produces a versioned Plan, checks DAG dependency consistency, and records version changes (AIA-22 §4.7, §6.4, §6.5).
+func (s *Service) GeneratePlan(ctx context.Context, in GeneratePlanInput) (*domainPlan.Plan, error) {
+	if s.planRepo == nil {
+		return nil, errors.New("plan repository is not configured")
+	}
+
+	prob, err := s.problemRepo.Get(ctx, in.ProblemID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load problem %s: %w", in.ProblemID, err)
+	}
+
+	var version int
+	var prevPlan *domainPlan.Plan
+	if in.SupersedesPlanID != "" {
+		prevPlan, err = s.planRepo.Get(ctx, in.SupersedesPlanID)
+		if err != nil {
+			return nil, fmt.Errorf("superseded plan %s not found: %w", in.SupersedesPlanID, err)
+		}
+		if in.ChangeReason == "" {
+			return nil, errors.New("change reason is required when superseding an existing plan")
+		}
+		version = prevPlan.Version + 1
+	} else {
+		version = prob.CurrentPlanVersion + 1
+	}
+
+	planID := fmt.Sprintf("%s-plan-v%d", prob.ID, version)
+
+	initialStatus := domainPlan.StatusProposed
+	if in.RequiresHumanApproval {
+		initialStatus = domainPlan.StatusProposed
+	}
+
+	p := &domainPlan.Plan{
+		ID:                 planID,
+		ProblemID:          prob.ID,
+		Version:            version,
+		Objective:          in.Objective,
+		Strategy:           in.Strategy,
+		Status:             initialStatus,
+		WorkItems:          in.WorkItems,
+		Dependencies:       in.Dependencies,
+		AcceptanceCriteria: in.AcceptanceCriteria,
+		SupersedesPlanID:   in.SupersedesPlanID,
+	}
+
+	// Validate Plan and WorkItem DAG
+	if err := p.Validate(); err != nil {
+		return nil, fmt.Errorf("plan validation failed: %w", err)
+	}
+
+	// Persist Plan (atomic bump of current_plan_version on Problem)
+	if err := s.planRepo.Create(ctx, p); err != nil {
+		return nil, fmt.Errorf("failed to persist plan: %w", err)
+	}
+
+	// If superseding, mark previous plan as SUPERSEDED and log change record (AIA-22 §6.5)
+	if in.SupersedesPlanID != "" {
+		_ = s.planRepo.UpdateStatus(ctx, in.SupersedesPlanID, domainPlan.StatusSuperseded)
+
+		var affectedWIs []string
+		for _, wi := range in.WorkItems {
+			affectedWIs = append(affectedWIs, wi.ID)
+		}
+		changeRec := &domainPlan.PlanChangeRecord{
+			ID:                    fmt.Sprintf("change-%s-v%d", prob.ID, version),
+			PlanID:                p.ID,
+			FromVersion:           prevPlan.Version,
+			ToVersion:             version,
+			Reason:                in.ChangeReason,
+			AffectedWorkItems:     affectedWIs,
+			RequiresHumanApproval: in.RequiresHumanApproval,
+			ApprovedBy:            in.ApprovedBy,
+			CreatedAt:             time.Now().UTC(),
+		}
+		_ = s.planRepo.RecordChange(ctx, changeRec)
+	}
+
+	// Update Problem status to PLANNED
+	prob.Status = domainProblem.StatusPlanned
+	prob.CurrentPlanVersion = version
+	_ = s.problemRepo.Update(ctx, prob)
+
+	if s.auditRepo != nil {
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:           domain.ID("audit-" + uuid.New().String()[:8]),
+			ActorType:    "SYSTEM",
+			ActorID:      "AIA-22",
+			Action:       "GENERATE_PLAN",
+			ResourceType: "PLAN",
+			ResourceID:   p.ID,
+			Outcome:      "SUCCESS",
+			CreatedAt:    time.Now().UTC(),
+		})
+	}
+
+	return p, nil
+}
+
+// ApprovePlan transitions a proposed plan to APPROVED status (AIA-22 §9.2).
+func (s *Service) ApprovePlan(ctx context.Context, planID string, approver string) (*domainPlan.Plan, error) {
+	if s.planRepo == nil {
+		return nil, errors.New("plan repository is not configured")
+	}
+
+	p, err := s.planRepo.Get(ctx, planID)
+	if err != nil {
+		return nil, fmt.Errorf("plan not found: %w", err)
+	}
+
+	if err := s.planRepo.UpdateStatus(ctx, planID, domainPlan.StatusApproved); err != nil {
+		return nil, fmt.Errorf("failed to approve plan: %w", err)
+	}
+	p.Status = domainPlan.StatusApproved
+
+	if s.auditRepo != nil {
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:           domain.ID("audit-" + uuid.New().String()[:8]),
+			ActorType:    "HUMAN",
+			ActorID:      approver,
+			Action:       "APPROVE_PLAN",
+			ResourceType: "PLAN",
+			ResourceID:   planID,
+			Outcome:      "SUCCESS",
+			CreatedAt:    time.Now().UTC(),
+		})
+	}
+	return p, nil
+}
+
+// MaterializeWorkItemToTask converts a single Plan WorkItem into an executable AIA Task (AIA-22 §4.7).
+func (s *Service) MaterializeWorkItemToTask(ctx context.Context, planID string, workItemID string) (*domainTask.Task, error) {
+	if s.planRepo == nil {
+		return nil, errors.New("plan repository is not configured")
+	}
+	if s.taskSvc == nil {
+		return nil, errors.New("task service is not configured")
+	}
+
+	plan, err := s.planRepo.Get(ctx, planID)
+	if err != nil {
+		return nil, fmt.Errorf("plan %s not found: %w", planID, err)
+	}
+
+	prob, err := s.problemRepo.Get(ctx, plan.ProblemID)
+	if err != nil {
+		return nil, fmt.Errorf("problem %s not found: %w", plan.ProblemID, err)
+	}
+
+	var targetItem *domainPlan.WorkItemDef
+	var targetIdx int
+	for i, wi := range plan.WorkItems {
+		if wi.ID == workItemID {
+			targetItem = &plan.WorkItems[i]
+			targetIdx = i
+			break
+		}
+	}
+	if targetItem == nil {
+		return nil, fmt.Errorf("work item %s not found in plan %s", workItemID, planID)
+	}
+
+	// If already materialized, return existing task
+	if targetItem.LinkedTaskID != "" {
+		return s.taskSvc.Get(ctx, targetItem.LinkedTaskID)
+	}
+
+	// Map dependencies to their materialized task IDs
+	var depTaskIDs []domain.ID
+	for _, depItemID := range targetItem.Dependencies {
+		for _, wi := range plan.WorkItems {
+			if wi.ID == depItemID && wi.LinkedTaskID != "" {
+				depTaskIDs = append(depTaskIDs, domain.ID(wi.LinkedTaskID))
+			}
+		}
+	}
+
+	var descBuilder strings.Builder
+	if targetItem.Description != "" {
+		descBuilder.WriteString(targetItem.Description)
+		descBuilder.WriteString("\n\n")
+	}
+	descBuilder.WriteString("### Acceptance Criteria (AIA-22):\n")
+	for _, ac := range targetItem.AcceptanceCriteria {
+		descBuilder.WriteString(fmt.Sprintf("- [ ] %s\n", ac))
+	}
+
+	agentID := targetItem.AssignedAgent
+	if agentID == "" {
+		if prob.ProjectID != "" && s.projectRepo != nil {
+			if proj, err := s.projectRepo.Get(ctx, domain.ID(prob.ProjectID)); err == nil && proj != nil {
+				switch proj.DomainType {
+				case domainProject.DomainWriting:
+					agentID = "writing-agent"
+				case domainProject.DomainCoding:
+					agentID = "coding-agent"
+				case domainProject.DomainInvestment:
+					agentID = "investment-agent"
+				default:
+					agentID = "personal-agent"
+				}
+			}
+		}
+		if agentID == "" {
+			agentID = "personal-agent"
+		}
+	}
+
+	taskReq := taskService.CreateTaskRequest{
+		ProjectID:    domain.ID(prob.ProjectID),
+		AgentID:      domain.ID(agentID),
+		Title:        targetItem.Title,
+		Description:  descBuilder.String(),
+		Dependencies: depTaskIDs,
+		Priority:     50,
+	}
+
+	t, err := s.taskSvc.Create(ctx, taskReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create task for work item %s: %w", workItemID, err)
+	}
+
+	// Update work item with task link
+	plan.WorkItems[targetIdx].LinkedTaskID = t.ID
+	if len(depTaskIDs) > 0 {
+		plan.WorkItems[targetIdx].Status = domainPlan.WorkItemPending
+	} else {
+		plan.WorkItems[targetIdx].Status = domainPlan.WorkItemReady
+	}
+
+	if err := s.planRepo.UpdateWorkItems(ctx, plan.ID, plan.WorkItems); err != nil {
+		return nil, fmt.Errorf("failed to update plan work item status: %w", err)
+	}
+
+	return t, nil
+}
+
+// MaterializeAllWorkItems materializes all work items in a plan in dependency order (AIA-22 §4.7).
+func (s *Service) MaterializeAllWorkItems(ctx context.Context, planID string) ([]*domainTask.Task, error) {
+	plan, err := s.planRepo.Get(ctx, planID)
+	if err != nil {
+		return nil, fmt.Errorf("plan %s not found: %w", planID, err)
+	}
+
+	var createdTasks []*domainTask.Task
+	for _, wi := range plan.WorkItems {
+		t, err := s.MaterializeWorkItemToTask(ctx, planID, wi.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to materialize work item %s: %w", wi.ID, err)
+		}
+		createdTasks = append(createdTasks, t)
+	}
+
+	// Update plan status to ACTIVE
+	_ = s.planRepo.UpdateStatus(ctx, planID, domainPlan.StatusActive)
+
+	// Update problem status to EXECUTING
+	prob, _ := s.problemRepo.Get(ctx, plan.ProblemID)
+	if prob != nil {
+		prob.Status = domainProblem.StatusExecuting
+		_ = s.problemRepo.Update(ctx, prob)
+	}
+
+	return createdTasks, nil
+}
+
 // BuildAnalysisPrompt generates a structured prompt for an Agent given problem and project context.
 func (s *Service) BuildAnalysisPrompt(ctx context.Context, problemID string, userPrompt string) (string, error) {
 	prob, err := s.problemRepo.Get(ctx, problemID)
@@ -284,6 +628,38 @@ func (s *Service) ListModels(ctx context.Context, problemID string) ([]*domainPr
 // ListAnalysisRecords retrieves all immutable analysis records for a problem.
 func (s *Service) ListAnalysisRecords(ctx context.Context, problemID string) ([]*domainProblem.AnalysisRecord, error) {
 	return s.problemRepo.ListAnalysisRecords(ctx, problemID)
+}
+
+// GetPlan retrieves a plan by ID.
+func (s *Service) GetPlan(ctx context.Context, id string) (*domainPlan.Plan, error) {
+	if s.planRepo == nil {
+		return nil, errors.New("plan repository is not configured")
+	}
+	return s.planRepo.Get(ctx, id)
+}
+
+// GetLatestPlan retrieves the latest plan for a problem.
+func (s *Service) GetLatestPlan(ctx context.Context, problemID string) (*domainPlan.Plan, error) {
+	if s.planRepo == nil {
+		return nil, errors.New("plan repository is not configured")
+	}
+	return s.planRepo.GetLatestByProblem(ctx, problemID)
+}
+
+// ListPlans retrieves all plans for a problem in ascending version order.
+func (s *Service) ListPlans(ctx context.Context, problemID string) ([]*domainPlan.Plan, error) {
+	if s.planRepo == nil {
+		return nil, errors.New("plan repository is not configured")
+	}
+	return s.planRepo.ListByProblem(ctx, problemID)
+}
+
+// ListPlanChanges retrieves the formal change history for a plan.
+func (s *Service) ListPlanChanges(ctx context.Context, planID string) ([]*domainPlan.PlanChangeRecord, error) {
+	if s.planRepo == nil {
+		return nil, errors.New("plan repository is not configured")
+	}
+	return s.planRepo.ListChanges(ctx, planID)
 }
 
 // Ensure interface compatibility

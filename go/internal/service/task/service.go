@@ -83,15 +83,17 @@ func (s *Service) Create(ctx context.Context, req CreateTaskRequest) (*task.Task
 		return nil, err
 	}
 
-	_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
-		ID:           uuid.New().String(),
-		ActorType:    "SYSTEM",
-		ActorID:      "task-service",
-		Action:       "CREATE_TASK",
-		ResourceType: "TASK",
-		ResourceID:   t.ID,
-		Outcome:      "SUCCESS",
-	})
+	if s.auditRepo != nil {
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:           uuid.New().String(),
+			ActorType:    "SYSTEM",
+			ActorID:      "task-service",
+			Action:       "CREATE_TASK",
+			ResourceType: "TASK",
+			ResourceID:   t.ID,
+			Outcome:      "SUCCESS",
+		})
+	}
 
 	return t, nil
 }

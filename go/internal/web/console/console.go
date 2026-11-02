@@ -17,6 +17,7 @@ import (
 	"github.com/wade/aia/internal/domain/investment"
 	domainLearning "github.com/wade/aia/internal/domain/learning"
 	domainMemory "github.com/wade/aia/internal/domain/memory"
+	domainPlan "github.com/wade/aia/internal/domain/plan"
 	domainProblem "github.com/wade/aia/internal/domain/problem"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/experiment"
@@ -122,9 +123,10 @@ func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
 	mux.HandleFunc("/api/v1/clarifications/", s.handleClarificationSubroutes)
 	mux.HandleFunc("/api/v1/projects/", s.handleProjectSubroutes)
 
-	// 11. Problems & Epistemic Analysis (AIA-22 Stage 2)
+	// 11. Problems & Epistemic Analysis (AIA-22 Stage 2 & 3)
 	mux.HandleFunc("/api/v1/problems", s.handleProblems)
 	mux.HandleFunc("/api/v1/problems/", s.handleProblemSubroutes)
+	mux.HandleFunc("/api/v1/plans/", s.handlePlanSubroutes)
 }
 
 func getReqID(r *http.Request) string {
@@ -1752,5 +1754,157 @@ func (s *ConsoleServices) handleProblemSubroutes(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// GET /api/v1/problems/{id}/plans
+	if len(parts) == 2 && parts[1] == "plans" {
+		if r.Method == http.MethodGet {
+			plans, err := s.ProblemSvc.ListPlans(ctx, probID)
+			if err != nil {
+				host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), reqID)
+				return
+			}
+			if plans == nil {
+				plans = []*domainPlan.Plan{}
+			}
+			host.WriteJSON(w, http.StatusOK, plans, reqID)
+			return
+		}
+		if r.Method == http.MethodPost {
+			var in problemService.GeneratePlanInput
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				host.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid plan JSON: "+err.Error(), reqID)
+				return
+			}
+			in.ProblemID = probID
+			p, err := s.ProblemSvc.GeneratePlan(ctx, in)
+			if err != nil {
+				host.WriteError(w, http.StatusBadRequest, "PLAN_GEN_ERROR", err.Error(), reqID)
+				return
+			}
+			host.WriteJSON(w, http.StatusCreated, p, reqID)
+			return
+		}
+		host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+		return
+	}
+
+	// GET /api/v1/problems/{id}/plan (latest plan)
+	if len(parts) == 2 && parts[1] == "plan" {
+		if r.Method != http.MethodGet {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		p, err := s.ProblemSvc.GetLatestPlan(ctx, probID)
+		if err != nil {
+			host.WriteError(w, http.StatusNotFound, "NOT_FOUND", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, p, reqID)
+		return
+	}
+
+	// POST /api/v1/problems/{id}/solutions (solution exploration)
+	if len(parts) == 2 && parts[1] == "solutions" {
+		if r.Method != http.MethodPost {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		var exp domainPlan.SolutionExplorationResult
+		if err := json.NewDecoder(r.Body).Decode(&exp); err != nil {
+			host.WriteError(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid solutions JSON: "+err.Error(), reqID)
+			return
+		}
+		exp.ProblemID = probID
+		rec, err := s.ProblemSvc.ExploreSolutions(ctx, probID, &exp, "web-console")
+		if err != nil {
+			host.WriteError(w, http.StatusBadRequest, "EXPLORATION_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, rec, reqID)
+		return
+	}
+
 	host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Unknown problem subroute: "+path, reqID)
+}
+
+func (s *ConsoleServices) handlePlanSubroutes(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	if s.ProblemSvc == nil {
+		host.WriteError(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "problem service not available", reqID)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/plans/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		host.WriteError(w, http.StatusBadRequest, "INVALID_PATH", "Plan ID required", reqID)
+		return
+	}
+
+	planID := parts[0]
+
+	// GET /api/v1/plans/{id}
+	if len(parts) == 1 {
+		if r.Method != http.MethodGet {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		p, err := s.ProblemSvc.GetPlan(ctx, planID)
+		if err != nil {
+			host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Plan not found", reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, p, reqID)
+		return
+	}
+
+	// POST /api/v1/plans/{id}/approve
+	if len(parts) == 2 && parts[1] == "approve" {
+		if r.Method != http.MethodPost {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		p, err := s.ProblemSvc.ApprovePlan(ctx, planID, "web-operator")
+		if err != nil {
+			host.WriteError(w, http.StatusBadRequest, "APPROVE_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, p, reqID)
+		return
+	}
+
+	// POST /api/v1/plans/{id}/materialize
+	if len(parts) == 2 && parts[1] == "materialize" {
+		if r.Method != http.MethodPost {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		tasks, err := s.ProblemSvc.MaterializeAllWorkItems(ctx, planID)
+		if err != nil {
+			host.WriteError(w, http.StatusBadRequest, "MATERIALIZE_ERROR", err.Error(), reqID)
+			return
+		}
+		host.WriteJSON(w, http.StatusOK, tasks, reqID)
+		return
+	}
+
+	// GET /api/v1/plans/{id}/changes
+	if len(parts) == 2 && parts[1] == "changes" {
+		if r.Method != http.MethodGet {
+			host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", reqID)
+			return
+		}
+		changes, err := s.ProblemSvc.ListPlanChanges(ctx, planID)
+		if err != nil {
+			host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), reqID)
+			return
+		}
+		if changes == nil {
+			changes = []*domainPlan.PlanChangeRecord{}
+		}
+		host.WriteJSON(w, http.StatusOK, changes, reqID)
+		return
+	}
+
+	host.WriteError(w, http.StatusNotFound, "NOT_FOUND", "Unknown plan subroute: "+path, reqID)
 }

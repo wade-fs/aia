@@ -307,7 +307,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 
 	problemRepo := repository.NewProblemRepository(db)
 	planRepo := repository.NewPlanRepository(db)
-	problemSvc := problemService.NewService(problemRepo, projRepo, clarificationSvc)
+	problemSvc := problemService.NewService(problemRepo, planRepo, projRepo, clarificationSvc)
+	problemSvc.SetTaskService(taskSvc)
 	problemSvc.SetAuditRepo(auditRepo)
 
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)

@@ -168,6 +168,32 @@ func (r *PlanRepository) UpdateStatus(ctx context.Context, id string, status dom
 	return nil
 }
 
+// UpdateWorkItems updates the serialized work items of an existing Plan.
+func (r *PlanRepository) UpdateWorkItems(ctx context.Context, id string, workItems []domainPlan.WorkItemDef) error {
+	wiJSON, err := json.Marshal(workItems)
+	if err != nil {
+		return fmt.Errorf("failed to marshal work items: %w", err)
+	}
+	query := `
+		UPDATE plans
+		SET work_items_json = ?, updated_at = ?
+		WHERE id = ?
+	`
+	now := time.Now().UTC()
+	res, err := r.db.RawDB().ExecContext(ctx, query, string(wiJSON), now.Format(time.RFC3339), id)
+	if err != nil {
+		return fmt.Errorf("failed to update plan work items: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return domainPlan.ErrPlanNotFound
+	}
+	return nil
+}
+
 // RecordChange records a formal change log between plan versions (AIA-22 §6.5).
 func (r *PlanRepository) RecordChange(ctx context.Context, change *domainPlan.PlanChangeRecord) error {
 	query := `

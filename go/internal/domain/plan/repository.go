@@ -10,6 +10,7 @@ type Repository interface {
 	GetLatestByProblem(ctx context.Context, problemID string) (*Plan, error)
 	ListByProblem(ctx context.Context, problemID string) ([]*Plan, error)
 	UpdateStatus(ctx context.Context, id string, status PlanStatus) error
+	UpdateWorkItems(ctx context.Context, id string, workItems []WorkItemDef) error
 
 	RecordChange(ctx context.Context, change *PlanChangeRecord) error
 	ListChanges(ctx context.Context, planID string) ([]*PlanChangeRecord, error)

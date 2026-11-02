@@ -123,9 +123,10 @@ func TestProblemService_ApplyAnalysis_And_ModelEvolution(t *testing.T) {
 	db := setupTestDB(t)
 	projRepo := repository.NewProjectRepository(db)
 	problemRepo := repository.NewProblemRepository(db)
+	planRepo := repository.NewPlanRepository(db)
 	dispatcher := &mockClarifyDispatcher{}
 
-	svc := problemService.NewService(problemRepo, projRepo, dispatcher)
+	svc := problemService.NewService(problemRepo, planRepo, projRepo, dispatcher)
 
 	// Create project and initial problem
 	proj := &domainProject.Project{
@@ -331,6 +332,7 @@ func TestProblemWebConsole_Endpoints(t *testing.T) {
 	db := setupTestDB(t)
 	projRepo := repository.NewProjectRepository(db)
 	problemRepo := repository.NewProblemRepository(db)
+	planRepo := repository.NewPlanRepository(db)
 
 	proj := &domainProject.Project{
 		ID:         "proj-web-test",
@@ -341,7 +343,7 @@ func TestProblemWebConsole_Endpoints(t *testing.T) {
 	}
 	_ = projRepo.Create(ctx, proj)
 
-	probSvc := problemService.NewService(problemRepo, projRepo, nil)
+	probSvc := problemService.NewService(problemRepo, planRepo, projRepo, nil)
 
 	mux := http.NewServeMux()
 	console.RegisterConsoleRoutes(mux, &console.ConsoleServices{

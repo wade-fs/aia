@@ -37,6 +37,27 @@ It manages novel manuscripts, audits chronological consistency and historical fa
 inspects book.yaml manifests, and dispatches chapter generation and editorial tasks.`,
 }
 
+func resolveWritingProjectID(ctx context.Context, requested string) (string, error) {
+	if strings.TrimSpace(requested) != "" {
+		return strings.TrimSpace(requested), nil
+	}
+	projects, err := appInst.ProjectSvc.ListByDomain(ctx, domainProject.DomainWriting)
+	if err != nil {
+		return "", fmt.Errorf("failed to query writing projects: %w", err)
+	}
+	if len(projects) == 0 {
+		return "", fmt.Errorf("no writing project found; please register one with 'aia writing register' or specify --project <id>")
+	}
+	if len(projects) == 1 {
+		return string(projects[0].ID), nil
+	}
+	var ids []string
+	for _, p := range projects {
+		ids = append(ids, string(p.ID))
+	}
+	return "", fmt.Errorf("multiple writing projects exist (%s); please explicitly specify target project via --project <id>", strings.Join(ids, ", "))
+}
+
 var writingBooksCmd = &cobra.Command{
 	Use:     "books",
 	Aliases: []string{"list"},
@@ -108,13 +129,10 @@ var writingScanCmd = &cobra.Command{
 		if len(args) > 0 {
 			targetID = args[0]
 		}
-		if targetID == "" {
-			projects, err := appInst.ProjectSvc.ListByDomain(ctx, domainProject.DomainWriting)
-			if err == nil && len(projects) > 0 {
-				targetID = string(projects[0].ID)
-			} else {
-				targetID = "yuan"
-			}
+		var err error
+		targetID, err = resolveWritingProjectID(ctx, targetID)
+		if err != nil {
+			return err
 		}
 
 		fmt.Printf("📖 Auditing manuscript consistency for project '%s'...\n", targetID)
@@ -156,13 +174,10 @@ var writingManifestCmd = &cobra.Command{
 		if len(args) > 0 {
 			targetID = args[0]
 		}
-		if targetID == "" {
-			projects, err := appInst.ProjectSvc.ListByDomain(ctx, domainProject.DomainWriting)
-			if err == nil && len(projects) > 0 {
-				targetID = string(projects[0].ID)
-			} else {
-				targetID = "yuan"
-			}
+		var err error
+		targetID, err = resolveWritingProjectID(ctx, targetID)
+		if err != nil {
+			return err
 		}
 
 		p, err := appInst.ProjectSvc.Get(ctx, targetID)
@@ -342,14 +357,9 @@ var writingPromptCmd = &cobra.Command{
 		ctx := context.Background()
 		promptText := strings.Join(args, " ")
 
-		targetProj := writingProjectID
-		if targetProj == "" {
-			projects, err := appInst.ProjectSvc.ListByDomain(ctx, domainProject.DomainWriting)
-			if err == nil && len(projects) > 0 {
-				targetProj = string(projects[0].ID)
-			} else {
-				targetProj = "yuan"
-			}
+		targetProj, err := resolveWritingProjectID(ctx, writingProjectID)
+		if err != nil {
+			return err
 		}
 
 		fmt.Printf("✍️ Dispatching task to Writing Agent (Project: %s)...\n", targetProj)
@@ -539,13 +549,10 @@ var writingBriefCmd = &cobra.Command{
 		if len(args) > 0 {
 			targetID = args[0]
 		}
-		if targetID == "" {
-			projects, err := appInst.ProjectSvc.ListByDomain(ctx, domainProject.DomainWriting)
-			if err == nil && len(projects) > 0 {
-				targetID = string(projects[0].ID)
-			} else {
-				targetID = "yuan"
-			}
+		var err error
+		targetID, err = resolveWritingProjectID(ctx, targetID)
+		if err != nil {
+			return err
 		}
 
 		brief, err := appInst.WritingWorkflowRepo.GetBriefByProjectID(ctx, targetID)
@@ -596,13 +603,10 @@ var writingClarifyListCmd = &cobra.Command{
 		if len(args) > 0 {
 			targetID = args[0]
 		}
-		if targetID == "" {
-			projects, err := appInst.ProjectSvc.ListByDomain(ctx, domainProject.DomainWriting)
-			if err == nil && len(projects) > 0 {
-				targetID = string(projects[0].ID)
-			} else {
-				targetID = "yuan"
-			}
+		var err error
+		targetID, err = resolveWritingProjectID(ctx, targetID)
+		if err != nil {
+			return err
 		}
 
 		reqs, err := appInst.WritingWorkflowRepo.ListClarificationsByProjectID(ctx, targetID)
@@ -709,13 +713,10 @@ var writingOutlineCmd = &cobra.Command{
 		if len(args) > 0 {
 			targetID = args[0]
 		}
-		if targetID == "" {
-			projects, err := appInst.ProjectSvc.ListByDomain(ctx, domainProject.DomainWriting)
-			if err == nil && len(projects) > 0 {
-				targetID = string(projects[0].ID)
-			} else {
-				targetID = "yuan"
-			}
+		var err error
+		targetID, err = resolveWritingProjectID(ctx, targetID)
+		if err != nil {
+			return err
 		}
 
 		if err := appInst.WritingWorkflowSvc.EstablishCreativeOutline(ctx, targetID, ""); err != nil {

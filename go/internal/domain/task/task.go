@@ -16,6 +16,7 @@ const (
 	StatusRunning           TaskStatus = "RUNNING"
 	StatusWaitingApproval   TaskStatus = "WAITING_APPROVAL"
 	StatusWaitingDependency TaskStatus = "WAITING_DEPENDENCY"
+	StatusWaitingInput      TaskStatus = "WAITING_FOR_INPUT"
 	StatusCompleted         TaskStatus = "COMPLETED"
 	StatusFailed            TaskStatus = "FAILED"
 	StatusCancelled         TaskStatus = "CANCELLED"
@@ -58,23 +59,27 @@ func ValidateTransition(from, to TaskStatus) error {
 	}
 	switch from {
 	case StatusCreated:
-		if to == StatusReady || to == StatusWaitingApproval || to == StatusWaitingDependency || to == StatusCancelled {
+		if to == StatusReady || to == StatusWaitingApproval || to == StatusWaitingDependency || to == StatusWaitingInput || to == StatusCancelled {
 			return nil
 		}
 	case StatusWaitingApproval:
-		if to == StatusReady || to == StatusWaitingDependency || to == StatusCancelled || to == StatusBlocked {
+		if to == StatusReady || to == StatusWaitingDependency || to == StatusWaitingInput || to == StatusCancelled || to == StatusBlocked {
 			return nil
 		}
 	case StatusWaitingDependency:
-		if to == StatusReady || to == StatusWaitingApproval || to == StatusCancelled || to == StatusBlocked {
+		if to == StatusReady || to == StatusWaitingApproval || to == StatusWaitingInput || to == StatusCancelled || to == StatusBlocked {
 			return nil
 		}
 	case StatusReady:
-		if to == StatusRunning || to == StatusCancelled || to == StatusBlocked || to == StatusWaitingApproval {
+		if to == StatusRunning || to == StatusCancelled || to == StatusBlocked || to == StatusWaitingApproval || to == StatusWaitingInput {
 			return nil
 		}
 	case StatusRunning:
-		if to == StatusCompleted || to == StatusFailed || to == StatusCancelled || to == StatusWaitingApproval || to == StatusBlocked || to == StatusReady || to == StatusWaitingAuth {
+		if to == StatusCompleted || to == StatusFailed || to == StatusCancelled || to == StatusWaitingApproval || to == StatusBlocked || to == StatusReady || to == StatusWaitingAuth || to == StatusWaitingInput {
+			return nil
+		}
+	case StatusWaitingInput:
+		if to == StatusReady || to == StatusRunning || to == StatusCancelled || to == StatusBlocked || to == StatusFailed {
 			return nil
 		}
 	case StatusWaitingAuth:

@@ -29,6 +29,7 @@ type CreativeBrief struct {
 	CoreProtagonists   []string       `json:"core_protagonists"`    // Main characters and roles
 	WorldviewSettings  map[string]any `json:"worldview_settings"`   // Dual world / lab / xianxia / sci-fi settings
 	WritingRules       []string       `json:"writing_rules"`        // 3-tier rules, perspective constraints, etc.
+	Version            int            `json:"version"`              // Brief version incremented on each revision
 	Status             BriefStatus    `json:"status"`
 	PendingQuestions   int            `json:"pending_questions"` // Number of unanswered clarification requests
 	CreatedAt          time.Time      `json:"created_at"`

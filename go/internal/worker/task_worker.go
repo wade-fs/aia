@@ -195,6 +195,14 @@ func (w *TaskWorker) executeTask(ctx context.Context, t *task.Task) error {
 		return execErr
 	}
 
+	// If task entered a waiting state (e.g. WAITING_FOR_INPUT for user clarifications or WAITING_APPROVAL),
+	// yield worker slot without marking as COMPLETED.
+	refreshed, rErr := w.mgr.taskSvc.Get(ctx, t.ID)
+	if rErr == nil && (refreshed.Status == task.StatusWaitingInput || refreshed.Status == task.StatusWaitingApproval || refreshed.Status == task.StatusWaitingAuth) {
+		slog.Info("task yielded worker slot into waiting state", "task_id", t.ID, "status", refreshed.Status)
+		return nil
+	}
+
 	// Mark COMPLETED
 	return w.mgr.taskSvc.UpdateStatus(ctx, t.ID, task.StatusCompleted)
 }

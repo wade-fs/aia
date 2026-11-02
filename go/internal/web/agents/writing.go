@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/wade/aia/internal/autonomy"
 	"github.com/wade/aia/internal/config"
@@ -296,18 +297,35 @@ func (m *WritingWebModule) handleProjects(w http.ResponseWriter, r *http.Request
 	host.WriteError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not supported", reqID)
 }
 
+func (m *WritingWebModule) resolveProjectID(ctx context.Context, requested string) (string, error) {
+	if strings.TrimSpace(requested) != "" {
+		return strings.TrimSpace(requested), nil
+	}
+	projects, err := m.projSvc.ListByDomain(ctx, domainProject.DomainWriting)
+	if err != nil {
+		return "", fmt.Errorf("failed to query writing projects: %w", err)
+	}
+	if len(projects) == 0 {
+		return "", fmt.Errorf("no writing project found; please register one first")
+	}
+	if len(projects) == 1 {
+		return string(projects[0].ID), nil
+	}
+	var ids []string
+	for _, p := range projects {
+		ids = append(ids, string(p.ID))
+	}
+	return "", fmt.Errorf("multiple writing projects exist (%s); please explicitly specify project_id", strings.Join(ids, ", "))
+}
+
 func (m *WritingWebModule) handleManifest(w http.ResponseWriter, r *http.Request) {
 	reqID := r.Header.Get("X-Request-ID")
 	ctx := r.Context()
 
-	projectID := r.URL.Query().Get("project_id")
-	if projectID == "" {
-		projects, err := m.projSvc.ListByDomain(ctx, domainProject.DomainWriting)
-		if err == nil && len(projects) > 0 {
-			projectID = string(projects[0].ID)
-		} else {
-			projectID = "yuan"
-		}
+	projectID, err := m.resolveProjectID(ctx, r.URL.Query().Get("project_id"))
+	if err != nil {
+		host.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error(), reqID)
+		return
 	}
 
 	p, err := m.projSvc.Get(ctx, projectID)
@@ -349,14 +367,10 @@ func (m *WritingWebModule) handleScan(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	ctx := r.Context()
-	targetID := req.ProjectID
-	if targetID == "" {
-		projects, err := m.projSvc.ListByDomain(ctx, domainProject.DomainWriting)
-		if err == nil && len(projects) > 0 {
-			targetID = string(projects[0].ID)
-		} else {
-			targetID = "yuan"
-		}
+	targetID, err := m.resolveProjectID(ctx, req.ProjectID)
+	if err != nil {
+		host.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error(), reqID)
+		return
 	}
 
 	if m.writingObs == nil {
@@ -394,14 +408,10 @@ func (m *WritingWebModule) handlePrompt(w http.ResponseWriter, r *http.Request) 
 	}
 
 	ctx := r.Context()
-	targetProj := req.ProjectID
-	if targetProj == "" {
-		projects, err := m.projSvc.ListByDomain(ctx, domainProject.DomainWriting)
-		if err == nil && len(projects) > 0 {
-			targetProj = string(projects[0].ID)
-		} else {
-			targetProj = "yuan"
-		}
+	targetProj, err := m.resolveProjectID(ctx, req.ProjectID)
+	if err != nil {
+		host.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error(), reqID)
+		return
 	}
 
 	title := req.Prompt

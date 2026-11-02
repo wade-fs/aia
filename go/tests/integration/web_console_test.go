@@ -524,6 +524,18 @@ func TestWeb_CodingAndWritingAgentModules(t *testing.T) {
 		t.Fatalf("expected 200 from DELETE writing/projects, got %d: %s", recWritingDel.Code, recWritingDel.Body.String())
 	}
 
+	// 7b. Writing Project Isolation Check (No hardcoded "yuan" fallback - AIA-21 §8.3)
+	reqNoProj := httptest.NewRequest("GET", "/api/v1/agents/writing/manifest", nil)
+	reqNoProj.AddCookie(cookie)
+	recNoProj := httptest.NewRecorder()
+	handler.ServeHTTP(recNoProj, reqNoProj)
+	if recNoProj.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request when project is omitted and no writing projects exist (no hardcoded 'yuan' fallback), got %d: %s", recNoProj.Code, recNoProj.Body.String())
+	}
+	if !strings.Contains(recNoProj.Body.String(), "no writing project found") {
+		t.Fatalf("expected error message indicating no writing project found, got: %s", recNoProj.Body.String())
+	}
+
 	// 8. Investment Agent Info and Instructions Update
 	reqInvInfo := httptest.NewRequest("GET", "/api/v1/agents/investment/info", nil)
 	reqInvInfo.AddCookie(cookie)

@@ -280,8 +280,11 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		memRepo,
 		writingGapAnalyzer,
 	)
+	writingWorkflowSvc.SetTaskRepository(taskRepo)
 
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
+	contextAssembler := orchestrator.NewContextAssembler(projRepo, memRepo, writingWorkflowRepo)
+	scheduler.SetContextAssembler(contextAssembler)
 	pa := orchestrator.NewPersonalAgent(prov, retriever, taskSvc, scheduler, evaluator)
 	pa.SetAutonomyEngine(autonomyEng)
 

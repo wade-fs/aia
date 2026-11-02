@@ -16,6 +16,7 @@ import (
 	"github.com/wade/aia/internal/domain"
 	"github.com/wade/aia/internal/domain/memory"
 	domainProject "github.com/wade/aia/internal/domain/project"
+	domainTask "github.com/wade/aia/internal/domain/task"
 	domainWriting "github.com/wade/aia/internal/domain/writing"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 )
@@ -23,6 +24,7 @@ import (
 // InitiateProjectRequest holds input parameters to begin a new writing project.
 type InitiateProjectRequest struct {
 	ProjectID string `json:"project_id"`
+	TaskID    string `json:"task_id,omitempty"`
 	Title     string `json:"title"`
 	RawIntent string `json:"raw_intent"`
 	Genre     string `json:"genre"`
@@ -52,6 +54,7 @@ type WorkflowService struct {
 	workflowRepo *repository.WritingWorkflowRepository
 	projectRepo  *repository.ProjectRepository
 	memoryRepo   *repository.MemoryRepository
+	taskRepo     *repository.TaskRepository
 	gapAnalyzer  *GapAnalyzer
 }
 
@@ -67,6 +70,11 @@ func NewWorkflowService(
 		memoryRepo:   memoryRepo,
 		gapAnalyzer:  gapAnalyzer,
 	}
+}
+
+// SetTaskRepository sets the task repository for managing WAITING_FOR_INPUT and task resumption.
+func (s *WorkflowService) SetTaskRepository(tr *repository.TaskRepository) {
+	s.taskRepo = tr
 }
 
 // InitiateProject starts the creative workflow (Nodes A, B, C, D, E, F).
@@ -171,6 +179,21 @@ func (s *WorkflowService) InitiateProject(ctx context.Context, req InitiateProje
 			_ = s.workflowRepo.CreateClarification(ctx, cr)
 		}
 		_ = s.workflowRepo.UpdateBrief(ctx, brief)
+
+		// Transition associated task to WAITING_FOR_INPUT (AIA-21 §7.1, §7.2)
+		if s.taskRepo != nil {
+			if req.TaskID != "" {
+				_ = s.taskRepo.UpdateStatus(ctx, domain.ID(req.TaskID), domainTask.StatusWaitingInput)
+			} else {
+				tasks, _ := s.taskRepo.List(ctx, repository.TaskFilter{
+					ProjectID: req.ProjectID,
+					Status:    domainTask.StatusRunning,
+				})
+				for _, t := range tasks {
+					_ = s.taskRepo.UpdateStatus(ctx, t.ID, domainTask.StatusWaitingInput)
+				}
+			}
+		}
 	} else {
 		// Node F: 沒有 ➔ 推進至 APPROVED
 		brief.Status = domainWriting.BriefStatusApproved
@@ -268,6 +291,17 @@ func (s *WorkflowService) AnswerClarification(ctx context.Context, clarification
 			}
 			if err := s.EstablishCreativeOutline(ctx, brief.ProjectID, workspace); err == nil {
 				outlineEstablished = true
+			}
+
+			// Resume paused tasks: transition WAITING_FOR_INPUT to READY for continuation (AIA-21 §7.4)
+			if s.taskRepo != nil {
+				waitingTasks, _ := s.taskRepo.List(ctx, repository.TaskFilter{
+					ProjectID: brief.ProjectID,
+					Status:    domainTask.StatusWaitingInput,
+				})
+				for _, wt := range waitingTasks {
+					_ = s.taskRepo.UpdateStatus(ctx, wt.ID, domainTask.StatusReady)
+				}
 			}
 		} else if outcome != nil && len(outcome.ClarificationRequests) > 0 {
 			allClarified = false

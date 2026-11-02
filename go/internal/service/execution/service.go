@@ -115,7 +115,9 @@ func (s *Service) Execute(ctx context.Context, t *task.Task, ag *agent.Agent, pr
 	// 3. Assemble Prompt
 	fullPrompt := t.Description
 	if contextPrompt != "" {
-		fullPrompt = fmt.Sprintf("%s\n\nTask Goal: %s\n%s", contextPrompt, t.Title, t.Description)
+		fullPrompt = fmt.Sprintf("%s\n\n---\n# CURRENT TASK GOAL & INSTRUCTION\n**Title:** %s\n**Description:**\n%s", contextPrompt, t.Title, t.Description)
+	} else if ag != nil && ag.Instructions != "" {
+		fullPrompt = fmt.Sprintf("# AGENT INSTRUCTIONS (%s)\n%s\n\n---\n# CURRENT TASK GOAL & INSTRUCTION\n**Title:** %s\n**Description:**\n%s", ag.Name, ag.Instructions, t.Title, t.Description)
 	}
 
 	// 4. Start Provider Session

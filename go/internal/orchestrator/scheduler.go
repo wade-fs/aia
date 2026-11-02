@@ -18,11 +18,12 @@ import (
 )
 
 type Scheduler struct {
-	taskSvc  *taskService.Service
-	execSvc  *execService.Service
-	agentSvc *agentService.Service
-	cfg      config.RuntimeConfig
-	mu       sync.Mutex
+	taskSvc   *taskService.Service
+	execSvc   *execService.Service
+	agentSvc  *agentService.Service
+	assembler *ContextAssembler
+	cfg       config.RuntimeConfig
+	mu        sync.Mutex
 }
 
 func NewScheduler(
@@ -37,6 +38,13 @@ func NewScheduler(
 		agentSvc: agentSvc,
 		cfg:      cfg,
 	}
+}
+
+// SetContextAssembler configures the context assembly engine for agy execution.
+func (s *Scheduler) SetContextAssembler(ca *ContextAssembler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.assembler = ca
 }
 
 func (s *Scheduler) RunTask(ctx context.Context, taskID domain.ID) error {
@@ -70,8 +78,18 @@ func (s *Scheduler) RunTask(ctx context.Context, taskID domain.ID) error {
 		Sandbox: true,
 	}
 
-	slog.Info("scheduling task execution", "task_id", t.ID, "agent", ag.Name)
-	_, err = s.execSvc.Execute(ctx, t, ag, prof, "")
+	var contextPrompt string
+	if s.assembler != nil {
+		assembled, cErr := s.assembler.Assemble(ctx, t, ag)
+		if cErr != nil {
+			slog.Warn("context assembly error; proceeding with fallback", "error", cErr)
+		} else {
+			contextPrompt = assembled
+		}
+	}
+
+	slog.Info("scheduling task execution with full context", "task_id", t.ID, "agent", ag.Name)
+	_, err = s.execSvc.Execute(ctx, t, ag, prof, contextPrompt)
 	return err
 }
 

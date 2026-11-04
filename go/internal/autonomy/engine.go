@@ -16,6 +16,7 @@ import (
 	"github.com/wade/aia/internal/eventbus"
 	"github.com/wade/aia/internal/policy"
 	approvalService "github.com/wade/aia/internal/service/approval"
+	clarifyService "github.com/wade/aia/internal/service/clarification"
 	"github.com/wade/aia/internal/service/investment"
 	problemService "github.com/wade/aia/internal/service/problem"
 	taskService "github.com/wade/aia/internal/service/task"
@@ -54,6 +55,7 @@ type Dependencies struct {
 	ProblemRepo      *repository.ProblemRepository
 	PlanRepo         *repository.PlanRepository
 	ProblemSvc       *problemService.Service
+	ClarificationSvc *clarifyService.Service
 	Config           EngineConfig
 }
 
@@ -166,6 +168,7 @@ func NewEngineWithDeps(deps Dependencies) *Engine {
 		ProblemRepo:      deps.ProblemRepo,
 		PlanRepo:         deps.PlanRepo,
 		ProblemSvc:       deps.ProblemSvc,
+		ClarificationSvc: deps.ClarificationSvc,
 	})
 
 	if deps.InvSvc != nil {
@@ -204,6 +207,12 @@ func (e *Engine) RegisterPilot(p cycle.DomainPilotExecutor) {
 func (e *Engine) SetProblemService(svc *problemService.Service) {
 	if e.coordinator != nil {
 		e.coordinator.SetProblemService(svc)
+	}
+}
+
+func (e *Engine) SetClarificationService(svc *clarifyService.Service) {
+	if e.coordinator != nil {
+		e.coordinator.SetClarificationService(svc)
 	}
 }
 

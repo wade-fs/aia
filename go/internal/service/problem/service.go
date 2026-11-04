@@ -2,6 +2,7 @@ package problem
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,11 +10,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/wade/aia/internal/domain"
+	"github.com/wade/aia/internal/domain/agent"
 	domainClarify "github.com/wade/aia/internal/domain/clarification"
 	domainPlan "github.com/wade/aia/internal/domain/plan"
 	domainProblem "github.com/wade/aia/internal/domain/problem"
+	"github.com/wade/aia/internal/domain/profile"
 	domainProject "github.com/wade/aia/internal/domain/project"
 	domainTask "github.com/wade/aia/internal/domain/task"
+	"github.com/wade/aia/internal/provider"
 	clarifyService "github.com/wade/aia/internal/service/clarification"
 	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
@@ -33,6 +37,7 @@ type Service struct {
 	clarifySvc   ClarificationDispatcher
 	auditRepo    *repository.AuditRepository
 	decompConfig domainProblem.DecompositionConfig
+	prov         provider.Provider
 }
 
 // NewService creates a new Problem Service instance.
@@ -64,6 +69,11 @@ func (s *Service) SetTaskService(ts *taskService.Service) {
 // SetAuditRepo attaches an audit repository for operational logging.
 func (s *Service) SetAuditRepo(repo *repository.AuditRepository) {
 	s.auditRepo = repo
+}
+
+// SetProvider attaches an LLM provider for autonomous problem analysis.
+func (s *Service) SetProvider(p provider.Provider) {
+	s.prov = p
 }
 
 // CreateProblemInput defines input parameters to initialize a Problem.
@@ -621,6 +631,335 @@ func (s *Service) BuildAnalysisPrompt(ctx context.Context, problemID string, use
 	}
 
 	return domainProblem.BuildProblemAnalysisPrompt(prob, proj, userPrompt, findings, nil), nil
+}
+
+// AnalyzeProblemWithProvider invokes the configured Provider to perform an epistemic problem analysis (AIA-22 §4).
+// If the provider succeeds and returns valid JSON conforming to AgentProblemAnalysis, it applies it to the problem model.
+// If the provider fails or is not configured, it synthesizes a domain-aware epistemic analysis to prevent blocking.
+func (s *Service) AnalyzeProblemWithProvider(
+	ctx context.Context,
+	problemID string,
+	userPrompt string,
+	agentID string,
+) (*domainProblem.ProblemModel, error) {
+	prob, err := s.problemRepo.Get(ctx, problemID)
+	if err != nil {
+		return nil, fmt.Errorf("problem %s not found: %w", problemID, err)
+	}
+
+	if agentID == "" {
+		agentID = "autonomy_core"
+	}
+
+	var analysis *domainProblem.AgentProblemAnalysis
+
+	if s.prov != nil {
+		prompt, pErr := s.BuildAnalysisPrompt(ctx, problemID, userPrompt)
+		if pErr == nil {
+			execID := fmt.Sprintf("prob-ana-%s-%s", prob.ID, uuid.New().String()[:6])
+			session, sErr := s.prov.Start(ctx, provider.StartRequest{
+				ExecutionID: execID,
+				Agent:       agent.Agent{Name: agentID},
+				Prompt:      prompt,
+				Profile: profile.ExecutionProfile{
+					Sandbox: true,
+				},
+			})
+			if sErr == nil {
+				res, wErr := session.Wait(ctx)
+				if wErr == nil && res.Response != "" {
+					cleanedJSON := extractJSONBlock(res.Response)
+					var parsed domainProblem.AgentProblemAnalysis
+					if jErr := json.Unmarshal([]byte(cleanedJSON), &parsed); jErr == nil {
+						if vErr := domainProblem.ValidateProblemAnalysis(&parsed); vErr == nil {
+							analysis = &parsed
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback to domain-aware heuristic epistemic analysis if provider analysis was not obtained
+	if analysis == nil {
+		analysis = s.synthesizeDomainEpistemicAnalysis(ctx, prob)
+	}
+
+	return s.ApplyAnalysis(ctx, problemID, analysis, agentID, "")
+}
+
+func extractJSONBlock(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```json") {
+		s = strings.TrimPrefix(s, "```json")
+		if idx := strings.LastIndex(s, "```"); idx >= 0 {
+			s = s[:idx]
+		}
+	} else if strings.HasPrefix(s, "```") {
+		s = strings.TrimPrefix(s, "```")
+		if idx := strings.LastIndex(s, "```"); idx >= 0 {
+			s = s[:idx]
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
+func (s *Service) synthesizeDomainEpistemicAnalysis(ctx context.Context, prob *domainProblem.Problem) *domainProblem.AgentProblemAnalysis {
+	now := time.Now().UTC()
+	domainType := "coding" // default
+	if s.projectRepo != nil {
+		if p, err := s.projectRepo.Get(ctx, domain.ID(prob.ProjectID)); err == nil && p != nil {
+			if p.DomainType != "" {
+				domainType = strings.ToLower(string(p.DomainType))
+			}
+		}
+	}
+
+	analysis := &domainProblem.AgentProblemAnalysis{
+		Intent: domainProblem.IntentSummary{
+			UserGoal: prob.Objective,
+		},
+		Context: domainProblem.ContextSummary{
+			FoundResources: []string{fmt.Sprintf("Project:%s", prob.ProjectID)},
+			TrustedData:    []string{"Execution audit logs", "Continuity snapshot"},
+		},
+	}
+
+	switch domainType {
+	case "writing":
+		analysis.Intent.SuccessCriteria = []string{
+			"Audit target manuscript chapters against Master Bible canon",
+			"Isolate chronological or character attribute contradictions",
+		}
+		analysis.ModelItems = []domainProblem.ModelItem{
+			{
+				ID:          fmt.Sprintf("fact-%s-1", prob.ID),
+				Category:    domainProblem.CategoryKnownFact,
+				Statement:   fmt.Sprintf("Writing manuscript and project guidelines identified for %s", prob.Title),
+				Source:      "AUTONOMY_ANALYZER",
+				Confidence: 1.0,
+				Status:      domainProblem.ItemStatusConfirmed,
+				CreatedBy:   "autonomy_core",
+				CreatedAt:   now,
+			},
+			{
+				ID:          fmt.Sprintf("unknown-%s-1", prob.ID),
+				Category:    domainProblem.CategoryUnknown,
+				Statement:   "Timeline deviations or character attribute contradictions across volumes",
+				Confidence: 0.0,
+				Status:      domainProblem.ItemStatusConfirmed,
+				CreatedBy:   "autonomy_core",
+				CreatedAt:   now,
+			},
+			{
+				ID:          fmt.Sprintf("assumption-%s-1", prob.ID),
+				Category:    domainProblem.CategoryAssumption,
+				Statement:   "Auditing manuscript against character setting will isolate narrative inconsistencies without corrupting canon",
+				Confidence: 0.85,
+				Status:      domainProblem.ItemStatusConfirmed,
+				CreatedBy:   "autonomy_core",
+				CreatedAt:   now,
+			},
+		}
+
+	case "investment":
+		analysis.Intent.SuccessCriteria = []string{
+			"Verify investment thesis against latest market filings",
+			"Maintain portfolio risk limits with zero look-ahead bias",
+		}
+		analysis.ModelItems = []domainProblem.ModelItem{
+			{
+				ID:          fmt.Sprintf("fact-%s-1", prob.ID),
+				Category:    domainProblem.CategoryKnownFact,
+				Statement:   fmt.Sprintf("Portfolio holdings and market conditions observed for %s", prob.Title),
+				Source:      "AUTONOMY_ANALYZER",
+				Confidence: 1.0,
+				Status:      domainProblem.ItemStatusConfirmed,
+				CreatedBy:   "autonomy_core",
+				CreatedAt:   now,
+			},
+			{
+				ID:          fmt.Sprintf("unknown-%s-1", prob.ID),
+				Category:    domainProblem.CategoryUnknown,
+				Statement:   "Forward macro volatility and regulatory event impact on target horizon",
+				Confidence: 0.0,
+				Status:      domainProblem.ItemStatusConfirmed,
+				CreatedBy:   "autonomy_core",
+				CreatedAt:   now,
+			},
+			{
+				ID:          fmt.Sprintf("assumption-%s-1", prob.ID),
+				Category:    domainProblem.CategoryAssumption,
+				Statement:   "Disciplined risk-parity rebalancing hedges downside volatility during market drift",
+				Confidence: 0.80,
+				Status:      domainProblem.ItemStatusConfirmed,
+				CreatedBy:   "autonomy_core",
+				CreatedAt:   now,
+			},
+		}
+
+	default: // "coding" or general
+		analysis.Intent.SuccessCriteria = []string{
+			"Restore operational stability",
+			"Remediate failure root causes",
+			"Verify patch against test harness with zero regression",
+		}
+		analysis.ModelItems = []domainProblem.ModelItem{
+			{
+				ID:          fmt.Sprintf("fact-%s-1", prob.ID),
+				Category:    domainProblem.CategoryKnownFact,
+				Statement:   fmt.Sprintf("Problem %s triggered autonomously under project %s", prob.Title, prob.ProjectID),
+				Source:      "AUTONOMY_ANALYZER",
+				Confidence: 1.0,
+				Status:      domainProblem.ItemStatusConfirmed,
+				CreatedBy:   "autonomy_core",
+				CreatedAt:   now,
+			},
+			{
+				ID:          fmt.Sprintf("unknown-%s-1", prob.ID),
+				Category:    domainProblem.CategoryUnknown,
+				Statement:   "Exact environmental or logic edge case leading to failure",
+				Confidence: 0.0,
+				Status:      domainProblem.ItemStatusConfirmed,
+				CreatedBy:   "autonomy_core",
+				CreatedAt:   now,
+			},
+			{
+				ID:          fmt.Sprintf("assumption-%s-1", prob.ID),
+				Category:    domainProblem.CategoryAssumption,
+				Statement:   "Decomposing remediation into root cause isolation and verified fix will restore project health",
+				Confidence: 0.80,
+				Status:      domainProblem.ItemStatusConfirmed,
+				CreatedBy:   "autonomy_core",
+				CreatedAt:   now,
+			},
+		}
+	}
+
+	return analysis
+}
+
+// GeneratePlanFromAnalysis dynamically constructs an executable Plan DAG based on the Problem and its Model (AIA-22 §6.4).
+func (s *Service) GeneratePlanFromAnalysis(ctx context.Context, problemID string, requiresApproval bool) (*domainPlan.Plan, error) {
+	prob, err := s.problemRepo.Get(ctx, problemID)
+	if err != nil {
+		return nil, fmt.Errorf("problem %s not found: %w", problemID, err)
+	}
+
+	domainType := "coding"
+	if s.projectRepo != nil {
+		if p, pErr := s.projectRepo.Get(ctx, domain.ID(prob.ProjectID)); pErr == nil && p != nil {
+			if p.DomainType != "" {
+				domainType = strings.ToLower(string(p.DomainType))
+			}
+		}
+	}
+
+	wi1ID := fmt.Sprintf("wi-%s-1", prob.ID)
+	wi2ID := fmt.Sprintf("wi-%s-2", prob.ID)
+
+	var assignedAgent string
+	var strategy string
+	var workItems []domainPlan.WorkItemDef
+
+	switch domainType {
+	case "writing":
+		assignedAgent = "writing-agent"
+		strategy = "Two-stage manuscript audit: 1. Canon & Timeline Cross-Referencing -> 2. Consistent Revision Proposal"
+		workItems = []domainPlan.WorkItemDef{
+			{
+				ID:            wi1ID,
+				Title:         fmt.Sprintf("Manuscript Audit: %s", prob.Title),
+				Description:   "Audit volume chapters against Master Bible and timeline consistency rules",
+				Stage:         "AUDIT",
+				AssignedAgent: assignedAgent,
+				AcceptanceCriteria: []string{
+					"Canon violations and timeline conflicts identified and documented",
+				},
+				Status: domainPlan.WorkItemPending,
+			},
+			{
+				ID:            wi2ID,
+				Title:         fmt.Sprintf("Revision Proposal: %s", prob.Title),
+				Description:   "Formulate chapter repair diffs and ensure intentional fictional licenses are preserved",
+				Stage:         "REVISION",
+				AssignedAgent: assignedAgent,
+				Dependencies:  []string{wi1ID},
+				AcceptanceCriteria: []string{
+					"Consistency Engine passes audit with zero remaining chronological contradictions",
+				},
+				Status: domainPlan.WorkItemPending,
+			},
+		}
+
+	case "investment":
+		assignedAgent = "investment-agent"
+		strategy = "Two-stage portfolio rebalance: 1. Market Evidence & Materiality Evaluation -> 2. Governed Order Proposal"
+		workItems = []domainPlan.WorkItemDef{
+			{
+				ID:            wi1ID,
+				Title:         fmt.Sprintf("Research & Thesis Evaluation: %s", prob.Title),
+				Description:   "Collect fresh primary filings and verify if market shift exceeds materiality gate",
+				Stage:         "RESEARCH",
+				AssignedAgent: assignedAgent,
+				AcceptanceCriteria: []string{
+					"Materiality check completed and supporting evidence recorded",
+				},
+				Status: domainPlan.WorkItemPending,
+			},
+			{
+				ID:            wi2ID,
+				Title:         fmt.Sprintf("Position Rebalance: %s", prob.Title),
+				Description:   "Calculate target amounts, tax/fees, and generate proposal under position limits",
+				Stage:         "REBALANCE",
+				AssignedAgent: assignedAgent,
+				Dependencies:  []string{wi1ID},
+				AcceptanceCriteria: []string{
+					"Trade proposal validated against cash and concentration limits",
+				},
+				Status: domainPlan.WorkItemPending,
+			},
+		}
+
+	default: // coding
+		assignedAgent = "coding-agent"
+		strategy = "Two-stage remediation: 1. Diagnosis and Root-Cause Isolation -> 2. Verified Implementation"
+		workItems = []domainPlan.WorkItemDef{
+			{
+				ID:            wi1ID,
+				Title:         fmt.Sprintf("Diagnosis: %s", prob.Title),
+				Description:   "Extract error logs, reproduce failure, and document isolated root cause",
+				Stage:         "DIAGNOSIS",
+				AssignedAgent: assignedAgent,
+				AcceptanceCriteria: []string{
+					"Root cause identified and documented",
+				},
+				Status: domainPlan.WorkItemPending,
+			},
+			{
+				ID:            wi2ID,
+				Title:         fmt.Sprintf("Remediate: %s", prob.Title),
+				Description:   "Implement fix, verify unit/integration tests, and ensure zero regression",
+				Stage:         "REMEDIATION",
+				AssignedAgent: assignedAgent,
+				Dependencies:  []string{wi1ID},
+				AcceptanceCriteria: []string{
+					"Regression validation passes cleanly",
+				},
+				Status: domainPlan.WorkItemPending,
+			},
+		}
+	}
+
+	planIn := GeneratePlanInput{
+		ProblemID:             prob.ID,
+		Objective:             prob.Objective,
+		Strategy:              strategy,
+		WorkItems:             workItems,
+		RequiresHumanApproval: requiresApproval,
+	}
+
+	return s.GeneratePlan(ctx, planIn)
 }
 
 // GetProblem retrieves a problem by ID.

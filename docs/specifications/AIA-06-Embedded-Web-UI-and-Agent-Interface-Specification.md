@@ -1488,18 +1488,18 @@ Frontend 不應：
 
 依目前程式碼檢視，以下限制必須在實作及 UI 中明確反映：
 
-1. `aia server start` 只啟動 Web Server。
-2. 尚無完整 Background Runtime Worker。
-3. Schedule Polling 尚未形成常駐工作流程。
-4. `aia schedule tick` 只建立到期 Task，不會自動執行 Task。
-5. Investment Sync 目前主要依靠手動操作。
-6. Prediction Evaluation 尚未形成自動週期工作。
-7. Collector Providers 尚有假資料及固定資料問題。
-8. Autonomy Monitor 尚未完成。
-9. 完整 Memory Continuity 尚未完成。
-10. Self-Correction Engine 尚未實作。
-11. Goal Evolution Engine 尚未實作。
-12. Coding / Writing 尚未實作。
+1. `aia server start` 啟動 Web Server 與後台常駐排程與工作槽位（Schedule & Task Workers）。
+2. Background Runtime Worker 常駐運行。
+3. Schedule Polling 已形成常駐輪詢工作流程。
+4. Schedule Tick 自動分派 Task 並由背景槽位自動執行。
+5. Investment 模組支援自動與手動同步。
+6. Prediction Evaluation 已形成週期評估機制。
+7. Collector Providers（TWSE / TPEx / FRED）目前在未接通正式金鑰環境下強制標示為模擬/隔離數據源。
+8. 16-Tab Web Console 支援 Autonomy Cycles, Learnings, Experiments, Clarifications, Problems 視覺化。
+9. 完整 Context Snapshot 與 Memory Continuity 機制已就緒。
+10. Self-Correction Engine 已實作（三層架構）。
+11. Goal Evolution Engine 已實作（三向演化與防目標漂移）。
+12. Coding / Writing MVA 已實作（支援自修沙盒與知識一致性檢驗）。
 
 UI 必須根據實際狀態呈現，不得以靜態畫面或預設數值假裝功能已經完成。
 

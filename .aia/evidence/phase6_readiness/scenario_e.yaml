@@ -1,8 +1,8 @@
 scenario_id: scenario_e
-executed_at: "2026-11-02T15:32:44Z"
+executed_at: "2026-11-04T09:25:39Z"
 status: PASSED
 target_domain: coding
-target_project: /tmp/TestPhase6_Readiness_ScenarioE_SafeModificationAndRecovery3488012999/002
+target_project: /tmp/TestPhase6_Readiness_ScenarioE_SafeModificationAndRecovery1509393286/002
 steps_executed:
     - step_index: 1
       name: INJECT_DESTRUCTIVE_DEFECT
@@ -16,5 +16,5 @@ steps_executed:
 verification:
     gate: G5
     level: L2_VERIFIED
-    evidence_hash: sha256-ec12ad749e3292f6bd271931252a49642c79b1fd9f1790a02a9b238e61089355
+    evidence_hash: sha256-3944b17405f7f9911af847a19fd3fc2af20de0754b5738764e1beb211afeb485
 rca_or_notes: Destructive modification rejected by verification; clean rollback detached worktree and deleted branch; 0 residual files; repository SHA strictly preserved.

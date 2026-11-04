@@ -11,7 +11,7 @@
 - Agent Harness：Antigravity CLI（agy）1.4.12
 - 架構模式：Modular Monolith + Domain Agent Architecture
 - 部署模式：Single User / Local First
-- 狀態：目標架構規格；部分元件尚未實作
+- 狀態：目標架構規格；Phase 0 ～ Phase 6 核心元件與 Phase 7 整合已於 Go 代碼庫落地（註：部分外部 API 數據源仍處於隔離模擬中）
 
 ---
 
@@ -663,11 +663,11 @@ Domain Agent 不應自行重複實作 Autonomy Core。
 
 | Domain Agent | 領域 | 狀態 |
 |---|---|---|
-| Investment Agent | 投資研究與虛擬投資 | 目前唯一已實作的 Domain Module |
-| Coding Agent | 程式開發、除錯及優化 | 尚未實作 |
-| Writing Agent | 寫作、內容及長期作品管理 | 尚未實作 |
+| Investment Agent | 投資研究與虛擬投資 | 已實作（Phase 1~5A，虛擬帳戶與世代實驗） |
+| Coding Agent | 程式開發、除錯及優化 | 已實作 MVA（Phase 5B/6，代碼自修與受控沙盒） |
+| Writing Agent | 寫作、內容及長期作品管理 | 已實作 MVA（Phase 5B/6，長篇小說規範稽核與一致性驗證） |
 
-目前不能將規劃中的 Coding Agent 或 Writing Agent 描述成已具備完整自主能力。
+註：Coding Agent 與 Writing Agent 基礎領域引擎與 Observer 已就緒，目前正進行長週期端到端自主解決問題之整合驗證。
 
 ## 7.3 Domain Agent Contract
 
@@ -1275,19 +1275,19 @@ AIA 初期使用 Go 實作。
 | Approval Service | 已有基礎 | 依實際操作驗收 |
 | Audit Service | 已有基礎 | 需確認完整性及不可竄改要求 |
 | Event Bus | 已有 | 需確認持久化事件需求 |
-| Investment Module | 已有 | 目前唯一已實作 Domain Module |
-| Coding Agent | 未實作 | 規劃中 |
-| Writing Agent | 未實作 | 規劃中 |
-| Autonomy Core | 尚未完整實作 | 尚無完整共用自主性循環 |
-| Persistent Runtime | 尚未完成 | 缺少完整常駐執行環境 |
-| Schedule Worker | 尚未完成 | 尚無常駐輪詢 |
-| Task Worker | 尚未完成 | 尚無完整背景執行整合 |
-| Recovery Worker | 尚未完成 | 目前有啟動時 Recovery，不等於持續 Worker |
-| Initiative Engine | 尚未實作 | 主動發現能力尚未完成 |
-| Self-Correction Engine | 尚未完整實作 | 預測評估不等於策略自我修正 |
-| Goal Evolution | 尚未實作 | 尚無完整目標演化流程 |
-| Web Host | 已有 | HTTP Server 與 Web Console |
-| Autonomy Monitor | 介面需求已定義 | 必須以可驗證證據呈現 |
+| Investment Module | 已實作 | 支援多投資組合與虛擬結算 (Phase 5A) |
+| Coding Agent | 已實作 MVA | 沙盒代碼修復與驗證管線 (Phase 5B/6) |
+| Writing Agent | 已實作 MVA | 長篇大綱與多層知識一致性驗證 (Phase 5B/6) |
+| Autonomy Core | 已實作 | 11 步共用決策自主閉環 (Phase 3/3.5/7) |
+| Persistent Runtime | 已實作 | 常駐 Schedule/Task/AutoWake/Purger Workers |
+| Schedule Worker | 已實作 | 15s 週期常駐輪詢 |
+| Task Worker | 已實作 | 5s 週期常駐並行槽排程執行 |
+| Recovery Worker | 已實作 | 支援 Context Reconstruction 與重啟復原 |
+| Initiative Engine | 已實作 | 多來源主動機會與缺口發現 (Phase 3) |
+| Self-Correction Engine | 已實作 | 三層式自我修正與反饋驗證 (Phase 4) |
+| Goal Evolution | 已實作 | 目標生命週期與三向演化 (Phase 4) |
+| Web Host | 已實作 | HTTP Server 與 16-Tab Web Console |
+| Autonomy Monitor | 已實作 | AIA-13 通用自主性度量引擎 (evaluator/metrics) |
 
 ## 16.1 Current Runtime Reality
 

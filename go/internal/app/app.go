@@ -355,7 +355,9 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	problemSvc := problemService.NewService(problemRepo, planRepo, projRepo, clarificationSvc)
 	problemSvc.SetTaskService(taskSvc)
 	problemSvc.SetAuditRepo(auditRepo)
+	problemSvc.SetProvider(prov)
 	autonomyEng.SetProblemService(problemSvc)
+	autonomyEng.SetClarificationService(clarificationSvc)
 
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	contextAssembler := orchestrator.NewContextAssembler(projRepo, memRepo, writingWorkflowRepo)

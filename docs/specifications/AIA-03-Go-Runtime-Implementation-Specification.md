@@ -704,19 +704,15 @@ Schedule 必須避免：
 
 應透過資料庫交易、唯一識別及執行紀錄確保一致性。
 
-## 8.5 Current Implementation Gap
+## 8.5 Implementation Status & Concurrency Runtime
 
-目前：
+本模組與排程背景工作鏈路已於 Phase 3 完成落地：
 
-- `CreateSchedule()` 已存在。
-- `TriggerSchedule()` 已存在。
-- `ProcessDueSchedules()` 已存在。
-- `aia schedule tick` 可手動處理到期排程。
-- Schedule Service 目前主要負責建立 Task。
-- 尚未由常駐 Schedule Worker 持續輪詢。
-- Schedule 建立 Task 後，尚未形成由 Background Task Worker 自動執行的完整鏈路。
-
-這是 R1 必須完成的工作。
+- `CreateSchedule()`、`TriggerSchedule()`、`ProcessDueSchedules()` 正常運作。
+- 常駐 `ScheduleWorker` 每 15s 輪詢處理到期排程並分派 Task。
+- 常駐 `TaskWorker` 每 5s 輪詢並行槽位（預設 3 Slots）自動執行任務與記錄執行結果。
+- `LogRetentionPurger` 週期性清理過期日誌。
+- 支援 `AutoWakeWorker` 與受控緊急停機（Controlled Emergency Stop）。
 
 # 9. Autonomy Core Implementation
 

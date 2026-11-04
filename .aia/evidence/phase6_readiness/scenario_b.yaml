@@ -1,5 +1,5 @@
 scenario_id: scenario_b
-executed_at: "2026-11-02T15:32:44Z"
+executed_at: "2026-11-04T09:25:39Z"
 status: PASSED
 target_domain: writing
 target_project: synthetic-adaptation-novel
@@ -13,5 +13,5 @@ steps_executed:
 verification:
     gate: G2
     level: L2_VERIFIED
-    evidence_hash: sha256-3e76d53f3bfc96029d4bd46c9c27328d31c4871a31bdd72f085ae7d73f12e023
+    evidence_hash: sha256-9fea390a2142e34251b98d24d6f0d46ba1f23f1cb26372fcd102a38474f802b4
 rca_or_notes: System dynamically adapted to unknown multi-tier requirement; rational NO_ACTION preserved for artistic fiction; high severity ANOMALY emitted for historical post-mortem appearance.

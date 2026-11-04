@@ -16,6 +16,7 @@ import (
 	"github.com/wade/aia/internal/autonomy/recall"
 	"github.com/wade/aia/internal/domain"
 	domainAutonomy "github.com/wade/aia/internal/domain/autonomy"
+	domainClarify "github.com/wade/aia/internal/domain/clarification"
 	"github.com/wade/aia/internal/domain/continuity"
 	"github.com/wade/aia/internal/domain/decision"
 	"github.com/wade/aia/internal/domain/governance"
@@ -25,6 +26,7 @@ import (
 	"github.com/wade/aia/internal/eventbus"
 	"github.com/wade/aia/internal/policy"
 	approvalService "github.com/wade/aia/internal/service/approval"
+	clarifyService "github.com/wade/aia/internal/service/clarification"
 	problemService "github.com/wade/aia/internal/service/problem"
 	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
@@ -74,6 +76,7 @@ type CoordinatorDeps struct {
 	ProblemRepo      *repository.ProblemRepository
 	PlanRepo         *repository.PlanRepository
 	ProblemSvc       *problemService.Service
+	ClarificationSvc *clarifyService.Service
 }
 
 // Coordinator orchestrates the 11-step closed-loop Autonomy Cycle (AIA-08, AIA-18, Plan §2):
@@ -90,6 +93,10 @@ func NewCoordinator(deps CoordinatorDeps) *Coordinator {
 
 func (c *Coordinator) SetProblemService(svc *problemService.Service) {
 	c.deps.ProblemSvc = svc
+}
+
+func (c *Coordinator) SetClarificationService(svc *clarifyService.Service) {
+	c.deps.ClarificationSvc = svc
 }
 
 func (c *Coordinator) RegisterPilot(p DomainPilotExecutor) {
@@ -649,6 +656,94 @@ func (c *Coordinator) RunCycle(ctx context.Context, in RunInput) (*domainAutonom
 				approvalID = &appr.ID
 			}
 		}
+
+		// AIA-21 Integration: Create structured clarification requests from missing or conflicted fields
+		if c.deps.ClarificationSvc != nil && chosenInitiative != nil {
+			meta := parseMetaMap(chosenInitiative.MetadataJSON)
+			var questions []*domainClarify.ClarificationRequest
+
+			extractFields := func(key string) []string {
+				if slice, ok := meta[key].([]any); ok {
+					var res []string
+					for _, item := range slice {
+						if s, ok := item.(string); ok && s != "" {
+							res = append(res, s)
+						}
+					}
+					return res
+				}
+				if slice, ok := meta[key].([]string); ok {
+					return slice
+				}
+				return nil
+			}
+
+			missingFields := extractFields("missing_fields")
+			conflictedFields := extractFields("conflicted_fields")
+
+			for _, f := range missingFields {
+				questions = append(questions, &domainClarify.ClarificationRequest{
+					ID:        "cr-" + uuid.New().String()[:8],
+					ProjectID: projectID,
+					FieldKey:  f,
+					Question:  fmt.Sprintf("專案 %s 缺少核心規劃欄位 %s，請確認其設定或目標", projectID, f),
+					Options: []string{
+						"採用保守預設值推進",
+						"由人類指定具體數值",
+						"發起獨立研究任務採集數據",
+					},
+					Reason:   fmt.Sprintf("Autonomy Cycle #%d 評估推進下一階段前必須補齊關鍵需求", cycleNumber),
+					Impact:   "若未確定，專案將在此階段掛起，避免無效消耗資源",
+					Priority: domainClarify.PriorityP0,
+					Blocking: true,
+					Status:   domainClarify.StatusOpen,
+				})
+			}
+
+			for _, f := range conflictedFields {
+				questions = append(questions, &domainClarify.ClarificationRequest{
+					ID:        "cr-" + uuid.New().String()[:8],
+					ProjectID: projectID,
+					FieldKey:  f,
+					Question:  fmt.Sprintf("專案 %s 欄位 %s 出現衝突結論，請進行人工仲裁", projectID, f),
+					Options: []string{
+						"維持最新觀察結果",
+						"保留原始設定並撤銷新結論",
+						"重新開立分析工單深入診斷",
+					},
+					Reason:   fmt.Sprintf("Autonomy Cycle #%d 偵測到與歷史假設不符之矛盾", cycleNumber),
+					Impact:   "決策衝突需由人類確認，以防止錯誤知識擴散",
+					Priority: domainClarify.PriorityP0,
+					Blocking: true,
+					Status:   domainClarify.StatusOpen,
+				})
+			}
+
+			// If no specific field list was in meta, create a general request based on detected opportunity
+			if len(questions) == 0 && chosenInitiative.DetectedOpportunity != "" {
+				questions = append(questions, &domainClarify.ClarificationRequest{
+					ID:        "cr-" + uuid.New().String()[:8],
+					ProjectID: projectID,
+					FieldKey:  "general_scope",
+					Question:  chosenInitiative.DetectedOpportunity,
+					Options: []string{
+						"同意按建議執行",
+						"暫緩或駁回此項變更",
+						"手動調整執行目標",
+					},
+					Reason:   chosenInitiative.Rationale,
+					Impact:   "澄清專案範圍與執行意圖",
+					Priority: domainClarify.PriorityP1,
+					Blocking: true,
+					Status:   domainClarify.StatusOpen,
+				})
+			}
+
+			if len(questions) > 0 {
+				_ = c.deps.ClarificationSvc.CreateRequests(ctx, questions)
+			}
+		}
+
 		execSummary = "Created scope-bound human clarification request (ASK_HUMAN)"
 
 	case decision.ActionMonitor:
@@ -1077,7 +1172,6 @@ func (c *Coordinator) executeAutonomousProblemOrPlan(
 	meta := parseMetaMap(chosenInitiative.MetadataJSON)
 	var prob *domainProblem.Problem
 	var err error
-	now := clock.Now(ctx)
 
 	if chosenInitiative.ProblemID != nil && *chosenInitiative.ProblemID != "" {
 		prob, err = c.deps.ProblemSvc.GetProblem(ctx, *chosenInitiative.ProblemID)
@@ -1114,94 +1208,21 @@ func (c *Coordinator) executeAutonomousProblemOrPlan(
 	}
 
 	// 1. Initial Epistemic Analysis (if not already modeled)
-	if prob.CurrentModelVersion == 0 {
-		analysis := &domainProblem.AgentProblemAnalysis{
-			Intent: domainProblem.IntentSummary{
-				UserGoal:        prob.Objective,
-				SuccessCriteria: []string{"Restore operational stability", "Remediate failure root causes"},
-			},
-			Context: domainProblem.ContextSummary{
-				FoundResources: []string{fmt.Sprintf("Project:%s", projectID)},
-				TrustedData:    []string{"Execution audit logs", "Continuity snapshot"},
-			},
-			ModelItems: []domainProblem.ModelItem{
-				{
-					ID:         fmt.Sprintf("fact-%s-1", prob.ID),
-					Category:   domainProblem.CategoryKnownFact,
-					Statement:  fmt.Sprintf("Problem %s triggered autonomously under project %s", prob.Title, projectID),
-					Source:     "AUTONOMY_CYCLE_COORDINATOR",
-					Confidence: 1.0,
-					Status:     domainProblem.ItemStatusConfirmed,
-					CreatedBy:  "autonomy_core",
-					CreatedAt:  now,
-				},
-				{
-					ID:         fmt.Sprintf("unknown-%s-1", prob.ID),
-					Category:   domainProblem.CategoryUnknown,
-					Statement:  "Exact environmental or logic edge case leading to failure",
-					Confidence: 0.0,
-					Status:     domainProblem.ItemStatusConfirmed,
-					CreatedBy:  "autonomy_core",
-					CreatedAt:  now,
-				},
-				{
-					ID:         fmt.Sprintf("assumption-%s-1", prob.ID),
-					Category:   domainProblem.CategoryAssumption,
-					Statement:  "Decomposing remediation into root cause isolation and verified fix will restore project health",
-					Confidence: 0.80,
-					Status:     domainProblem.ItemStatusConfirmed,
-					CreatedBy:  "autonomy_core",
-					CreatedAt:  now,
-				},
-			},
-		}
-		if _, aErr := c.deps.ProblemSvc.ApplyAnalysis(ctx, prob.ID, analysis, "autonomy_core", ""); aErr != nil {
-			return nil, "", fmt.Errorf("failed to apply problem analysis: %w", aErr)
-		}
-	}
-
-	// 2. Generate Plan (if not already planned)
 	wiAgent := chosenInitiative.TargetAgentID
 	if wiAgent == "" {
 		wiAgent = "coding-agent"
 	}
 
+	if prob.CurrentModelVersion == 0 {
+		if _, aErr := c.deps.ProblemSvc.AnalyzeProblemWithProvider(ctx, prob.ID, chosenInitiative.Rationale, wiAgent); aErr != nil {
+			return nil, "", fmt.Errorf("failed to apply problem analysis: %w", aErr)
+		}
+	}
+
+	// 2. Generate Plan (if not already planned)
 	var activePlan *domainPlan.Plan
 	if prob.CurrentPlanVersion == 0 {
-		wi1ID := fmt.Sprintf("wi-%s-1", prob.ID)
-		wi2ID := fmt.Sprintf("wi-%s-2", prob.ID)
-		planIn := problemService.GeneratePlanInput{
-			ProblemID: prob.ID,
-			Objective: prob.Objective,
-			Strategy:  "Two-stage remediation: 1. Diagnosis and Root-Cause Isolation -> 2. Verified Implementation",
-			WorkItems: []domainPlan.WorkItemDef{
-				{
-					ID:            wi1ID,
-					Title:         fmt.Sprintf("Diagnosis: %s", prob.Title),
-					Description:   "Extract error logs, reproduce failure, and document isolated root cause",
-					Stage:         "DIAGNOSIS",
-					AssignedAgent: wiAgent,
-					AcceptanceCriteria: []string{
-						"Root cause identified and documented",
-					},
-					Status: domainPlan.WorkItemPending,
-				},
-				{
-					ID:            wi2ID,
-					Title:         fmt.Sprintf("Remediate: %s", prob.Title),
-					Description:   "Implement fix, verify unit/integration tests, and ensure zero regression",
-					Stage:         "REMEDIATION",
-					AssignedAgent: wiAgent,
-					Dependencies:  []string{wi1ID},
-					AcceptanceCriteria: []string{
-						"Regression validation passes cleanly",
-					},
-					Status: domainPlan.WorkItemPending,
-				},
-			},
-			RequiresHumanApproval: requiresHumanApproval,
-		}
-		p, pErr := c.deps.ProblemSvc.GeneratePlan(ctx, planIn)
+		p, pErr := c.deps.ProblemSvc.GeneratePlanFromAnalysis(ctx, prob.ID, requiresHumanApproval)
 		if pErr != nil {
 			return nil, "", fmt.Errorf("failed to generate plan: %w", pErr)
 		}

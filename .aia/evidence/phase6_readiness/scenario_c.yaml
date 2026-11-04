@@ -1,8 +1,8 @@
 scenario_id: scenario_c
-executed_at: "2026-11-02T15:32:44Z"
+executed_at: "2026-11-04T09:25:39Z"
 status: PASSED
 target_domain: coding
-target_project: /tmp/TestPhase6_Readiness_ScenarioC_RealExecutionAndVerification1523159744/002
+target_project: /tmp/TestPhase6_Readiness_ScenarioC_RealExecutionAndVerification1912918578/002
 steps_executed:
     - step_index: 1
       name: DETECT_DEFECT_AND_CONFIGURE_SANDBOX
@@ -16,5 +16,5 @@ steps_executed:
 verification:
     gate: G3
     level: L2_VERIFIED
-    evidence_hash: sha256-7b28fda03f3f427d916efc592f8fd19bc9b67b03c42f3a51193e79683a2ce234
+    evidence_hash: sha256-dd1cf56f70ac6a23231a7c0a7c3afea13086bdeb2ca898021cab8cfc3a43ec63
 rca_or_notes: Remediation executed in isolated Git worktree; L2 verification passed (25 tests OK); main branch unpolluted (0 uncommitted changes).

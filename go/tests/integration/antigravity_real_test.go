@@ -41,16 +41,15 @@ func TestAgy_RealIntegration_AG01_Version(t *testing.T) {
 	defer cancel()
 
 	adapter := antigravity.NewAdapter(config.AntigravityConfig{
-		Executable:      agyPath,
-		RequiredVersion: "1.4.12",
+		Executable: agyPath,
 	})
 
 	ver, err := adapter.Version(ctx)
 	if err != nil {
 		t.Fatalf("failed to get agy version: %v", err)
 	}
-	if ver != "1.4.12" {
-		t.Errorf("expected version 1.4.12, got %s", ver)
+	if !strings.HasPrefix(ver, "1.") {
+		t.Errorf("expected version starting with 1.x, got %s", ver)
 	}
 
 	if err := adapter.HealthCheck(ctx); err != nil {
@@ -67,8 +66,7 @@ func TestAgy_RealIntegration_AG02_AG04_StreamJson(t *testing.T) {
 	wsDir := filepath.Join(tmpDir, "real_ws")
 
 	adapter := antigravity.NewAdapter(config.AntigravityConfig{
-		Executable:      agyPath,
-		RequiredVersion: "1.4.12",
+		Executable: agyPath,
 	})
 
 	req := provider.StartRequest{

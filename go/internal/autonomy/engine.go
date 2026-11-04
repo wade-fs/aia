@@ -50,6 +50,8 @@ type Dependencies struct {
 	InvSvc           *investment.Service
 	Evaluator        *policy.Evaluator
 	Bus              eventbus.Publisher
+	ProblemRepo      *repository.ProblemRepository
+	PlanRepo         *repository.PlanRepository
 	Config           EngineConfig
 }
 
@@ -119,6 +121,12 @@ func NewEngineWithDeps(deps Dependencies) *Engine {
 	if deps.LearningRepo != nil {
 		recallEng.SetLearningRepository(deps.LearningRepo)
 	}
+	if deps.ProblemRepo != nil {
+		recallEng.SetProblemRepository(deps.ProblemRepo)
+	}
+	if deps.PlanRepo != nil {
+		recallEng.SetPlanRepository(deps.PlanRepo)
+	}
 	disc := initiative.NewDiscoverer(deps.AutonomyRepo)
 	delib := deliberation.NewDeliberator()
 	var learnEng *learning.Engine
@@ -153,6 +161,8 @@ func NewEngineWithDeps(deps Dependencies) *Engine {
 		ApprovalSvc:      deps.ApprovalSvc,
 		Evaluator:        deps.Evaluator,
 		Bus:              deps.Bus,
+		ProblemRepo:      deps.ProblemRepo,
+		PlanRepo:         deps.PlanRepo,
 	})
 
 	if deps.InvSvc != nil {

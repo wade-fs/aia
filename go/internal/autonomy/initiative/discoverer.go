@@ -288,6 +288,54 @@ func (d *Discoverer) Discover(ctx context.Context, in DiscoverInput) ([]*domainA
 				UpdatedAt:           now,
 			})
 		}
+
+		// 5. Open Complex Problems requiring modeling or plan decomposition (AIA-22 §10.2)
+		for _, prob := range in.Recalled.ActiveProblems {
+			if prob == nil {
+				continue
+			}
+			summary := fmt.Sprintf("Analyze and Plan Problem: %s", prob.Title)
+			if isDuplicateOfActiveTask(summary) {
+				continue
+			}
+			seenFingerprints[strings.ToLower(summary)] = true
+
+			probID := prob.ID
+			metaBytes, _ := json.Marshal(map[string]any{
+				"problem_id":            prob.ID,
+				"problem_title":         prob.Title,
+				"current_model_version": prob.CurrentModelVersion,
+				"current_plan_version":  prob.CurrentPlanVersion,
+				"status":                prob.Status,
+			})
+
+			prio := 7
+			if prob.Priority == "HIGH" || prob.Priority == "CRITICAL" {
+				prio = 8
+			}
+
+			candidates = append(candidates, &domainAutonomy.CandidateInitiative{
+				ID:                  uuid.New().String(),
+				CycleID:             in.CycleID,
+				ProjectID:           projPtr,
+				GoalID:              in.GoalID,
+				ProblemID:           &probID,
+				DiscoveryType:       domainAutonomy.DiscoveryProblem,
+				ConfidenceLevel:     domainAutonomy.ConfidenceConfirmed,
+				TargetAgentID:       inferTargetAgent(prob.Title + " " + prob.Objective),
+				TriggerSource:       "PROBLEM_ANALYZER",
+				DetectedOpportunity: summary,
+				Rationale:           fmt.Sprintf("Complex problem %q is active (status=%s, plan_version=%d) and requires epistemic analysis or plan decomposition (AIA-22 §10.2).", prob.Title, prob.Status, prob.CurrentPlanVersion),
+				ExpectedOutcome:     fmt.Sprintf("Produce validated ProblemModel or versioned execution Plan for %q", prob.Title),
+				PriorityScore:       prio,
+				EstimatedCost:       1.5,
+				EstimatedRisk:       governance.RiskTierLow,
+				Status:              domainAutonomy.InitiativeCandidate,
+				MetadataJSON:        string(metaBytes),
+				CreatedAt:           now,
+				UpdatedAt:           now,
+			})
+		}
 	}
 
 	sort.SliceStable(candidates, func(i, j int) bool {

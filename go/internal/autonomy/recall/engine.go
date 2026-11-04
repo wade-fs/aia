@@ -18,6 +18,8 @@ import (
 	"github.com/wade/aia/internal/domain/knowledge"
 	domainLearning "github.com/wade/aia/internal/domain/learning"
 	"github.com/wade/aia/internal/domain/memory"
+	domainPlan "github.com/wade/aia/internal/domain/plan"
+	domainProblem "github.com/wade/aia/internal/domain/problem"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 )
@@ -53,6 +55,8 @@ type RecalledBundle struct {
 	RecentDecisions []*decision.Decision        `json:"recent_decisions,omitempty"`
 	PendingIssues   []string                    `json:"pending_issues,omitempty"`
 	ActiveTasks     []task.Task                 `json:"active_tasks,omitempty"`
+	ActiveProblems  []*domainProblem.Problem    `json:"active_problems,omitempty"`
+	ActivePlans     []*domainPlan.Plan          `json:"active_plans,omitempty"`
 	// Phase 4 L0–L3 Epistemic Learning Partitions (AIA-11 §21.2)
 	VerifiedLearnings   []*domainLearning.LearningRecord `json:"verified_learnings,omitempty"`   // L2/L3 EFFECTIVE
 	NegativeConstraints []*domainLearning.LearningRecord `json:"negative_constraints,omitempty"` // REGRESSED / INEFFECTIVE anti-patterns
@@ -79,6 +83,8 @@ type Engine struct {
 	projectRepo    *repository.ProjectRepository
 	taskRepo       *repository.TaskRepository
 	learningRepo   *repository.LearningRepository
+	problemRepo    *repository.ProblemRepository
+	planRepo       *repository.PlanRepository
 }
 
 func NewEngine(
@@ -105,6 +111,14 @@ func NewEngine(
 
 func (e *Engine) SetLearningRepository(repo *repository.LearningRepository) {
 	e.learningRepo = repo
+}
+
+func (e *Engine) SetProblemRepository(repo *repository.ProblemRepository) {
+	e.problemRepo = repo
+}
+
+func (e *Engine) SetPlanRepository(repo *repository.PlanRepository) {
+	e.planRepo = repo
 }
 
 // Recall reconstructs L1–L5 context associatively using project state, goals, observations, and provenance weights.
@@ -183,6 +197,25 @@ func (e *Engine) Recall(ctx context.Context, in RecallInput) (*RecalledBundle, e
 				}
 				if !tk.IsTerminal() {
 					bundle.ActiveTasks = append(bundle.ActiveTasks, tk)
+				}
+			}
+		}
+	}
+
+	// --- L4: Problems & Versioned Plans (AIA-22 §10.1~10.3) ---
+	if e.problemRepo != nil && in.ProjectID != "" {
+		if probs, err := e.problemRepo.ListByProject(ctx, in.ProjectID); err == nil {
+			for _, p := range probs {
+				if hasAsOf && p.CreatedAt.After(asOf) {
+					continue
+				}
+				if p.Status != domainProblem.StatusResolved && p.Status != domainProblem.StatusClosed {
+					bundle.ActiveProblems = append(bundle.ActiveProblems, p)
+					if e.planRepo != nil && p.CurrentPlanVersion > 0 {
+						if pl, err := e.planRepo.GetByProblemAndVersion(ctx, p.ID, p.CurrentPlanVersion); err == nil && pl != nil {
+							bundle.ActivePlans = append(bundle.ActivePlans, pl)
+						}
+					}
 				}
 			}
 		}

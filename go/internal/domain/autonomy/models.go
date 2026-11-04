@@ -17,6 +17,7 @@ const (
 	DiscoveryGoalGap     DiscoveryType = "GOAL_GAP"
 	DiscoveryContinuity  DiscoveryType = "CONTINUITY"
 	DiscoveryImprovement DiscoveryType = "IMPROVEMENT"
+	DiscoveryProblem     DiscoveryType = "PROBLEM"
 )
 
 // DiscoveryConfidence reflects evidentiary certainty for a discovery (AIA-09 §4.2).
@@ -46,6 +47,7 @@ type CandidateInitiative struct {
 	CycleID             string              `json:"cycle_id"`
 	ProjectID           *string             `json:"project_id,omitempty"`
 	GoalID              *string             `json:"goal_id,omitempty"`
+	ProblemID           *string             `json:"problem_id,omitempty"`
 	DiscoveryType       DiscoveryType       `json:"discovery_type"`
 	ConfidenceLevel     DiscoveryConfidence `json:"confidence_level"`
 	TargetAgentID       string              `json:"target_agent_id"`

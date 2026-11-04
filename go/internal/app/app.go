@@ -177,6 +177,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	experimentRepo := repository.NewExperimentRepository(db)
 	selfmodRepo := repository.NewSelfModRepository(db)
 	writingWorkflowRepo := repository.NewWritingWorkflowRepository(db)
+	problemRepo := repository.NewProblemRepository(db)
+	planRepo := repository.NewPlanRepository(db)
 
 	taskRepo.SetChangeHook(func(ctx context.Context, taskID domain.ID, status task.TaskStatus, created bool) {
 		if bus != nil {
@@ -221,6 +223,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	collectorSvc := invService.NewDataCollectorService(invDataRepo, invRepo)
 	schedSvc := scheduleService.NewService(schedRepo, taskSvc, bus)
 	reconstructor := continuity.NewReconstructor(continuityRepo, goalRepo, decisionRepo, eventHistoryRepo, projRepo)
+	reconstructor.SetProblemRepository(problemRepo)
 	knowledgeSvc := knowledgeService.NewService(knowledgeRepo, decisionRepo, continuityRepo)
 	approvalSvc := approvalService.NewService(approvalRepo, taskSvc, auditRepo, bus)
 	goalSvc := goalService.NewService(goalRepo, autonomyRepo, eventHistoryRepo, taskSvc)
@@ -270,6 +273,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		InvSvc:           invSvc,
 		Evaluator:        evaluator,
 		Bus:              bus,
+		ProblemRepo:      problemRepo,
+		PlanRepo:         planRepo,
 	})
 	autonomyEng.RegisterObserver("investment", autonomy.NewInvestmentObserver(invSvc))
 	codingObs := autonomy.NewCodeHealthObserver()
@@ -338,8 +343,6 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	briefObs := autonomy.NewBriefCompletenessObserver(genericBriefRepo, projRepo)
 	autonomyEng.RegisterObserver("brief_completeness", briefObs)
 
-	problemRepo := repository.NewProblemRepository(db)
-	planRepo := repository.NewPlanRepository(db)
 	problemSvc := problemService.NewService(problemRepo, planRepo, projRepo, clarificationSvc)
 	problemSvc.SetTaskService(taskSvc)
 	problemSvc.SetAuditRepo(auditRepo)
@@ -347,6 +350,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	scheduler := orchestrator.NewScheduler(taskSvc, execSvc, agSvc, cfg.Runtime)
 	contextAssembler := orchestrator.NewContextAssembler(projRepo, memRepo, writingWorkflowRepo)
 	contextAssembler.SetGenericBriefRepository(genericBriefRepo)
+	contextAssembler.SetProblemRepository(problemRepo)
 	scheduler.SetContextAssembler(contextAssembler)
 	pa := orchestrator.NewPersonalAgent(prov, retriever, taskSvc, scheduler, evaluator)
 	pa.SetAutonomyEngine(autonomyEng)

@@ -68,6 +68,8 @@ type CoordinatorDeps struct {
 	ApprovalSvc      *approvalService.Service
 	Evaluator        *policy.Evaluator
 	Bus              eventbus.Publisher
+	ProblemRepo      *repository.ProblemRepository
+	PlanRepo         *repository.PlanRepository
 }
 
 // Coordinator orchestrates the 11-step closed-loop Autonomy Cycle (AIA-08, AIA-18, Plan §2):
@@ -286,13 +288,15 @@ func (c *Coordinator) RunCycle(ctx context.Context, in RunInput) (*domainAutonom
 	// Step 3: Assess (評估專案、活躍目標差距與待處理問題)
 	// =========================================================================
 	t3 := time.Now()
-	assessSummary := fmt.Sprintf("Assessed %d active goals, %d active tasks, %d pending issues, %d conflicts",
-		len(recalled.ActiveGoals), len(recalled.ActiveTasks), len(recalled.PendingIssues), len(recalled.Conflicts))
+	assessSummary := fmt.Sprintf("Assessed %d active goals, %d active tasks, %d active problems, %d pending issues, %d conflicts",
+		len(recalled.ActiveGoals), len(recalled.ActiveTasks), len(recalled.ActiveProblems), len(recalled.PendingIssues), len(recalled.Conflicts))
 	recordStep(3, "Assess", assessSummary, t3, map[string]any{
-		"active_goals":   len(recalled.ActiveGoals),
-		"active_tasks":   len(recalled.ActiveTasks),
-		"pending_issues": len(recalled.PendingIssues),
-		"conflicts":      len(recalled.Conflicts),
+		"active_goals":    len(recalled.ActiveGoals),
+		"active_tasks":    len(recalled.ActiveTasks),
+		"active_problems": len(recalled.ActiveProblems),
+		"active_plans":    len(recalled.ActivePlans),
+		"pending_issues":  len(recalled.PendingIssues),
+		"conflicts":       len(recalled.Conflicts),
 	})
 
 	// =========================================================================

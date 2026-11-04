@@ -19,6 +19,7 @@ type ContextAssembler struct {
 	memoryRepo       *repository.MemoryRepository
 	workflowRepo     *repository.WritingWorkflowRepository
 	genericBriefRepo *repository.GenericBriefRepository
+	problemRepo      *repository.ProblemRepository
 }
 
 // NewContextAssembler creates an assembler instance.
@@ -37,6 +38,11 @@ func NewContextAssembler(
 // SetGenericBriefRepository wires the universal project brief repository.
 func (ca *ContextAssembler) SetGenericBriefRepository(gbr *repository.GenericBriefRepository) {
 	ca.genericBriefRepo = gbr
+}
+
+// SetProblemRepository wires the complex problem and planning repository (AIA-22 §10.3).
+func (ca *ContextAssembler) SetProblemRepository(pr *repository.ProblemRepository) {
+	ca.problemRepo = pr
 }
 
 // Assemble compiles the structured markdown context prompt for agy.
@@ -145,6 +151,21 @@ func (ca *ContextAssembler) Assemble(ctx context.Context, t *task.Task, ag *agen
 				sb.WriteString("\n---\n# PROJECT MEMORY & PRIOR DECISIONS\n")
 				for _, m := range memories {
 					sb.WriteString(fmt.Sprintf("- [%s] **%s**: %s\n", m.Type, m.Title, m.Content))
+				}
+			}
+		}
+
+		// 4.1 Active Complex Problems & Planning (AIA-22 §10.3)
+		if ca.problemRepo != nil {
+			if probs, err := ca.problemRepo.ListByProject(ctx, t.ProjectID); err == nil && len(probs) > 0 {
+				sb.WriteString("\n---\n# ACTIVE PROBLEMS & PLANNING CONTEXT\n")
+				for _, pr := range probs {
+					if pr.Status != "RESOLVED" && pr.Status != "CLOSED" {
+						sb.WriteString(fmt.Sprintf("- **Problem [%s]**: %s (Status: %s, Priority: %s)\n", pr.ID, pr.Title, pr.Status, pr.Priority))
+						if pr.Objective != "" {
+							sb.WriteString(fmt.Sprintf("  • Objective: %s\n", pr.Objective))
+						}
+					}
 				}
 			}
 		}

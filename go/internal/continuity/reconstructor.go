@@ -11,6 +11,7 @@ import (
 	"github.com/wade/aia/internal/domain/continuity"
 	"github.com/wade/aia/internal/domain/decision"
 	"github.com/wade/aia/internal/domain/goal"
+	domainProblem "github.com/wade/aia/internal/domain/problem"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 )
 
@@ -24,6 +25,7 @@ type ProjectReconstruction struct {
 	ActiveGoals     []*goal.Goal                `json:"active_goals"`
 	RecentDecisions []*decision.Decision        `json:"recent_decisions"`
 	PendingIssues   []string                    `json:"pending_issues"`
+	ActiveProblems  []*domainProblem.Problem    `json:"active_problems,omitempty"`
 	LastCycle       *continuity.AutonomyCycle   `json:"last_cycle,omitempty"`
 	UnfinishedTasks []string                    `json:"unfinished_tasks"`
 	ReconstructedAt time.Time                   `json:"reconstructed_at"`
@@ -36,6 +38,7 @@ type Reconstructor struct {
 	decisionRepo   *repository.DecisionRepository
 	eventRepo      *repository.EventHistoryRepository
 	projectRepo    *repository.ProjectRepository
+	problemRepo    *repository.ProblemRepository
 }
 
 func NewReconstructor(
@@ -52,6 +55,10 @@ func NewReconstructor(
 		eventRepo:      eventRepo,
 		projectRepo:    projectRepo,
 	}
+}
+
+func (r *Reconstructor) SetProblemRepository(repo *repository.ProblemRepository) {
+	r.problemRepo = repo
 }
 
 // ReconstructProjectState restores full project continuity after process termination or restart.
@@ -111,6 +118,17 @@ func (r *Reconstructor) ReconstructProjectState(ctx context.Context, projectID s
 		cycle, err := r.continuityRepo.GetCycle(ctx, *decisions[0].CycleID)
 		if err == nil {
 			recon.LastCycle = cycle
+		}
+	}
+
+	// 6. 取得關聯之活躍複雜問題 (AIA-22 §10.3)
+	if r.problemRepo != nil {
+		if probs, err := r.problemRepo.ListByProject(ctx, projectID); err == nil {
+			for _, prob := range probs {
+				if prob.Status != domainProblem.StatusResolved && prob.Status != domainProblem.StatusClosed {
+					recon.ActiveProblems = append(recon.ActiveProblems, prob)
+				}
+			}
 		}
 	}
 

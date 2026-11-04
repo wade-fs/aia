@@ -920,11 +920,21 @@ CREATE TABLE IF NOT EXISTS plan_changes (
 CREATE INDEX IF NOT EXISTS idx_plan_changes_plan ON plan_changes(plan_id);
 ```
 
+### 3.16 自我修改驗證強化與監控度量 (Self-Modification Multi-Level Validation & Monitoring — Migration 019)
+
+依據 [AIA-14](file:///home/wade/src/github/aia/docs/specifications/AIA-14-Self-Modification-and-Safe-Code-Evolution-Specification.md) §4.6、§4.10 與 §7.1，為自我修改提案擴充事先說明的多層級驗證範圍 (`L1_SYNTAX` ~ `L6_AUTONOMY`)、結構化驗證結果，以及部署後運行度量指標（錯誤率、崩潰率、自主性退化監控）。
+
+```sql
+ALTER TABLE self_modification_proposals ADD COLUMN validation_plan_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE self_modification_proposals ADD COLUMN verification_results_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE self_modification_proposals ADD COLUMN post_deploy_metrics_json TEXT NOT NULL DEFAULT '{}';
+```
+
 ---
 
 ## 4. 既有 Schema 向下相容矩陣 (Backward Compatibility)
 
-現行資料庫包含 Migration Version 1 ～ 18，保留率達 **100%**，所有變更皆遵循向前向後相容原則：
+現行資料庫包含 Migration Version 1 ～ 19，保留率達 **100%**，所有變更皆遵循向前向後相容原則：
 
 | 現有資料表 / 模組 | 所屬 Migration | 處理策略 | 相容性保證 |
 |---|---|---|---|
@@ -946,10 +956,10 @@ CREATE INDEX IF NOT EXISTS idx_plan_changes_plan ON plan_changes(plan_id);
 | `initiatives`, `deliberation_threads`, `decisions`, `decision_evidence_links` | 010 | 新增自主性主動提案與權衡決策鏈結 | 全新獨立表，完全向下相容 |
 | `outcome_evaluations`, `root_cause_analyses`, `correction_actions`, `learning_records`, `goal_evolution_proposals` | 011 | 新增四級學習閉環與防移目標柱機制 | 全新獨立表，完全向下相容 |
 | `experiments`, `experiment_generations`, `experiment_comparisons`, `delegation_requests` | 012 | 新增跨世代對照實驗與跨領域代理委派 | 全新獨立表，完全向下相容 |
-| `self_modification_proposals` | 014 | 新增安全自我修改提案與沙盒驗證生命週期 | 全新獨立表，完全向下相容 |
+| `self_modification_proposals` | 014, 019 | Migration 014 建立提案本體；Migration 019 擴充驗證計畫、多層級驗證結果與部署後監控指標 | 預設值保證完全相容 |
 | `writing_briefs`, `writing_clarifications` | 015 | 新增小說創作領域需求與澄清提問 | 全新獨立表，完全向下相容 |
 | `project_briefs`, `brief_field_history` | 016 | 新增通用專案簡報與不可竄改欄位演化歷程 (AIA-21) | 全新獨立表，完全向下相容 |
 | `clarification_requests` | 017 | 新增跨專案通用澄清管理與阻擋提問 (AIA-21) | 全新獨立表，完全向下相容 |
 | `problems`, `problem_models`, `analysis_records`, `plans`, `plan_changes` | 018 | 新增開放式複雜問題建模、分析紀錄與版本化執行計畫 (AIA-22) | 全新獨立表，完全向下相容 |
 
-本統一資料模型已徹底消除跨規格歧異，並為 Migration 001 ～ 018 提供了精確欄位規範與完整向下相容保證。
+本統一資料模型已徹底消除跨規格歧異，並為 Migration 001 ～ 019 提供了精確欄位規範與完整向下相容保證。

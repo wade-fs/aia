@@ -25,8 +25,9 @@ func (r *SelfModRepository) Create(ctx context.Context, p *selfmod.SelfModificat
 			id, title, description, rationale, target_files_json, patches_json,
 			scope_level, requires_approval, approval_id, status, branch_name,
 			pre_commit_sha, post_commit_sha, verification_output, rca_log,
+			validation_plan_json, verification_results_json, post_deploy_metrics_json,
 			created_at, completed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	now := time.Now().UTC()
 	if p.CreatedAt.IsZero() {
@@ -35,6 +36,9 @@ func (r *SelfModRepository) Create(ctx context.Context, p *selfmod.SelfModificat
 
 	targetFilesJSON, _ := json.Marshal(p.TargetFiles)
 	patchesJSON, _ := json.Marshal(p.Patches)
+	validationPlanJSON, _ := json.Marshal(p.ValidationPlan)
+	verificationResultsJSON, _ := json.Marshal(p.VerificationResults)
+	postDeployMetricsJSON, _ := json.Marshal(p.PostDeployMetrics)
 
 	var completedAt *string
 	if p.CompletedAt != nil {
@@ -46,6 +50,7 @@ func (r *SelfModRepository) Create(ctx context.Context, p *selfmod.SelfModificat
 		p.ID, p.Title, p.Description, p.Rationale, string(targetFilesJSON), string(patchesJSON),
 		string(p.ScopeLevel), p.RequiresApproval, p.ApprovalID, string(p.Status), p.BranchName,
 		p.PreCommitSHA, p.PostCommitSHA, p.VerificationOutput, p.RCALog,
+		string(validationPlanJSON), string(verificationResultsJSON), string(postDeployMetricsJSON),
 		p.CreatedAt.UTC().Format(time.RFC3339), completedAt,
 	)
 	if err != nil {
@@ -60,11 +65,15 @@ func (r *SelfModRepository) Update(ctx context.Context, p *selfmod.SelfModificat
 			title = ?, description = ?, rationale = ?, target_files_json = ?, patches_json = ?,
 			scope_level = ?, requires_approval = ?, approval_id = ?, status = ?, branch_name = ?,
 			pre_commit_sha = ?, post_commit_sha = ?, verification_output = ?, rca_log = ?,
+			validation_plan_json = ?, verification_results_json = ?, post_deploy_metrics_json = ?,
 			completed_at = ?
 		WHERE id = ?
 	`
 	targetFilesJSON, _ := json.Marshal(p.TargetFiles)
 	patchesJSON, _ := json.Marshal(p.Patches)
+	validationPlanJSON, _ := json.Marshal(p.ValidationPlan)
+	verificationResultsJSON, _ := json.Marshal(p.VerificationResults)
+	postDeployMetricsJSON, _ := json.Marshal(p.PostDeployMetrics)
 
 	var completedAt *string
 	if p.CompletedAt != nil {
@@ -76,6 +85,7 @@ func (r *SelfModRepository) Update(ctx context.Context, p *selfmod.SelfModificat
 		p.Title, p.Description, p.Rationale, string(targetFilesJSON), string(patchesJSON),
 		string(p.ScopeLevel), p.RequiresApproval, p.ApprovalID, string(p.Status), p.BranchName,
 		p.PreCommitSHA, p.PostCommitSHA, p.VerificationOutput, p.RCALog,
+		string(validationPlanJSON), string(verificationResultsJSON), string(postDeployMetricsJSON),
 		completedAt, p.ID,
 	)
 	if err != nil {
@@ -93,23 +103,26 @@ func (r *SelfModRepository) Get(ctx context.Context, id string) (*selfmod.SelfMo
 		SELECT id, title, description, rationale, target_files_json, patches_json,
 		       scope_level, requires_approval, approval_id, status, branch_name,
 		       pre_commit_sha, post_commit_sha, verification_output, rca_log,
+		       validation_plan_json, verification_results_json, post_deploy_metrics_json,
 		       created_at, completed_at
 		FROM self_modification_proposals
 		WHERE id = ?
 	`
 	var (
-		p                                  selfmod.SelfModificationProposal
-		targetFilesJSON, patchesJSON       string
-		createdAtStr                       string
-		completedAtStr                     sql.NullString
-		approvalIDStr                      sql.NullString
-		scopeLevelStr, statusStr           string
+		p                                                      selfmod.SelfModificationProposal
+		targetFilesJSON, patchesJSON                           string
+		validationPlanJSON, verificationResultsJSON, metricsJSON string
+		createdAtStr                                           string
+		completedAtStr                                         sql.NullString
+		approvalIDStr                                          sql.NullString
+		scopeLevelStr, statusStr                               string
 	)
 
 	err := r.db.RawDB().QueryRowContext(ctx, query, id).Scan(
 		&p.ID, &p.Title, &p.Description, &p.Rationale, &targetFilesJSON, &patchesJSON,
 		&scopeLevelStr, &p.RequiresApproval, &approvalIDStr, &statusStr, &p.BranchName,
 		&p.PreCommitSHA, &p.PostCommitSHA, &p.VerificationOutput, &p.RCALog,
+		&validationPlanJSON, &verificationResultsJSON, &metricsJSON,
 		&createdAtStr, &completedAtStr,
 	)
 	if err == sql.ErrNoRows {
@@ -126,6 +139,14 @@ func (r *SelfModRepository) Get(ctx context.Context, id string) (*selfmod.SelfMo
 	}
 	_ = json.Unmarshal([]byte(targetFilesJSON), &p.TargetFiles)
 	_ = json.Unmarshal([]byte(patchesJSON), &p.Patches)
+	_ = json.Unmarshal([]byte(validationPlanJSON), &p.ValidationPlan)
+	_ = json.Unmarshal([]byte(verificationResultsJSON), &p.VerificationResults)
+	if metricsJSON != "" && metricsJSON != "{}" && metricsJSON != "null" {
+		var m selfmod.PostDeployMetrics
+		if err := json.Unmarshal([]byte(metricsJSON), &m); err == nil {
+			p.PostDeployMetrics = &m
+		}
+	}
 
 	if t, err := time.Parse(time.RFC3339, createdAtStr); err == nil {
 		p.CreatedAt = t
@@ -144,6 +165,7 @@ func (r *SelfModRepository) ListByStatus(ctx context.Context, status selfmod.Mod
 		SELECT id, title, description, rationale, target_files_json, patches_json,
 		       scope_level, requires_approval, approval_id, status, branch_name,
 		       pre_commit_sha, post_commit_sha, verification_output, rca_log,
+		       validation_plan_json, verification_results_json, post_deploy_metrics_json,
 		       created_at, completed_at
 		FROM self_modification_proposals
 		WHERE status = ?
@@ -158,17 +180,19 @@ func (r *SelfModRepository) ListByStatus(ctx context.Context, status selfmod.Mod
 	var list []*selfmod.SelfModificationProposal
 	for rows.Next() {
 		var (
-			p                            selfmod.SelfModificationProposal
-			targetFilesJSON, patchesJSON string
-			createdAtStr                 string
-			completedAtStr               sql.NullString
-			approvalIDStr                sql.NullString
-			scopeLevelStr, statusStr     string
+			p                                                      selfmod.SelfModificationProposal
+			targetFilesJSON, patchesJSON                           string
+			validationPlanJSON, verificationResultsJSON, metricsJSON string
+			createdAtStr                                           string
+			completedAtStr                                         sql.NullString
+			approvalIDStr                                          sql.NullString
+			scopeLevelStr, statusStr                               string
 		)
 		if err := rows.Scan(
 			&p.ID, &p.Title, &p.Description, &p.Rationale, &targetFilesJSON, &patchesJSON,
 			&scopeLevelStr, &p.RequiresApproval, &approvalIDStr, &statusStr, &p.BranchName,
 			&p.PreCommitSHA, &p.PostCommitSHA, &p.VerificationOutput, &p.RCALog,
+			&validationPlanJSON, &verificationResultsJSON, &metricsJSON,
 			&createdAtStr, &completedAtStr,
 		); err != nil {
 			return nil, err
@@ -180,6 +204,14 @@ func (r *SelfModRepository) ListByStatus(ctx context.Context, status selfmod.Mod
 		}
 		_ = json.Unmarshal([]byte(targetFilesJSON), &p.TargetFiles)
 		_ = json.Unmarshal([]byte(patchesJSON), &p.Patches)
+		_ = json.Unmarshal([]byte(validationPlanJSON), &p.ValidationPlan)
+		_ = json.Unmarshal([]byte(verificationResultsJSON), &p.VerificationResults)
+		if metricsJSON != "" && metricsJSON != "{}" && metricsJSON != "null" {
+			var m selfmod.PostDeployMetrics
+			if err := json.Unmarshal([]byte(metricsJSON), &m); err == nil {
+				p.PostDeployMetrics = &m
+			}
+		}
 		if t, err := time.Parse(time.RFC3339, createdAtStr); err == nil {
 			p.CreatedAt = t
 		}

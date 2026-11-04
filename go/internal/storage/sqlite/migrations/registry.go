@@ -31,6 +31,7 @@ func All() []Migration {
 		{Version: 16, Name: "generic_brief_and_history", SQL: GenericBriefAndHistory},
 		{Version: 17, Name: "generic_clarification_management", SQL: GenericClarificationManagement},
 		{Version: 18, Name: "complex_problem_and_planning", SQL: ComplexProblemAndPlanning},
+		{Version: 19, Name: "self_modification_validation_and_monitoring", SQL: SelfModificationValidationAndMonitoring},
 	}
 }
 

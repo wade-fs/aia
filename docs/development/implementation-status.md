@@ -1,7 +1,7 @@
 # AIA Development: Implementation Status
 
 **Project:** Autonomous Intelligence Architecture (AIA)  
-**Active Implementation Status:** **Phase 0 ～ Phase 6 Completed + AIA-21 & AIA-22 Implemented** (Phase 6 Safe Self-Modification, Multi-Domain MVA & Writing Dual-Loop Workflow, Universal Project Brief & Field History, Generic Clarification Management, Complex Problem Analysis & Versioned Planning Engine; Migrations `001` ～ `018` active)  
+**Active Implementation Status:** **Phase 0 ～ Phase 6 Completed + AIA-21 & AIA-22 Implemented** (Phase 6 Safe Self-Modification, Multi-Domain MVA & Writing Dual-Loop Workflow, Universal Project Brief & Field History, Generic Clarification Management, Complex Problem Analysis & Versioned Planning Engine, Self-Modification Multi-Level Verification & Post-Deployment Monitoring; Migrations `001` ～ `019` active)  
 **Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Baseline [`0e189d9`](file:///home/wade/src/github/aia) ➔ Phase 5A Baseline [`29d1cb3`](file:///home/wade/src/github/aia) ➔ Phase 5B Baseline ➔ Phase 6 Active Baseline ➔ AIA-21/22 Active  
 **Specification Baseline:** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-22) v2.0  
 **Audit Report:** [docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)  
@@ -47,7 +47,7 @@ go/
 │   ├── service/              # Application services (agent, task, exec, inv, mem, knowledge,
 │   │                         #                       approval, governance, goal + evolution, delegation,
 │   │                         #                       selfmod pipeline, brief, clarification, problem, plan)
-│   ├── storage/sqlite/       # SQLite WAL driver, migrations 001~018, repositories
+│   ├── storage/sqlite/       # SQLite WAL driver, migrations 001~019, repositories
 │   ├── validation/           # Hardened execution validator (output/artifact/fatal-marker checks)
 │   ├── web/                  # Port 7777 host, OTT/session auth, Console REST API (/api/v1/*)
 │   ├── worker/               # Background ScheduleWorker (15s), TaskWorker (5s, 3 slots)
@@ -57,7 +57,7 @@ go/
 ├── Makefile                  # Root and go/ build automation
 └── tests/
     ├── integration/          # End-to-end integration suites (incl. real agy CLI, Phase 4, Phase 6, problem_stage1~5)
-    └── unit/                 # Unit suites (incl. Migrations 001~018, Phase 6 selfmod, brief, clarification, problem, plan)
+    └── unit/                 # Unit suites (incl. Migrations 001~019, Phase 6 selfmod, brief, clarification, problem, plan)
 ```
 
 ---
@@ -105,7 +105,7 @@ go/
 
 ## 3. Database Schema Status
 
-### Active Tables (Migrations 001 ~ 018)
+### Active Tables (Migrations 001 ~ 019)
 - `agents`: Registered agents, capabilities, configurations.
 - `tasks`: Work units, status machine (`READY`, `RUNNING`, `COMPLETED`, `WAITING_APPROVAL`).
 - `task_dependencies`: Inter-task DAG dependencies.
@@ -140,7 +140,7 @@ go/
 - `experiment_generations`: Generational cohorts (`G1` frozen rule baseline vs `G2` / `G2.1` / `G2.2` LLM cohorts) with isolated portfolio profile bindings and SQLite triggers (`trg_exp_gen_freeze_update`, `trg_exp_gen_freeze_delete`) blocking mutation/deletion of frozen `G1` (Migration 012).
 - `experiment_comparisons`: Point-in-time Track A (performance + Brier/LogLoss & decision confidence calibration) and Track B (autonomy + 5-regime verdict) comparison snapshots (Migration 012).
 - `delegation_requests`: Cross-agent delegation contract records with acceptance gates (Migration 012).
-- `self_modification_proposals`: Self-modification proposal tracking with scope levels (`LEVEL_A_DOMAIN`, `LEVEL_B_CORE`, `LEVEL_C_GOVERNANCE`), patch diff, status machine (`DRAFT`, `IN_SANDBOX`, `PENDING_APPROVAL`, `APPROVED`, `VERIFIED`, `MERGED`, `ROLLED_BACK`, `REJECTED`), verification test logs, and approval binding (Migration 014).
+- `self_modification_proposals`: Self-modification proposal tracking with scope levels (`LEVEL_A_DOMAIN`, `LEVEL_B_CORE`, `LEVEL_C_GOVERNANCE`), patch diff, status machine (`DRAFT`, `IN_SANDBOX`, `PENDING_APPROVAL`, `APPROVED`, `VERIFIED`, `MERGED`, `ROLLED_BACK`, `REJECTED`, `REQUEST_CHANGES`, `DEFERRED`), verification test logs, multi-tier validation plans (`L1_SYNTAX` ~ `L6_AUTONOMY`), post-deployment monitoring metrics (`error_rate`, `crash_rate`, `autonomy_metric`), and approval binding (Migration 014 / 019).
 - `writing_briefs`: Creative brief tracking with genre, era, scale, protagonists, worldview, status, and pending questions (Migration 015).
 - `writing_clarifications`: Domain-specific human clarification requests (`ASK_HUMAN` / `WAITING_FOR_INPUT`) with category, options, user answer, and status (Migration 015).
 - `project_briefs`: Universal project requirements model across all domains with brief version, readiness stage, and YAML payload (Migration 016).

@@ -57,7 +57,7 @@ AIA explicitly separates **platform orchestration & state management** from the 
 │                                  │                                     │
 │   ┌──────────────────────────────▼─────────────────────────────────┐   │
 │   │                    Persistence & Interfaces                    │   │
-│   │  • SQLite Storage (Migrations 001~018) • Web Console (7777)    │   │
+│   │  • SQLite Storage (Migrations 001~019) • Web Console (7777)    │   │
 │   │  • REST & SSE API                      • Cobra CLI Tooling     │   │
 │   └──────────────────────────────┬─────────────────────────────────┘   │
 └──────────────────────────────────┼─────────────────────────────────────┘

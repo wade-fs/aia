@@ -1621,10 +1621,6 @@ func (s *ConsoleServices) handleProblems(w http.ResponseWriter, r *http.Request)
 	switch r.Method {
 	case http.MethodGet:
 		projID := r.URL.Query().Get("project_id")
-		if projID == "" {
-			host.WriteError(w, http.StatusBadRequest, "MISSING_PARAM", "project_id is required", reqID)
-			return
-		}
 		problems, err := s.ProblemSvc.ListProblems(ctx, projID)
 		if err != nil {
 			host.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), reqID)

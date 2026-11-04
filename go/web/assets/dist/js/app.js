@@ -7,6 +7,9 @@ const app = {
   currentTab: 'overview',
   eventSource: null,
   activeTaskFilter: '',
+  activeGoalStatus: '',
+  activeLearningLevel: '',
+  activeClarifyStatus: '',
 
   init() {
     this.bindEvents();
@@ -59,6 +62,40 @@ const app = {
     // Logout
     document.getElementById('btn-logout').addEventListener('click', () => this.handleLogout());
 
+    // Emergency Stop & Resume Dispatch
+    const btnStop = document.getElementById('btn-emergency-stop');
+    if (btnStop) {
+      btnStop.addEventListener('click', async () => {
+        if (!confirm('🛑 確定要執行緊急停止嗎？\n\n系統將立即凍結所有背景排程與 Worker 任務調度！')) return;
+        try {
+          await this.apiCall('/api/v1/system/emergency-stop', {
+            method: 'POST',
+            body: { reason: 'Web Console Operator Emergency Stop' }
+          });
+          this.showToast('🛑 系統已成功執行緊急停止！', 'warning');
+          this.loadOverview();
+        } catch (err) {
+          this.showToast('緊急停止失敗: ' + err.message, 'error');
+        }
+      });
+    }
+
+    const btnResume = document.getElementById('btn-resume-dispatch');
+    if (btnResume) {
+      btnResume.addEventListener('click', async () => {
+        try {
+          await this.apiCall('/api/v1/system/resume', {
+            method: 'POST',
+            body: { force: true }
+          });
+          this.showToast('▶️ 系統已恢復正常調度！', 'success');
+          this.loadOverview();
+        } catch (err) {
+          this.showToast('恢復調度失敗: ' + err.message, 'error');
+        }
+      });
+    }
+
     // Task Filter Chips
     document.querySelectorAll('[data-task-filter]').forEach(chip => {
       chip.addEventListener('click', (e) => {
@@ -66,6 +103,36 @@ const app = {
         e.currentTarget.classList.add('active');
         this.activeTaskFilter = e.currentTarget.getAttribute('data-task-filter');
         this.loadTasks();
+      });
+    });
+
+    // Goal Filter Chips
+    document.querySelectorAll('[data-goal-status]').forEach(chip => {
+      chip.addEventListener('click', (e) => {
+        document.querySelectorAll('[data-goal-status]').forEach(c => c.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        this.activeGoalStatus = e.currentTarget.getAttribute('data-goal-status');
+        this.loadGoals();
+      });
+    });
+
+    // Learning Level Filter Chips
+    document.querySelectorAll('[data-learning-level]').forEach(chip => {
+      chip.addEventListener('click', (e) => {
+        document.querySelectorAll('[data-learning-level]').forEach(c => c.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        this.activeLearningLevel = e.currentTarget.getAttribute('data-learning-level');
+        this.loadLearnings();
+      });
+    });
+
+    // Clarify Status Filter Chips
+    document.querySelectorAll('[data-clarify-status]').forEach(chip => {
+      chip.addEventListener('click', (e) => {
+        document.querySelectorAll('[data-clarify-status]').forEach(c => c.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        this.activeClarifyStatus = e.currentTarget.getAttribute('data-clarify-status');
+        this.loadClarifications();
       });
     });
 
@@ -229,6 +296,13 @@ const app = {
       case 'overview': this.loadOverview(); break;
       case 'tasks': this.loadTasks(); break;
       case 'pending': this.loadPending(); break;
+      case 'goals': this.loadGoals(); break;
+      case 'cycles': this.loadCycles(); break;
+      case 'learnings': this.loadLearnings(); break;
+      case 'experiments': this.loadExperiments(); break;
+      case 'delegations': this.loadDelegations(); break;
+      case 'clarifications': this.loadClarifications(); break;
+      case 'problems': this.loadProblems(); break;
       case 'investment': this.loadInvestment(); break;
       case 'coding': this.loadCoding(); break;
       case 'writing': this.loadWriting(); break;
@@ -258,7 +332,27 @@ const app = {
   async loadOverview() {
     try {
       const sys = await this.apiCall('/api/v1/system/status');
-      document.getElementById('sys-status').textContent = sys.database === 'OK' ? 'RUNNING (Healthy)' : sys.database;
+
+      // Sync Emergency Stop status and button toggles
+      const isStopped = sys.workers && sys.workers.emergency_stopped;
+      const btnStop = document.getElementById('btn-emergency-stop');
+      const btnResume = document.getElementById('btn-resume-dispatch');
+      if (btnStop && btnResume) {
+        if (isStopped) {
+          btnStop.classList.add('hidden');
+          btnResume.classList.remove('hidden');
+          document.getElementById('sys-status').textContent = 'EMERGENCY_STOPPED';
+          document.getElementById('sys-status').className = 'stat-value text-danger';
+        } else {
+          btnStop.classList.remove('hidden');
+          btnResume.classList.add('hidden');
+          document.getElementById('sys-status').textContent = sys.database === 'OK' ? 'RUNNING (Healthy)' : sys.database;
+          document.getElementById('sys-status').className = 'stat-value text-success';
+        }
+      } else {
+        document.getElementById('sys-status').textContent = sys.database === 'OK' ? 'RUNNING (Healthy)' : sys.database;
+      }
+
       document.getElementById('sys-schema-ver').textContent = `SQLite Schema v${sys.schema_version}`;
       document.getElementById('sys-provider').textContent = sys.provider.name;
       document.getElementById('sys-provider-status').textContent = sys.provider.status;
@@ -535,6 +629,384 @@ const app = {
       this.updatePendingCountBadge();
     } catch (err) {
       alert(err.message);
+    }
+  },
+
+  // ----------------------------------------------------------------
+  // Goals Tab (AIA-08, AIA-10)
+  // ----------------------------------------------------------------
+  async loadGoals() {
+    try {
+      let url = '/api/v1/goals';
+      if (this.activeGoalStatus) {
+        url += `?status=${encodeURIComponent(this.activeGoalStatus)}`;
+      }
+      const goals = await this.apiCall(url);
+      const tbody = document.querySelector('#goals-table tbody');
+      if (!tbody) return;
+      if (goals && goals.length > 0) {
+        tbody.innerHTML = goals.map(g => `
+          <tr>
+            <td><code>${g.id.substring(0, 8)}</code></td>
+            <td><strong>${this.escape(g.name)}</strong><br><small class="text-muted">${this.escape(g.description || '')}</small></td>
+            <td><span class="badge badge-subtle">${g.level || 'TACTICAL'}</span></td>
+            <td><span class="badge badge-${g.status}">${g.status}</span></td>
+            <td>${g.priority || 50}</td>
+            <td><code style="font-size:0.75rem;">${this.escape(g.target_metric_json || '{}')}</code></td>
+            <td><code style="font-size:0.75rem;">${this.escape(g.current_metric_json || '{}')}</code></td>
+            <td>${this.formatTime(g.updated_at || g.created_at)}</td>
+          </tr>
+        `).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">目前無符合條件之目標記錄</td></tr>';
+      }
+    } catch (e) {
+      console.error('loadGoals error:', e);
+    }
+  },
+
+  openCreateGoalModal() {
+    document.getElementById('create-goal-modal').classList.remove('hidden');
+  },
+
+  closeCreateGoalModal() {
+    document.getElementById('create-goal-modal').classList.add('hidden');
+    document.getElementById('form-create-goal').reset();
+  },
+
+  async submitCreateGoal(e) {
+    e.preventDefault();
+    const name = document.getElementById('goal-name').value.trim();
+    const level = document.getElementById('goal-level').value;
+    const priority = parseInt(document.getElementById('goal-priority').value, 10) || 50;
+    const description = document.getElementById('goal-desc').value.trim();
+    const targetMetric = document.getElementById('goal-target-metric').value.trim() || '{}';
+
+    try {
+      await this.apiCall('/api/v1/goals', {
+        method: 'POST',
+        body: {
+          project_id: 'default',
+          name,
+          level,
+          priority,
+          description,
+          target_metric_json: targetMetric,
+          current_metric_json: '{}'
+        }
+      });
+      this.showToast(`目標「${name}」建立成功！`, 'success');
+      this.closeCreateGoalModal();
+      this.loadGoals();
+    } catch (err) {
+      alert('建立目標失敗: ' + err.message);
+    }
+  },
+
+  // ----------------------------------------------------------------
+  // Autonomy Cycles Tab (AIA-08)
+  // ----------------------------------------------------------------
+  async loadCycles() {
+    try {
+      const cycles = await this.apiCall('/api/v1/cycles?limit=30');
+      const tbody = document.querySelector('#cycles-table tbody');
+      if (!tbody) return;
+      if (cycles && cycles.length > 0) {
+        tbody.innerHTML = cycles.map(c => {
+          const started = new Date(c.started_at);
+          const completed = c.completed_at ? new Date(c.completed_at) : null;
+          const duration = completed ? `${((completed - started) / 1000).toFixed(1)}s` : '運行中...';
+          const outcome = c.decision_outcome || 'N/A';
+          return `
+            <tr>
+              <td><strong>#${c.cycle_number}</strong><br><small class="text-muted"><code>${c.id.substring(0, 8)}</code></small></td>
+              <td>${this.escape(c.project_id || 'default')}</td>
+              <td><span class="badge badge-${c.status}">${c.status}</span></td>
+              <td><span class="badge ${outcome === 'ACT' ? 'badge-RUNNING' : 'badge-subtle'}">${outcome}</span></td>
+              <td>${this.escape(c.summary || '無摘要記錄')}</td>
+              <td>${this.formatTime(c.started_at)}</td>
+              <td>${duration}</td>
+            </tr>
+          `;
+        }).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">目前尚無自主循環執行記錄</td></tr>';
+      }
+    } catch (e) {
+      console.error('loadCycles error:', e);
+    }
+  },
+
+  async handleTriggerCycle() {
+    const btn = document.getElementById('btn-trigger-cycle');
+    if (btn) btn.disabled = true;
+    try {
+      this.showToast('⚡ 正在啟動自主循環 (Autonomy Cycle)...', 'info');
+      await this.apiCall('/api/v1/cycles', {
+        method: 'POST',
+        body: { project_id: 'default', summary: 'Web Console 手動觸發 11 步自主循環' }
+      });
+      this.showToast('✅ 自主循環已完成！', 'success');
+      this.loadCycles();
+    } catch (err) {
+      this.showToast('觸發自主循環失敗: ' + err.message, 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  },
+
+  // ----------------------------------------------------------------
+  // Learnings Tab (AIA-11)
+  // ----------------------------------------------------------------
+  async loadLearnings() {
+    try {
+      let url = '/api/v1/learnings?limit=50';
+      if (this.activeLearningLevel) {
+        url += `&level=${encodeURIComponent(this.activeLearningLevel)}`;
+      }
+      const list = await this.apiCall(url);
+      const tbody = document.querySelector('#learnings-table tbody');
+      if (!tbody) return;
+      if (list && list.length > 0) {
+        tbody.innerHTML = list.map(l => {
+          const verdictClass = l.effectiveness_verdict === 'VERIFIED_EFFECTIVE' ? 'badge-RUNNING' : (l.effectiveness_verdict === 'REGRESSION_DETECTED' ? 'badge-FAILED' : 'badge-subtle');
+          return `
+            <tr>
+              <td><code>${l.id.substring(0, 8)}</code></td>
+              <td><span class="badge badge-subtle">${l.domain || 'general'}</span></td>
+              <td><span class="badge badge-primary">${l.learning_level}</span></td>
+              <td><span class="badge ${verdictClass}">${l.effectiveness_verdict}</span></td>
+              <td>${l.discrepancy_score != null ? Number(l.discrepancy_score).toFixed(2) : '-'}</td>
+              <td><small>${this.escape(l.hypothesis || '')}</small></td>
+              <td>${this.escape(l.summary || l.intervention_summary || '')}</td>
+              <td>${this.formatTime(l.created_at)}</td>
+            </tr>
+          `;
+        }).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">目前尚無符合條件之自我修正學習紀錄</td></tr>';
+      }
+    } catch (e) {
+      console.error('loadLearnings error:', e);
+    }
+  },
+
+  // ----------------------------------------------------------------
+  // Experiments Tab (AIA-15)
+  // ----------------------------------------------------------------
+  async loadExperiments() {
+    try {
+      const exps = await this.apiCall('/api/v1/experiments');
+      const tbody = document.querySelector('#experiments-table tbody');
+      if (!tbody) return;
+      if (exps && exps.length > 0) {
+        tbody.innerHTML = exps.map(x => `
+          <tr>
+            <td><code>${x.id.substring(0, 8)}</code></td>
+            <td><strong>${this.escape(x.name)}</strong></td>
+            <td><span class="badge badge-subtle">${x.domain || 'investment'}</span></td>
+            <td>${x.experiment_type || 'GENERATIONAL_COMPARISON'}</td>
+            <td><span class="badge badge-${x.status}">${x.status}</span></td>
+            <td>第 ${x.iteration_count || 1} 代</td>
+            <td><small>${this.escape(x.hypothesis || '')}</small></td>
+            <td>${this.formatTime(x.created_at)}</td>
+          </tr>
+        `).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">目前尚無對照實驗記錄</td></tr>';
+      }
+    } catch (e) {
+      console.error('loadExperiments error:', e);
+    }
+  },
+
+  // ----------------------------------------------------------------
+  // Delegations Tab (AIA-12)
+  // ----------------------------------------------------------------
+  async loadDelegations() {
+    try {
+      const list = await this.apiCall('/api/v1/delegations');
+      const tbody = document.querySelector('#delegations-table tbody');
+      if (!tbody) return;
+      if (list && list.length > 0) {
+        tbody.innerHTML = list.map(d => `
+          <tr>
+            <td><code>${d.id.substring(0, 8)}</code></td>
+            <td><strong>${this.escape(d.requester_agent_id)}</strong></td>
+            <td><span class="badge badge-primary">➔ ${this.escape(d.target_agent_id)}</span></td>
+            <td>${this.escape(d.source_project_id || '-')}</td>
+            <td><code>${d.spawned_task_id ? d.spawned_task_id.substring(0, 8) : '-'}</code></td>
+            <td><span class="badge badge-${d.status}">${d.status}</span></td>
+            <td>${this.formatTime(d.created_at)}</td>
+          </tr>
+        `).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">目前無跨領域代理委派記錄</td></tr>';
+      }
+    } catch (e) {
+      console.error('loadDelegations error:', e);
+    }
+  },
+
+  // ----------------------------------------------------------------
+  // Clarifications Tab (AIA-21)
+  // ----------------------------------------------------------------
+  async loadClarifications() {
+    try {
+      let url = '/api/v1/clarifications';
+      if (this.activeClarifyStatus) {
+        url += `?status=${encodeURIComponent(this.activeClarifyStatus)}`;
+      }
+      const list = await this.apiCall(url);
+      const tbody = document.querySelector('#clarifications-table tbody');
+      if (!tbody) return;
+      if (list && list.length > 0) {
+        tbody.innerHTML = list.map(c => {
+          const isOpen = c.status === 'OPEN';
+          const isBlocking = c.blocking === 1 || c.blocking === true;
+          return `
+            <tr>
+              <td><code>${c.id.substring(0, 8)}</code></td>
+              <td>${this.escape(c.project_id || 'default')}</td>
+              <td><code>${this.escape(c.field_key)}</code></td>
+              <td><strong>${this.escape(c.question)}</strong></td>
+              <td><span class="badge badge-${c.status}">${c.status}</span></td>
+              <td>${isBlocking ? '<span class="badge badge-FAILED">BLOCKING</span>' : '<span class="badge badge-subtle">OPTIONAL</span>'}</td>
+              <td><small>${this.escape(c.reason || '')}</small></td>
+              <td>
+                ${isOpen ? `<button class="btn btn-sm btn-primary" onclick="app.openAnswerClarificationModal('${c.id}', '${this.escape(c.question).replace(/'/g, "\\'")}', '${this.escape(c.options_json || '[]').replace(/'/g, "\\'")}')">✍️ 回覆提問</button>` : `<span class="text-muted">已回答：${this.escape(c.answer || '')}</span>`}
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">目前無澄清提問</td></tr>';
+      }
+    } catch (e) {
+      console.error('loadClarifications error:', e);
+    }
+  },
+
+  openAnswerClarificationModal(id, question, optionsJson) {
+    document.getElementById('ans-clarify-id').value = id;
+    document.getElementById('ans-clarify-question').textContent = question;
+    document.getElementById('ans-clarify-text').value = '';
+
+    const optsContainer = document.getElementById('ans-clarify-options');
+    const optsGroup = document.getElementById('ans-clarify-options-group');
+    optsContainer.innerHTML = '';
+
+    let options = [];
+    try {
+      options = JSON.parse(optionsJson || '[]');
+    } catch (e) {}
+
+    if (Array.isArray(options) && options.length > 0) {
+      optsGroup.classList.remove('hidden');
+      options.forEach(opt => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'chip';
+        btn.textContent = opt;
+        btn.onclick = () => {
+          document.getElementById('ans-clarify-text').value = opt;
+        };
+        optsContainer.appendChild(btn);
+      });
+    } else {
+      optsGroup.classList.add('hidden');
+    }
+
+    document.getElementById('answer-clarification-modal').classList.remove('hidden');
+  },
+
+  closeAnswerClarificationModal() {
+    document.getElementById('answer-clarification-modal').classList.add('hidden');
+    document.getElementById('form-answer-clarification').reset();
+  },
+
+  async submitAnswerClarification(e) {
+    e.preventDefault();
+    const id = document.getElementById('ans-clarify-id').value;
+    const answer = document.getElementById('ans-clarify-text').value.trim();
+    if (!answer) return;
+
+    try {
+      await this.apiCall(`/api/v1/clarifications/${id}/answer`, {
+        method: 'POST',
+        body: { answer }
+      });
+      this.showToast('✅ 提問回覆成功！', 'success');
+      this.closeAnswerClarificationModal();
+      this.loadClarifications();
+    } catch (err) {
+      alert('送出回覆失敗: ' + err.message);
+    }
+  },
+
+  // ----------------------------------------------------------------
+  // Problems Tab (AIA-22)
+  // ----------------------------------------------------------------
+  async loadProblems() {
+    try {
+      const list = await this.apiCall('/api/v1/problems');
+      const tbody = document.querySelector('#problems-table tbody');
+      if (!tbody) return;
+      if (list && list.length > 0) {
+        tbody.innerHTML = list.map(p => `
+          <tr>
+            <td><code>${p.id.substring(0, 8)}</code></td>
+            <td><strong>${this.escape(p.title)}</strong></td>
+            <td>${this.escape(p.project_id || 'default')}</td>
+            <td><small>${this.escape(p.objective || p.description || '')}</small></td>
+            <td><span class="badge badge-subtle">${p.priority || 'MEDIUM'}</span></td>
+            <td><span class="badge badge-${p.status}">${p.status}</span></td>
+            <td>v${p.current_model_version || 0}</td>
+            <td>v${p.current_plan_version || 0}</td>
+            <td>${this.formatTime(p.created_at)}</td>
+          </tr>
+        `).join('');
+      } else {
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">目前尚無複雜問題記錄</td></tr>';
+      }
+    } catch (e) {
+      console.error('loadProblems error:', e);
+    }
+  },
+
+  openCreateProblemModal() {
+    document.getElementById('create-problem-modal').classList.remove('hidden');
+  },
+
+  closeCreateProblemModal() {
+    document.getElementById('create-problem-modal').classList.add('hidden');
+    document.getElementById('form-create-problem').reset();
+  },
+
+  async submitCreateProblem(e) {
+    e.preventDefault();
+    const title = document.getElementById('prob-title').value.trim();
+    const projectID = document.getElementById('prob-project-id').value.trim() || 'default';
+    const priority = document.getElementById('prob-priority').value;
+    const objective = document.getElementById('prob-objective').value.trim();
+    const scope = document.getElementById('prob-scope').value.trim();
+
+    try {
+      await this.apiCall('/api/v1/problems', {
+        method: 'POST',
+        body: {
+          title,
+          project_id: projectID,
+          priority,
+          objective,
+          scope
+        }
+      });
+      this.showToast(`問題「${title}」建立成功！`, 'success');
+      this.closeCreateProblemModal();
+      this.loadProblems();
+    } catch (err) {
+      alert('建立問題失敗: ' + err.message);
     }
   },
 

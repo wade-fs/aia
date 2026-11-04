@@ -119,16 +119,17 @@ func (r *ProblemRepository) Update(ctx context.Context, p *domainProblem.Problem
 }
 
 // ListByProject returns all problems associated with a project.
+// If projectID is empty, it returns problems across all projects.
 func (r *ProblemRepository) ListByProject(ctx context.Context, projectID string) ([]*domainProblem.Problem, error) {
 	query := `
 		SELECT id, project_id, parent_id, goal_id, title, description,
 		       objective, scope, status, priority, current_model_version,
 		       current_plan_version, created_at, updated_at
 		FROM problems
-		WHERE project_id = ?
+		WHERE (? = '' OR project_id = ?)
 		ORDER BY created_at DESC
 	`
-	rows, err := r.db.RawDB().QueryContext(ctx, query, projectID)
+	rows, err := r.db.RawDB().QueryContext(ctx, query, projectID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query problems by project: %w", err)
 	}

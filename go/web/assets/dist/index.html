@@ -44,6 +44,13 @@
           <button class="nav-tab active" data-tab="overview">總覽</button>
           <button class="nav-tab" data-tab="tasks">任務 <span id="tasks-badge" class="nav-badge hidden">0</span></button>
           <button class="nav-tab" data-tab="pending">待核准 <span id="pending-badge" class="nav-badge alert-badge hidden">0</span></button>
+          <button class="nav-tab" data-tab="goals">目標</button>
+          <button class="nav-tab" data-tab="cycles">自治循環</button>
+          <button class="nav-tab" data-tab="learnings">自我修正</button>
+          <button class="nav-tab" data-tab="experiments">實驗</button>
+          <button class="nav-tab" data-tab="delegations">委派</button>
+          <button class="nav-tab" data-tab="clarifications">澄清提問</button>
+          <button class="nav-tab" data-tab="problems">問題與計畫</button>
           <button class="nav-tab" data-tab="investment">投資 Agent</button>
           <button class="nav-tab" data-tab="coding">Coding Agent</button>
           <button class="nav-tab" data-tab="writing">Writing Agent</button>
@@ -53,6 +60,8 @@
         </nav>
       </div>
       <div class="header-right">
+        <button id="btn-emergency-stop" class="btn btn-sm btn-danger" title="緊急停止所有任務排程與分派">🛑 緊急停止</button>
+        <button id="btn-resume-dispatch" class="btn btn-sm btn-outline hidden" title="恢復系統調度">▶️ 恢復調度</button>
         <div id="sse-status" class="sse-indicator" title="即時 SSE 推播連線狀態">
           <span class="status-dot"></span>
           <span class="status-text">連線中...</span>
@@ -290,6 +299,240 @@
                 <tbody><tr><td colspan="5" class="text-center text-muted">無待審核記憶候選</td></tr></tbody>
               </table>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Goals Tab -->
+      <section id="tab-goals" class="tab-pane">
+        <div class="section-header-row">
+          <div>
+            <h2>長期目標治理 (Goals)</h2>
+            <span class="text-muted">AIA-08 / AIA-10 階層化目標、修訂歷程與反移目標柱檢驗</span>
+          </div>
+          <div>
+            <button class="btn btn-primary" onclick="app.openCreateGoalModal()">+ 新增目標</button>
+          </div>
+        </div>
+
+        <div class="filter-bar mt-2">
+          <button class="chip active" data-goal-status="">全部目標</button>
+          <button class="chip" data-goal-status="ACTIVE">進行中 (ACTIVE)</button>
+          <button class="chip" data-goal-status="PROPOSED">提議中 (PROPOSED)</button>
+          <button class="chip" data-goal-status="ACHIEVED">已達成 (ACHIEVED)</button>
+          <button class="chip" data-goal-status="PAUSED">暫停 (PAUSED)</button>
+          <button class="chip" data-goal-status="ABANDONED">放棄 (ABANDONED)</button>
+        </div>
+
+        <div class="card mt-3">
+          <div class="table-responsive">
+            <table class="table" id="goals-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>目標名稱</th>
+                  <th>層級</th>
+                  <th>狀態</th>
+                  <th>優先級</th>
+                  <th>目標指標 (Target Metric)</th>
+                  <th>當前進展 (Current Metric)</th>
+                  <th>更新時間</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="8" class="text-center text-muted">載入中...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Autonomy Cycles Tab -->
+      <section id="tab-cycles" class="tab-pane">
+        <div class="section-header-row">
+          <div>
+            <h2>自治循環審核 (Autonomy Cycles)</h2>
+            <span class="text-muted">AIA-08 11 步統一自治循環（Observe 到 Reassess）與決策裁定</span>
+          </div>
+          <div>
+            <button class="btn btn-primary" id="btn-trigger-cycle" onclick="app.handleTriggerCycle()">⚡ 觸發自主循環 (Trigger Cycle)</button>
+          </div>
+        </div>
+
+        <div class="card mt-3">
+          <div class="table-responsive">
+            <table class="table" id="cycles-table">
+              <thead>
+                <tr>
+                  <th>循環 #</th>
+                  <th>專案 ID</th>
+                  <th>狀態</th>
+                  <th>決策結論 (Verdict)</th>
+                  <th>執行摘要 (Summary)</th>
+                  <th>開始時間</th>
+                  <th>耗時</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="7" class="text-center text-muted">載入中...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Learnings Tab -->
+      <section id="tab-learnings" class="tab-pane">
+        <div class="section-title">
+          <h2>自我修正與驗證學習 (Learnings)</h2>
+          <span class="text-muted">AIA-11 四級學習閉環 (L0~L3)、RCA 假說與有效性判定</span>
+        </div>
+
+        <div class="filter-bar mt-2">
+          <button class="chip active" data-learning-level="">全部級別</button>
+          <button class="chip" data-learning-level="L0_RECORDED">L0 記錄</button>
+          <button class="chip" data-learning-level="L1_APPLIED">L1 應用</button>
+          <button class="chip" data-learning-level="L2_VERIFIED">L2 驗證</button>
+          <button class="chip" data-learning-level="L3_GENERALIZED">L3 泛化</button>
+        </div>
+
+        <div class="card mt-3">
+          <div class="table-responsive">
+            <table class="table" id="learnings-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>領域</th>
+                  <th>成熟度級別</th>
+                  <th>評定結果 (Verdict)</th>
+                  <th>差距分數</th>
+                  <th>假說 (Hypothesis)</th>
+                  <th>修正摘要</th>
+                  <th>時間</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="8" class="text-center text-muted">載入中...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Experiments Tab -->
+      <section id="tab-experiments" class="tab-pane">
+        <div class="section-title">
+          <h2>世代對照實驗 (Generational Experiments)</h2>
+          <span class="text-muted">AIA-15 G1 基準世代對比 G2/G2.1/G2.2 實驗世代之長期雙軌驗證</span>
+        </div>
+
+        <div class="card mt-3">
+          <div class="table-responsive">
+            <table class="table" id="experiments-table">
+              <thead>
+                <tr>
+                  <th>實驗 ID</th>
+                  <th>實驗名稱</th>
+                  <th>領域</th>
+                  <th>實驗類型</th>
+                  <th>狀態</th>
+                  <th>迭代代數</th>
+                  <th>假說 (Hypothesis)</th>
+                  <th>建立時間</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="8" class="text-center text-muted">載入中...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Delegations Tab -->
+      <section id="tab-delegations" class="tab-pane">
+        <div class="section-title">
+          <h2>跨領域代理委派 (Delegations)</h2>
+          <span class="text-muted">AIA-12 §21 跨領域工作委託協議與驗收門檻</span>
+        </div>
+
+        <div class="card mt-3">
+          <div class="table-responsive">
+            <table class="table" id="delegations-table">
+              <thead>
+                <tr>
+                  <th>委派 ID</th>
+                  <th>委託 Agent</th>
+                  <th>受託 Agent</th>
+                  <th>來源專案</th>
+                  <th>派生任務</th>
+                  <th>狀態</th>
+                  <th>建立時間</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="7" class="text-center text-muted">載入中...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Clarifications Tab -->
+      <section id="tab-clarifications" class="tab-pane">
+        <div class="section-title">
+          <h2>專案簡報與澄清提問 (Clarifications)</h2>
+          <span class="text-muted">AIA-21 主動探索未知需求、多選題選項與阻擋性提問機制</span>
+        </div>
+
+        <div class="filter-bar mt-2">
+          <button class="chip active" data-clarify-status="">全部提問</button>
+          <button class="chip" data-clarify-status="OPEN">待回覆 (OPEN)</button>
+          <button class="chip" data-clarify-status="ANSWERED">已回覆 (ANSWERED)</button>
+          <button class="chip" data-clarify-status="DEFERRED">延後處理 (DEFERRED)</button>
+        </div>
+
+        <div class="card mt-3">
+          <div class="table-responsive">
+            <table class="table" id="clarifications-table">
+              <thead>
+                <tr>
+                  <th>提問 ID</th>
+                  <th>專案</th>
+                  <th>欄位 Key</th>
+                  <th>提問內容</th>
+                  <th>狀態</th>
+                  <th>阻擋性</th>
+                  <th>提問原由 / 影響</th>
+                  <th>操作 / 回覆</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="8" class="text-center text-muted">載入中...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Problems & Plans Tab -->
+      <section id="tab-problems" class="tab-pane">
+        <div class="section-header-row">
+          <div>
+            <h2>複雜問題分析與計畫 (Problems & Plans)</h2>
+            <span class="text-muted">AIA-22 開放式問題建模、推演分析記錄與版本化執行計畫</span>
+          </div>
+          <div>
+            <button class="btn btn-primary" onclick="app.openCreateProblemModal()">+ 新增問題</button>
+          </div>
+        </div>
+
+        <div class="card mt-3">
+          <div class="table-responsive">
+            <table class="table" id="problems-table">
+              <thead>
+                <tr>
+                  <th>問題 ID</th>
+                  <th>標題</th>
+                  <th>專案</th>
+                  <th>目標描述</th>
+                  <th>優先級</th>
+                  <th>狀態</th>
+                  <th>模型版本</th>
+                  <th>計畫版本</th>
+                  <th>建立時間</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="9" class="text-center text-muted">載入中...</td></tr></tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -1074,6 +1317,122 @@
           <div class="modal-footer mt-4">
             <button type="button" class="btn btn-ghost" onclick="app.closeRegisterWritingProjectModal()">取消</button>
             <button type="submit" class="btn btn-primary">確認註冊</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Goal Modal -->
+  <div id="create-goal-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>新增長遠目標 (Create Goal)</h3>
+        <button class="close-btn" onclick="app.closeCreateGoalModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-create-goal" onsubmit="app.submitCreateGoal(event)">
+          <div class="form-group">
+            <label for="goal-name">目標名稱 (Name) *</label>
+            <input type="text" id="goal-name" required placeholder="例如：維持年度夏普比率 >= 1.5">
+          </div>
+          <div class="form-group mt-3">
+            <label for="goal-level">目標層級 (Level)</label>
+            <select id="goal-level">
+              <option value="STRATEGIC" selected>STRATEGIC (戰略頂層目標 - 受反移目標柱嚴格保護)</option>
+              <option value="TACTICAL">TACTICAL (戰術中間目標)</option>
+              <option value="OPERATIONAL">OPERATIONAL (操作執行目標)</option>
+            </select>
+          </div>
+          <div class="form-group mt-3">
+            <label for="goal-priority">優先級 (1-100)</label>
+            <input type="number" id="goal-priority" value="50" min="1" max="100">
+          </div>
+          <div class="form-group mt-3">
+            <label for="goal-desc">目標說明 (Description)</label>
+            <textarea id="goal-desc" rows="3" placeholder="詳細描述此目標之成功條件與驗收依據..."></textarea>
+          </div>
+          <div class="form-group mt-3">
+            <label for="goal-target-metric">目標指標 JSON (Target Metric)</label>
+            <input type="text" id="goal-target-metric" value="{}" placeholder='例如：{"sharpe": 1.5, "max_drawdown": 0.15}'>
+          </div>
+          <div class="modal-footer mt-4">
+            <button type="button" class="btn btn-ghost" onclick="app.closeCreateGoalModal()">取消</button>
+            <button type="submit" class="btn btn-primary">確認新增目標</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Problem Modal -->
+  <div id="create-problem-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>新增複雜問題 (Create Problem)</h3>
+        <button class="close-btn" onclick="app.closeCreateProblemModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-create-problem" onsubmit="app.submitCreateProblem(event)">
+          <div class="form-group">
+            <label for="prob-title">問題標題 (Title) *</label>
+            <input type="text" id="prob-title" required placeholder="例如：長途徒步環島指南出版企劃與路線規劃">
+          </div>
+          <div class="form-group mt-3">
+            <label for="prob-project-id">關聯專案 ID (Project ID)</label>
+            <input type="text" id="prob-project-id" value="default" placeholder="例如：default 或 writing-proj-1">
+          </div>
+          <div class="form-group mt-3">
+            <label for="prob-priority">優先級 (Priority)</label>
+            <select id="prob-priority">
+              <option value="LOW">LOW</option>
+              <option value="MEDIUM" selected>MEDIUM</option>
+              <option value="HIGH">HIGH</option>
+              <option value="CRITICAL">CRITICAL</option>
+            </select>
+          </div>
+          <div class="form-group mt-3">
+            <label for="prob-objective">核心目標 (Objective)</label>
+            <textarea id="prob-objective" rows="2" placeholder="說明此問題需要達成的核心目標..."></textarea>
+          </div>
+          <div class="form-group mt-3">
+            <label for="prob-scope">邊界與範圍 (Scope)</label>
+            <textarea id="prob-scope" rows="2" placeholder="說明此問題涵蓋與排除的邊界範圍..."></textarea>
+          </div>
+          <div class="modal-footer mt-4">
+            <button type="button" class="btn btn-ghost" onclick="app.closeCreateProblemModal()">取消</button>
+            <button type="submit" class="btn btn-primary">建立問題模型</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Answer Clarification Modal -->
+  <div id="answer-clarification-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>回覆澄清提問 (Answer Clarification)</h3>
+        <button class="close-btn" onclick="app.closeAnswerClarificationModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-answer-clarification" onsubmit="app.submitAnswerClarification(event)">
+          <input type="hidden" id="ans-clarify-id">
+          <div class="form-group">
+            <label>提問內容 (Question)</label>
+            <p id="ans-clarify-question" class="text-accent" style="font-weight: 600; margin: 4px 0 12px;"></p>
+          </div>
+          <div class="form-group" id="ans-clarify-options-group">
+            <label>可選預設選項 (點擊直接填入)</label>
+            <div id="ans-clarify-options" class="filter-bar mt-1 mb-2"></div>
+          </div>
+          <div class="form-group mt-3">
+            <label for="ans-clarify-text">您的回覆 (Your Answer) *</label>
+            <textarea id="ans-clarify-text" rows="3" required placeholder="輸入您對此提問的明確裁決或回覆..."></textarea>
+          </div>
+          <div class="modal-footer mt-4">
+            <button type="button" class="btn btn-ghost" onclick="app.closeAnswerClarificationModal()">取消</button>
+            <button type="submit" class="btn btn-primary">確認送出回覆</button>
           </div>
         </form>
       </div>

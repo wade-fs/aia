@@ -79,13 +79,23 @@ Operates periodically (e.g., weekly or post-horizon) to inspect the fidelity of 
 - **Interval:** 15 seconds.
 - Scans `schedule_rules` in SQLite for rules whose `next_run_at <= CURRENT_TIMESTAMP`.
 - Instantiates new Tasks in `READY` state.
-- Automatically calculates the next trigger time using cron syntax or duration offsets.
+- Automatically calculates the next trigger time using cron syntax or duration offsets (seeds daily log retention purge schedule).
 
 ### TaskWorker ([`task_worker.go`](file:///home/wade/src/github/aia/go/internal/worker/task_worker.go))
 - **Interval:** 5 seconds.
 - **Concurrency Limit:** Regulated by a buffered channel semaphore (default: 3 concurrent tasks).
 - Claims `READY` tasks atomically, transitions them to `RUNNING`, and dispatches them to their designated Agent executor.
 - Dispatches execution events to `execution_events` and manages failure retries (`max_retries`).
+
+### LogRetentionPurger ([`worker.go`](file:///home/wade/src/github/aia/go/internal/worker/worker.go))
+- **Role:** Enforces operational log retention policy (`logging.retain_days` in `config.yaml`, AIA-19).
+- **Interval:** Periodic background sweep (default: 1 hour) and scheduled daily maintenance.
+- Purges expired execution logs, audit traces, and events beyond the retention boundary to keep SQLite database size constrained.
+
+### Autonomy AutoWakeWorker ([`worker.go`](file:///home/wade/src/github/aia/go/internal/worker/worker.go))
+- **Role:** Triggers periodic autonomous cycles for registered active projects (AIA-08/09).
+- **Interval:** Configurable interval (e.g. 15 minutes) or event-driven wake.
+- Executes `TriggerAutonomousCycle()` across registered projects with `CYCLE_TRIGGER_AUTO` to observe environment shifts and assess candidate initiatives.
 
 ---
 

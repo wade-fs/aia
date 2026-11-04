@@ -35,8 +35,9 @@ AIA executes a **Dual-Track Evolution Model**:
 │ Phase 6: Safe Self-Modification & Autonomous System Evolution          │
 │                              [COMPLETED]                               │
 ├────────────────────────────────────────────────────────────────────────┤
-│ Phase 7: Universal Brief, Clarification & Complex Problem Planning     │
-│ [COMPLETED IN DATA & SERVICES, INTEGRATION IN PROGRESS] (AIA-21, 22)   │
+│ Phase 7: Universal Brief, Clarification, Complex Problem Planning &   │
+│ Systemic Autonomy Hardening (AIA-06, 13, 14, 19, 21, 22)               │
+│ [DATA, SERVICES & CYCLE INTEGRATION COMPLETED; VERIFICATION ACTIVE]   │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -54,9 +55,9 @@ Progress is evaluated by verifiable, computable autonomous behavior rather than 
 - **M5: Verifiable Self-Correction & Learning Mechanism** ── Discrepancy detection, testable RCA hypotheses, table-driven 3-tier runtime profile (`TIER1_AUTO`, `TIER2_APPROVAL`, `TIER3_BLOCKED`), 4 learning maturity levels (`L0_RECORDED` ～ `L3_GENERALIZED`), 7 epistemic comparison fields, regression rollback, and `INCONCLUSIVE` / `<= 0.45` confidence caps. *(Completed — Phase 4)*
 - **M6: Governed Goal Evolution** ── 3-way goal evolution taxonomy (`PERSISTENCE`, `OPTIMIZATION`, `REVISION`) with Anti-Goalpost-Moving guard preventing unapproved metric weakening on `STRATEGIC` goals. *(Completed — Phase 4)*
 - **M7: Domain Experiments & Longitudinal Validation** ── Longitudinal validation of `L3_GENERALIZED` learning across Investment (NT$100,000 virtual capital + historical PiT replay), Coding, and Writing experiments, plus cross-domain `DelegationRequest`. *(Completed — Phase 5)*
-- **M8: Safe Self-Modification** ── OS-isolated sandbox code modification, automated multi-level test verification, human approval gate, and automatic rollback. *(Completed — Phase 6)*
-- **M9: Universal Intent & Proactive Clarification** ── Dynamic Project Brief YAML generation, schema validation, blocking clarification management, and field change provenance history (AIA-21). *(Completed in Data & Service layers)*
-- **M10: Complex Problem Modeling & Versioned Planning** ── Multi-perspective problem modeling (objectives, facts, assumptions, risks), analysis deduction records, versioned execution plans with approval-gated modifications (AIA-22). *(Completed in Data & Service layers)*
+- **M8: Safe Self-Modification** ── OS-isolated sandbox code modification, multi-tier validation plans (`V1_SYNTAX` ~ `V6_AUTONOMY`), RCA-based failure retries, post-deployment metrics monitoring, human approval gate, and zero-residual rollback (Phase 6, Migrations `014` & `019`). *(Completed)*
+- **M9: Universal Intent & Proactive Clarification** ── Dynamic Project Brief YAML generation, schema validation, immutable field history tracking (`brief_field_history`), blocking clarification management, and Brief Observer autonomous perception (AIA-21, Migrations `016` & `017`). *(Completed in Data, Services & Observers)*
+- **M10: Complex Problem Modeling & Versioned Planning** ── Multi-perspective problem modeling (objectives, facts, assumptions, risks), analysis deduction records, versioned execution plans, autonomous escalation from repeated task failures (AIA-22 §10), and complete 11-step Autonomy Loop integration (AIA-22, Migration `018`). *(Completed in Data, Services & Autonomy Loop)*
 
 ---
 
@@ -107,24 +108,33 @@ Progress is evaluated by verifiable, computable autonomous behavior rather than 
   - **Level A (Domain Scope)**: Domain tools, collectors, scripts, and prompts; autonomous branch creation, sandbox test verification, L2 regression check, and autonomous merge.
   - **Level B (AIA Core Non-Governance Scope)**: Core services, workers, domain models, and autonomy runtime; verified in isolated sandbox, followed by a mandatory **Human Approval Gate** (`WAITING_APPROVAL`); agent self-approval is strictly forbidden and rejected (`ErrAgentSelfApprovalForbidden`).
   - **Level C (Governance, Policy, Security & Migration Scope)**: Core policy (`internal/policy/`), approval rules (`internal/service/approval/`, `internal/domain/governance/`), database schema migrations (`internal/storage/sqlite/migrations/`), environment config, and system databases. Strictly immutable and locked; any agent self-modification attempt fails closed immediately with high-severity audit logging (`ErrGovernanceImmutable`).
-- **Migration `014` (`self_modification_proposals`)**: Persists proposals, diff content, scope level (`LEVEL_A`, `LEVEL_B`, `LEVEL_C`), lifecycle status (`PROPOSED` -> `VERIFYING` -> `VERIFIED` / `PENDING_APPROVAL` -> `MERGED` / `REJECTED`), test logs, target branch, and worktree path.
+- **Migrations `014` & `019` (`self_modification_proposals`)**: Persists proposals, diff content, scope level (`LEVEL_A`, `LEVEL_B`, `LEVEL_C`), lifecycle status (`PROPOSED` -> `VERIFYING` -> `VERIFIED` / `PENDING_APPROVAL` -> `MERGED` / `REJECTED`), multi-tier validation plans (`validation_plan_json`), multi-level test logs (`verification_results_json`), post-deployment monitoring metrics (`post_deploy_metrics_json`), target branch, and worktree path.
 - **Self-Modification Pipeline (`internal/service/selfmod/pipeline.go`)**:
   - `Propose`: Validates, sanitizes, and classifies modification level via `ScopeClassifier`.
-  - `ExecuteSandboxVerification`: Clones isolated branch/worktree, applies patch, executes multi-level validation suite (V1 compile, V2 unit, V3 integration), and captures verification artifacts.
+  - `ExecuteSandboxVerification`: Clones isolated branch/worktree, applies patch, executes multi-level validation suite (V1 compile, V2 unit, V3 integration, V4 benchmark, V5 lint, V6 security), and captures verification artifacts.
   - `SubmitForApproval`: Creates decision & approval record for Level B changes, transitioning to `PENDING_APPROVAL`.
   - `ApplyMerge`: Merges verified changes into target branch (strictly enforcing human ownership for Level B).
+  - **Multi-Level Verification & Retry Loop**: Diagnostic RCA parsing on failure, automatic repair retry loop bounded by `MaxRetries`, and review outcome handling (`REQUEST_CHANGES`, `DEFERRED`, `REJECTED`, `APPROVED`).
   - **Zero-Residual Rollback**: Automatic clean teardown of worktrees, branch pruning, and zero workspace pollution on verification failure.
 - **Autonomous System Evolution Engine (`internal/autonomy/self_evolution_engine.go`)**: Coordinates periodic autonomous inspection, hypothesis generation, modification proposal creation, sandbox verification, and end-to-end evolution cycles.
 
-### Phase 7: Universal Brief, Clarification & Complex Problem Planning *(Data & Services Complete, Autonomy Core Integration Next)*
+### Phase 7: Universal Brief, Clarification, Complex Problem Planning & Systemic Hardening *(Data, Services & Cycle Integration Completed; Behavioral Verification Active)*
 - **Universal Project Brief & Dynamic Clarification (AIA-21)**:
-  - **Migration `016` (`project_briefs`, `brief_field_history`) & `017` (`clarification_requests`)**: Unified schema persistence for project briefs, immutable field version history, and structured clarification questions with blocking flags.
+  - **Migrations `016` (`project_briefs`, `brief_field_history`) & `017` (`clarification_requests`)**: Unified schema persistence for project briefs, immutable field version history, and structured clarification questions with blocking flags.
   - **Domain Brief Service (`internal/service/brief/`)**: Domain template validation, YAML parsing, readiness status checks, and field history tracking.
   - **Clarification Service (`internal/service/clarification/`)**: Management of interactive questions, options serialization, user answer recording, and task unblocking.
+  - **Brief Observer (`internal/autonomy/brief_observer.go`)**: Continuous observation of brief omissions, outdated assumptions, and readiness state.
   - **CLI & REST API**: CLI commands (`aia brief`, `aia clarify`) and HTTP endpoints (`/api/v1/briefs`, `/api/v1/clarifications`).
 - **Complex Problem Analysis & Versioned Planning (AIA-22)**:
   - **Migration `018` (`problems`, `problem_models`, `analysis_records`, `plans`, `plan_changes`)**: Relational problem modeling (objectives, constraints, facts, assumptions, unknowns, risks, success criteria), deduction analysis records, and versioned plan trees.
   - **Problem Analysis Service (`internal/service/problem/`)**: Multi-stage problem decomposition and validation (verified by `tests/integration/problem_stage1_to_5_test.go`).
   - **Versioned Plan Service (`internal/service/plan/`)**: Versioned work item graphs, supersede chains, and plan alteration governance.
+  - **Autonomous Escalation from Repeated Failures (AIA-22 §10)**: Coordinator automatically detects repeated task failures and escalates them into formal problem models and versioned plans.
+  - **Autonomy Core Integration**: Complete wiring of problem modeling, recall, and plan work item materialization into the 11-step Autonomy Loop (`internal/autonomy/cycle/coordinator.go`), Initiative proactive discovery, and context assembly.
   - **CLI & REST API**: CLI commands (`aia problem`, `aia plan`) and HTTP endpoints (`/api/v1/problems`, `/api/v1/plans`).
-  - **Autonomy Core Integration**: Wiring problem modeling and plan generation into the 11-step Autonomy Loop (`internal/autonomy/cycle.go`), Initiative proactive discovery, and Self-Correction workflows.
+- **Systemic Operations, Evaluation & Web Console Hardening**:
+  - **AIA-13 Autonomy Evaluation & Benchmarking**: `internal/autonomy/evaluation/` (evaluator.go, metrics.go) providing general autonomy indicators (Proactive Rate, Override Frequency, Calibration, Recovery Accuracy, Self-Correction Score).
+  - **AIA-19 Operations & Observability**: SQLite Backup & Restore (`BackupService`, CLI `aia backup`), Distributed Tracing (`internal/telemetry/tracing`, CLI `aia trace`), Operational Metrics (`internal/telemetry/metrics`), and background periodic log retention purger (`LogRetentionPurger`).
+  - **AIA-06 Web Console**: 16 dedicated tabs (Overview, Tasks, Pending, Goals, Cycles, Learnings, Experiments, Delegations, Clarifications, Problems, Domains, etc.) and Emergency Stop button with immediate freeze & human resume.
+- **Next Frontier (Multi-Domain End-to-End Behavioral Verification)**:
+  - Validating cross-session continuity and shared problem-solving intelligence across Writing (6 volumes / 540 chapters audit & repair), Coding (repository defect isolation & sandbox test verification), and Investment (closed-loop research, PiT replay, and dual-cohort calibration).

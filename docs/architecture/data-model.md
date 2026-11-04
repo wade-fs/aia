@@ -3,7 +3,7 @@
 **文件代號：** AIA-ARCH-DATA-01  
 **適用架構：** AIA v2.0 系列規範 (以 [AIA-SPEC-AUDIT-01](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md) 為基準)  
 **底層儲存：** SQLite (WAL 模式)  
-**現有代碼基準：** Git baseline `main` (已內建 Migration Version 1 ～ 18)  
+**現有代碼基準：** Git baseline `main` (已內建 Migration Version 1 ～ 19)  
 **文件狀態：** Normative Architectural Baseline  
 **最後更新：** 2026-11-04  
 

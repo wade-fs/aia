@@ -1,5 +1,8 @@
 # AIA Phase 6 准入成熟度評估報告 (Phase 6 Readiness Assessment)
 
+> [!NOTE]
+> **歷史准入評估紀錄**：本文件記錄 2026-11-02 啟動 Phase 6 准入門檻評估的歷史判定（G1–G5 全數通過）。隨後 Phase 6（AIA-14 安全代碼自修、工作區隔離、V1～V6 多層驗證管線與監控）已於代碼庫全量實作並合入 `main`（Migrations `014` & `019`），現行系統整體架構與狀態請參閱 [`docs/development/implementation-status.md`](file:///home/wade/src/github/aia/docs/development/implementation-status.md) 與 [`docs/development/roadmap.md`](file:///home/wade/src/github/aia/docs/development/roadmap.md)。
+
 - **評估日期**：2026-11-02
 - **評估版本**：v1.0 (基於 Phase 1–5b 與通用 Knowledge / Consistency 核心抽象化架構)
 - **目標階段**：Phase 6 — 受治理之安全自我修改 (Governed Safe Self-Modification)

@@ -4,7 +4,7 @@
 **文件名稱：** 複雜問題分析與自主規劃規格  
 **英文名稱：** Complex Problem Analysis & Planning Specification  
 **版本：** v1.0  
-**文件狀態：** Planned Architecture  
+**文件狀態：** 正式規格 (Normative Specification) · 程式碼實作完成 (Implemented in Migration `018` & Autonomy Loop)  
 **適用系統：** AIA (Autonomous Intelligence Architecture)  
 **適用範圍：** All Domains  
 **依賴規格：** AIA-01、AIA-02、AIA-03、AIA-08、AIA-09、AIA-10、AIA-11、AIA-16、AIA-17、AIA-18、AIA-21

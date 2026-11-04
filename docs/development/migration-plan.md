@@ -2,10 +2,10 @@
 
 **文件代號：** AIA-DEV-MIG-01  
 **適用資料庫：** SQLite (WAL 模式)  
-**文件狀態：** Active Baseline (Migrations `001`～`012` Implemented)  
+**文件狀態：** Active Baseline (Migrations `001`～`019` Implemented)  
 **依賴基準：** [docs/architecture/data-model.md](file:///home/wade/src/github/aia/docs/architecture/data-model.md)  
-**現有代碼基準：** Git commit `7597902` 凍結資產 + Phase 1～5A 已落地遷移 (`007`～`012`)  
-**最後更新：** 2026-11-01  
+**現有代碼基準：** Git baseline `main` (已落地全量遷移 `001`～`019`)  
+**最後更新：** 2026-11-04  
 
 ---
 
@@ -69,11 +69,35 @@
    │      • 建立 outcome_evaluations (預期 vs 實際結果落差量測)
    │      • 建立 root_cause_analyses (外鍵關聯 outcome_evaluations)
    │      • 建立 correction_actions (徹底分離 correction_type 與 C0～C5 authorization_level)
+   │      • 建立 learning_records (7 大科學對照欄位、L0~L3 成熟度、負向約束)
    ▼
  Phase 5: 012_experiments_and_collaboration.sql (長週期實驗與跨領域協作層)
-          • 建立 experiments (嚴格遵循 AIA-15 完整 11 個生命週期狀態)、experiment_goal_links
-          • 擴充 tasks 表新增 experiment_id 外鍵欄位
-          • 建立 delegation_requests (跨 Agent 委派契約與驗收狀態)
+   │      • 建立 experiments (AIA-15 11 狀態機)、experiment_goal_links、experiment_generations (G1 凍結保護)
+   │      • 建立 experiment_comparisons、delegation_requests (跨 Agent 委派契約)
+   ▼
+ Phase 5B: 013_project_domain_type.sql (多領域專案路由層)
+   │      • 擴充 projects 表新增 domain_type (GENERAL/INVESTMENT/CODING/WRITING)
+   ▼
+ Phase 6: 014_self_modification_and_evolution.sql (受控代碼自修與系統演化層 - AIA-14)
+   │      • 建立 self_modification_proposals (三級隔離 Scope A/B/C、Git Worktree 沙盒、審批與回滾)
+   ▼
+ Phase 6+: 015_writing_brief_and_clarification.sql (創作領域 Brief 與釐清層 - AIA-20)
+   │      • 建立 writing_briefs 與 writing_clarifications
+   ▼
+ Phase 7: 016_generic_brief_and_history.sql (通用專案綱要與不可變欄位歷史層 - AIA-21)
+   │      • 建立 project_briefs (跨領域需求綱要、YAML Payload、Readiness Stage)
+   │      • 建立 brief_field_history (不可變欄位修訂歷史、版本、來源、任務/釐清 ID 溯源)
+   ▼
+ Phase 7: 017_generic_clarification_management.sql (通用人機互動釐清管理層 - AIA-21)
+   │      • 建立 clarification_requests (阻斷式人機 Q&A、選項序列化、答案回填與 Brief 欄位綁定)
+   ▼
+ Phase 7: 018_complex_problem_and_planning.sql (複雜問題建模、分析紀錄與版本化計畫層 - AIA-22)
+   │      • 建立 problems, problem_models (多版本形式化問題模型、目標、事實、假說、未知、風險)
+   │      • 建立 analysis_records (多階段診斷推理紀錄、因果圖節點與證據關聯)
+   │      • 建立 plans, plan_changes (版本化工作項 DAG、變更提案、影響分析與工單具體化)
+   ▼
+ Phase 6/7 加固: 019_self_modification_validation_and_monitoring.sql (自修多層驗證與監控擴充 - AIA-14)
+          • 擴充 self_modification_proposals 新增 validation_plan_json, verification_results_json, post_deploy_metrics_json
 ```
 
 ---
@@ -177,3 +201,62 @@
 - **擴充現有 `tasks` 表**：
   - `ALTER TABLE tasks ADD COLUMN experiment_id TEXT REFERENCES experiments(id);`
 - 建立 `delegation_requests`：跨 Agent 委派契約（`requester_agent_id`, `target_agent_id`, `source_project_id`, `goal_id`, `task_spec`, `acceptance_gate`, `status`）。
+
+---
+
+### Phase 5B 交付：多領域專案路由 (Migration 013) [IMPLEMENTED]
+
+#### **`013_project_domain_type.sql`**
+*依賴：擴充 `008` 的 `projects` 表。*
+- **擴充 `projects` 表**：
+  - `ALTER TABLE projects ADD COLUMN domain_type TEXT NOT NULL DEFAULT 'general';`
+  - `CREATE INDEX IF NOT EXISTS idx_projects_domain_type ON projects(domain_type);`
+  - 支援資料庫驅動之 Observer 與 Agent 路由（`writing`、`coding`、`investment`、`general`），取代啟動時硬編碼路徑註冊。
+
+---
+
+### Phase 6 交付：受控安全代碼自修與系統演化 (Migration 014 & 019) [IMPLEMENTED]
+
+#### **`014_self_modification_and_evolution.sql`**
+*依賴：依賴 `009` 的 `approvals`。*
+- 建立 `self_modification_proposals`：
+  - 欄位：`id`, `title`, `description`, `rationale`, `target_files_json`, `patches_json`, `scope_level` (`LEVEL_A_DOMAIN`, `LEVEL_B_CORE`, `LEVEL_C_GOVERNANCE`), `requires_approval`, `approval_id REFERENCES approvals(id)`, `status` (`DRAFT`, `IN_SANDBOX`, `PENDING_APPROVAL`, `APPROVED`, `VERIFIED`, `MERGED`, `ROLLED_BACK`, `REJECTED`, `REQUEST_CHANGES`, `DEFERRED`), `branch_name`, `pre_commit_sha`, `post_commit_sha`, `verification_output`, `rca_log`, `created_at`, `completed_at`。
+  - 索引：`idx_selfmod_status`, `idx_selfmod_scope`。
+
+#### **`019_self_modification_validation_and_monitoring.sql`**
+*依賴：擴充 `014` 的 `self_modification_proposals` 表。*
+- **擴充 `self_modification_proposals` 表**：
+  - `ALTER TABLE self_modification_proposals ADD COLUMN validation_plan_json TEXT NOT NULL DEFAULT '[]';`
+  - `ALTER TABLE self_modification_proposals ADD COLUMN verification_results_json TEXT NOT NULL DEFAULT '[]';`
+  - `ALTER TABLE self_modification_proposals ADD COLUMN post_deploy_metrics_json TEXT NOT NULL DEFAULT '{}';`
+  - 支援 AIA-14 §4.6、§4.10 與 §7.1 所要求之 V1～V6 多層級驗證管線、多輪測試執行結果，以及部署後自主監控度量指標（`error_rate`, `crash_rate`, `autonomy_metric`）。
+
+---
+
+### Phase 6+ 交付：寫作領域創意綱要與人機釐清 (Migration 015) [IMPLEMENTED]
+
+#### **`015_writing_brief_and_clarification.sql`**
+*依賴：依賴 `projects`。*
+- 建立 `writing_briefs`：專屬創作大綱（`project_id REFERENCES projects(id)`, `title`, `raw_intent`, `genre`, `era`, `theme_and_philosophy_json`, `scale_json`, `core_protagonists_json`, `worldview_settings_json`, `writing_rules_json`, `status`, `pending_questions`）。
+- 建立 `writing_clarifications`：創作領域人機互動釐清（`project_id`, `brief_id`, `category`, `question`, `rationale`, `options_json`, `user_answer`, `status`）。
+
+---
+
+### Phase 7 交付：通用專案綱要、動態釐清與複雜問題規劃 (Migrations 016, 017, 018) [IMPLEMENTED]
+
+#### **`016_generic_brief_and_history.sql`**
+*依賴：依賴 `projects`。*
+- 建立 `project_briefs` (AIA-21 §4)：跨領域通用需求綱要（`project_id UNIQUE`, `domain`, `brief_version`, `readiness_status`, `raw_intent`, `brief_yaml`）。
+- 建立 `brief_field_history` (AIA-21 §12)：不可變欄位級修訂歷史（`brief_id`, `project_id`, `field_key`, `version`, `old_value_json`, `new_value_json`, `old_status`, `new_status`, `source`, `rationale`, `related_task_id`, `related_clarification_id`）。
+
+#### **`017_generic_clarification_management.sql`**
+*依賴：依賴 `projects` 與 `tasks`。*
+- 建立 `clarification_requests` (AIA-21 §5)：跨領域通用阻斷式人機互動提問管理（`project_id`, `task_id`, `field_key`, `question`, `options_json`, `reason`, `impact`, `priority`, `blocking`, `status`, `answer`, `answered_at`, `expires_at`）。
+
+#### **`018_complex_problem_and_planning.sql`**
+*依賴：依賴 `projects` 與 `goals`。*
+- 建立 `problems` (AIA-22 §6)：形式化開放問題本體（`project_id`, `parent_id`, `goal_id`, `title`, `description`, `objective`, `scope`, `status`, `priority`, `current_model_version`, `current_plan_version`）。
+- 建立 `problem_models` (AIA-22 §6)：多版本問題結構化模型（`problem_id`, `version`, `objectives_json`, `constraints_json`, `known_facts_json`, `assumptions_json`, `unknowns_json`, `dependencies_json`, `risks_json`, `success_criteria_json`, `UNIQUE(problem_id, version)`）。
+- 建立 `analysis_records` (AIA-22 §6)：多階段診斷與因果推演紀錄（`problem_id`, `model_version`, `analysis_type`, `input_refs_json`, `findings_json`, `conclusions_json`, `open_questions_json`, `agent_id`, `execution_id`）。
+- 建立 `plans` (AIA-22 §12)：版本化執行計畫（`problem_id`, `version`, `objective`, `strategy`, `status`, `work_items_json`, `dependencies_json`, `acceptance_criteria_json`, `supersedes_plan_id`, `UNIQUE(problem_id, version)`）。
+- 建立 `plan_changes` (AIA-22 §12)：計畫變更提案與衝擊分析（`plan_id`, `from_version`, `to_version`, `reason`, `evidence_refs_json`, `affected_work_items_json`, `cost_risk_impact`, `requires_human_approval`, `approved_by`）。

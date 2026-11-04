@@ -3,7 +3,7 @@
 **文件代號：** AIA-21  
 **文件名稱：** Project Brief & Clarification Management Specification  
 **系統名稱：** AIA — Autonomous Intelligence Architecture  
-**文件狀態：** Planned Architecture  
+**文件狀態：** 正式規格 (Normative Specification) · 程式碼實作完成 (Implemented in Migrations `016` & `017`)  
 **版本：** v1.0  
 **適用範圍：** AIA Core / Project Management / All Domain Agents  
 **依賴規格：** AIA-01、AIA-02、AIA-03、AIA-08、AIA-09、AIA-10、AIA-16、AIA-17、AIA-18、AIA-20  

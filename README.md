@@ -15,7 +15,7 @@ AIA 是一個以研究與實證 AI Agent 長期自主行為為目標的本機優
 
 ## 1. Current Status
 
-目前平台已完成 **Phase 0 ～ Phase 5（含 Phase 3.5 安全加固、Phase 4 可驗證學習、Phase 5A 雙世代投資實驗與 Phase 5B 多領域 MVA & 跨領域委派）**，資料庫推進至 **Migration `012`**；下一階段為 **Phase 6（受控沙盒代碼自修與系統演化）**。
+目前平台已完成 **Phase 0 ～ Phase 6（含 Phase 3.5 安全加固、Phase 4 可驗證學習、Phase 5A 雙世代投資實驗與 Phase 5B 多領域 MVA & 跨領域委派、Phase 6 受控沙盒代碼自修與系統演化，以及 AIA-21 通用專案綱要/人機互動釐清與 AIA-22 複雜問題分析與自主規劃引擎）**，資料庫推進至 **Migration `019`**；目前正推進 **Phase 7 多領域端到端自主行為與問題解決整合驗證**。
 
 | Domain Module | Status | Description |
 |---|---|---|
@@ -27,9 +27,9 @@ AIA 是一個以研究與實證 AI Agent 長期自主行為為目標的本機優
 
 | Component | Status | Description |
 |---|---|---|
-| **Go Runtime & Workers** | **IMPLEMENTED** | 常駐 `ScheduleWorker`（15s）與 `TaskWorker`（5s，3 並行槽位）及啟動恢復（`Recovery`） |
-| **SQLite Persistence** | **IMPLEMENTED** | WAL 模式、Migrations `001`～`012`、Repository 層與防竄改 Triggers |
-| **Continuity & Provenance** | **IMPLEMENTED (Phase 1)** | SHA-256 Hash-Chained `event_history`、5 維度 `sources`/`evidence`/`claims`、`ContextReconstructor` |
+| **Go Runtime & Workers** | **IMPLEMENTED** | 常駐 `ScheduleWorker`（15s）、`TaskWorker`（5s，3 並行槽位）、`LogRetentionPurger` 週期性日誌清理、啟動恢復（`Recovery`）與 Autonomy Auto-Wake 機制 |
+| **SQLite Persistence** | **IMPLEMENTED** | WAL 模式、Migrations `001`～`019`、Repository 層與防竄改 Triggers |
+| **Continuity & Provenance** | **IMPLEMENTED (Phase 1)** | SHA-256 Hash-Chained `event_history`、5 維度 `sources`/`evidence`/`claims`、`ContextReconstructor` 跨 Session 還原 |
 | **Governance & Emergency Stop** | **IMPLEMENTED (Phase 2)** | Policy / Approval / Permission 三層分離、`< 1s` 受控緊急停止（`EMERGENCY_STOP`）與人類強制復歸 |
 | **Autonomy Core (11-Step Loop)** | **IMPLEMENTED (Phase 3)** | `Observe` ➔ `Recall` ➔ `Assess` ➔ `Discover` ➔ `Deliberate` ➔ `Decide` (`ACT`/`DEFER`/`MONITOR`/`ASK_HUMAN`/`NO_ACTION`) ➔ `Governance Check` ➔ `Execute` ➔ `Verify` ➔ `Learn` ➔ `Reassess` |
 | **Budget Gate & OS Sandbox** | **IMPLEMENTED (Phase 3.5)** | 每日 Token / Cycle 硬閘門、`service.env` 機密剝除、`bwrap`/`systemd-run` 唯讀掛載隔離、拒絕盲信 Exit Code 0 |
@@ -38,9 +38,14 @@ AIA 是一個以研究與實證 AI Agent 長期自主行為為目標的本機優
 | **Goal Evolution Engine** | **IMPLEMENTED (Phase 4)** | `PERSISTENCE` / `OPTIMIZATION` / `REVISION` 三態分流與 `STRATEGIC` 目標防移動球門守衛 |
 | **Generational Experiment Engine** | **IMPLEMENTED (Phase 5A)** | `experiments` 11 狀態機、凍結 `G1` 活體對照組、`G2 -> G2.1 -> G2.2` 譜系演化與雙重差分（DiD）驗證橋接 |
 | **Cross-Domain Delegation** | **IMPLEMENTED (Phase 5B)** | `DelegationService` 跨領域合約狀態機（`PENDING` ➔ `IN_PROGRESS` ➔ `DELIVERED` ➔ `VERIFIED`）、自動工單派發、Web Console API (`/api/v1/delegations`) 與 CLI (`aia delegation`) |
-| **Safe Code Self-Modification** | **PLANNED (Phase 6)** | 隔離工作區代碼自修、多層測試流水線、Diff Review 與異常自動回滾 |
+| **Safe Code Self-Modification** | **IMPLEMENTED (Phase 6)** | `ScopeClassifier` 三級邊界（Level A 領域、Level B 核心受審批防自批、Level C 治理不可篡改）、Git Worktree 隔離、V1～V6 多層驗證管線、失敗重試、審批結果分流與部署後指標監控（Migration `014` & `019`） |
+| **Project Brief & Clarification** | **IMPLEMENTED (AIA-21)** | 通用 Project Brief YAML Schema、不可變欄位歷史（`brief_field_history`）、人機互動阻斷式釐清工作流（`clarification_requests`）、Brief 觀察者自主感知（Migration `016` & `017`） |
+| **Complex Problem Analysis & Planning** | **IMPLEMENTED (AIA-22)** | 開放式複雜問題建模（`problems`, `problem_models`, `analysis_records`）、版本化執行計畫（`plans`, `plan_changes`）、反覆任務失敗自主升級（AIA-22 §10）與 11 步 Autonomy Loop 完整整合（Migration `018`） |
+| **Deployment Operations & Observability** | **IMPLEMENTED (AIA-19)** | SQLite 線上備份與校驗還原（`BackupService` / CLI `aia backup`）、分散式追蹤（`Tracing` / CLI `aia trace`）、維運指標（`Metrics`）、日誌保留政策與週期性清理器（`LogRetentionPurger`） |
+| **Autonomy Evaluation & Benchmarking** | **IMPLEMENTED (AIA-13)** | 全系統通用自主性度量引擎（`internal/autonomy/evaluation/`）：主動率（M3）、介入率/覆寫頻率（M4）、決策校準度與 EV、連續性復原準確率（M1）、自我修正有效性與回歸率（M5） |
+| **Embedded Web UI & Agent Interface** | **IMPLEMENTED (AIA-06)** | Port 7777 本機 Web Console，一鍵式 Emergency Stop 停機與安全復歸、16 個專屬分頁（Overview、Tasks、Pending、Goals、Cycles、Learnings、Experiments、Delegations、Clarifications、Problems 等） |
 
-> **認識論聲明**：Phase 4 完成代表「可驗證的自我修正與學習基礎機制」已落地並通過合成對抗情境（Scenarios A～E）驗證，**不代表已宣稱完成通用長期自主學習**；跨週期泛化能力（`L3`）須在 Phase 5 長期實驗中持續檢驗。
+> **認識論聲明**：各階段完成代表核心架構、服務與自動化檢驗標準已落地，**不代表已宣稱完成通用黑盒自主智慧**；實際生產應用仍須透過真實專案場景持續檢驗長週期自主行為。
 
 ### 1.2 Investment Data Status
 
@@ -55,19 +60,24 @@ AIA 採用五層職責分離架構（詳見 [docs/development/roadmap.md](file:/
 ```text
 AIA
 ├── Autonomy Core (go/internal/autonomy/)
-│   ├── Observation & L1~L5 Associative Recall
+│   ├── Observation (Domain & Brief Observers) & L1~L5 Associative Recall
 │   ├── Candidate Initiative & Expected-Value Deliberation
 │   ├── 11-Step Cycle Coordinator & Point-in-Time (AsOf) Clock
-│   └── Verifiable Self-Correction & Learning Engine (L0~L3)
+│   ├── Verifiable Self-Correction & Epistemic Learning Engine (L0~L3)
+│   ├── Autonomous Evaluation & Benchmarking (AIA-13)
+│   └── Self-Evolution Engine (Phase 6 Safe Code Self-Modification)
 ├── Runtime & Governance (go/internal/app, worker, policy, service)
-│   ├── ScheduleWorker (15s) / TaskWorker (5s) / Recovery
-│   ├── Policy Engine, Budget Gate, Scope-Bound Approvals & Emergency Stop
-│   ├── Continuity Reconstructor & Provenance Knowledge Graph
-│   └── Goal Hierarchy & Anti-Goalpost-Moving Evolution
+│   ├── ScheduleWorker (15s) / TaskWorker (5s) / AutoWakeWorker / LogRetentionPurger / Recovery
+│   ├── Policy Engine, Budget Gate, Scope-Bound Approvals & Emergency Stop (<1s)
+│   ├── Continuity Reconstructor & Provenance Knowledge Graph (Sources, Evidence, Claims)
+│   ├── Goal Hierarchy & Anti-Goalpost-Moving Evolution
+│   ├── Project Brief & Dynamic Clarification Service (AIA-21)
+│   ├── Complex Problem Diagnostic & Versioned Planning Engine (AIA-22)
+│   └── Backup & Restore Service, Distributed Tracing & Metrics (AIA-19)
 ├── Domain Modules
-│   ├── Investment (Pilot Ready)
-│   ├── Coding (Phase 5)
-│   └── Writing (Phase 5)
+│   ├── Investment (Pilot Ready, NT$100,000 Dual-Cohort Ledgers)
+│   ├── Coding (CodeHealthObserver, PilotExecutor, Sandboxed Worktree)
+│   └── Writing (ManuscriptConsistencyObserver, Dual-Loop Creative Engine)
 └── Execution Harness (go/internal/provider/antigravity/)
     └── Antigravity CLI (agy) + Env Secret Scrubbing + OS Mount Namespace Sandbox
 ```
@@ -165,11 +175,28 @@ aia investment sync 2330
 aia investment proposals
 aia investment predictions
 aia investment evaluate
+
+# 專案綱要與釐清管理 (AIA-21)
+aia project brief show <project-id>
+aia clarification list --project <project-id>
+aia clarification answer <clarification-id> --answer "Selected option"
+
+# 複雜問題診斷與版本化計畫 (AIA-22)
+aia problem list --project <project-id>
+aia problem analyze <problem-id>
+aia plan list --problem <problem-id>
+
+# 維運、備份與分散式追蹤 (AIA-19)
+aia backup create
+aia backup list
+aia backup verify <backup-id>
+aia trace list
+aia worker purge-logs
 ```
 
 ---
 
-## 6. Seven-Phase Development Roadmap
+## 6. Development Roadmap & Implementation Baseline
 
 詳見 [docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md) 與 [docs/development/implementation-status.md](file:///home/wade/src/github/aia/docs/development/implementation-status.md)：
 
@@ -181,7 +208,8 @@ aia investment evaluate
 | **Phase 3 & 3.5** | 11-Step Autonomy Core, Initiative, Budget Gate, OS Sandbox & PiT Replay (`010`) | **COMPLETED** |
 | **Phase 4** | Verifiable Self-Correction, Learning Mechanism (`L0`–`L3`) & Governed Goal Evolution (`011`) | **COMPLETED** |
 | **Phase 5** | Longitudinal Domain Experiments (`5A` Investment `G1` vs `G2`/`G2.x`; `5B` Coding, Writing & Delegation) (`012`–`013`) | **COMPLETED** |
-| **Phase 6** | Isolated Sandbox Safe Code Self-Modification & Autonomous System Evolution (`014`) | **COMPLETED** |
+| **Phase 6** | Isolated Sandbox Safe Code Self-Modification, Multi-Tier Verification & System Evolution (`014`, `019`) | **COMPLETED** |
+| **Phase 7** | Universal Brief, Clarification, Complex Problem Planning & Systemic Autonomy Integration (`015`–`018`) | **IMPLEMENTED (DATA, SERVICES & CYCLE INTEGRATION)** |
 
 ---
 
@@ -197,4 +225,4 @@ aia investment evaluate
 
 - **總體藍圖與記憶架構**：[docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md) · [docs/memory.md](file:///home/wade/src/github/aia/docs/memory.md)
 - **實作現況與資料模型**：[implementation-status.md](file:///home/wade/src/github/aia/docs/development/implementation-status.md) · [data-model.md](file:///home/wade/src/github/aia/docs/architecture/data-model.md) · [security-model.md](file:///home/wade/src/github/aia/docs/architecture/security-model.md)
-- **正式規格書（v2.0）**：[docs/specifications/](file:///home/wade/src/github/aia/docs/specifications)（`AIA-00` 至 `AIA-19`）
+- **正式規格書（v2.0）**：[docs/specifications/](file:///home/wade/src/github/aia/docs/specifications)（`AIA-00` 至 `AIA-22`）

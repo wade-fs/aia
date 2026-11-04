@@ -43,11 +43,41 @@ func ComputeEventHash(prevHash, eventID, eventType, aggregateID string, aggregat
 type CycleTriggerType string
 
 const (
-	TriggerScheduled     CycleTriggerType = "SCHEDULED"
-	TriggerEventTrigger  CycleTriggerType = "EVENT_TRIGGERED"
-	TriggerManual        CycleTriggerType = "MANUAL"
-	TriggerDriftDetected CycleTriggerType = "DRIFT_DETECTED"
+	TriggerScheduled           CycleTriggerType = "SCHEDULED"
+	TriggerEventTrigger        CycleTriggerType = "EVENT_TRIGGERED"
+	TriggerManual              CycleTriggerType = "MANUAL"
+	TriggerDriftDetected       CycleTriggerType = "DRIFT_DETECTED"
+	TriggerProjectUpdated      CycleTriggerType = "PROJECT_UPDATED"
+	TriggerTaskCompleted       CycleTriggerType = "TASK_COMPLETED"
+	TriggerEvaluationCompleted CycleTriggerType = "EVALUATION_COMPLETED"
+	TriggerCapabilityChanged   CycleTriggerType = "AGENT_CAPABILITY_CHANGED"
+	TriggerSystemHealth        CycleTriggerType = "SYSTEM_HEALTH_EVENT"
 )
+
+// AutonomyStatus represents the runtime lifecycle of the autonomous core (AIA-08 §6).
+type AutonomyStatus string
+
+const (
+	AutonomyStatusIdle               AutonomyStatus = "IDLE"
+	AutonomyStatusObserving          AutonomyStatus = "OBSERVING"
+	AutonomyStatusDeliberating       AutonomyStatus = "DELIBERATING"
+	AutonomyStatusActing             AutonomyStatus = "ACTING"
+	AutonomyStatusWaitingForApproval AutonomyStatus = "WAITING_FOR_APPROVAL"
+	AutonomyStatusPaused             AutonomyStatus = "PAUSED"
+	AutonomyStatusRecovering         AutonomyStatus = "RECOVERING"
+	AutonomyStatusError              AutonomyStatus = "ERROR"
+	AutonomyStatusShutdown           AutonomyStatus = "SHUTDOWN"
+)
+
+// AutonomyState captures the continuous runtime state of the autonomous core across cycles (AIA-08 §6).
+type AutonomyState struct {
+	SessionID        string         `json:"session_id"`
+	Status           AutonomyStatus `json:"status"`
+	CurrentCycleID   *string        `json:"current_cycle_id,omitempty"`
+	LastCycleID      *string        `json:"last_cycle_id,omitempty"`
+	NextEvaluationAt *time.Time     `json:"next_evaluation_at,omitempty"`
+	UpdatedAt        time.Time      `json:"updated_at"`
+}
 
 type CycleStatus string
 

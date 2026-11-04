@@ -32,12 +32,15 @@ const (
 type CorrectionType string
 
 const (
-	CorrectionFact     CorrectionType = "FACT"
-	CorrectionJudgment CorrectionType = "JUDGMENT"
-	CorrectionStrategy CorrectionType = "STRATEGY"
-	CorrectionPrompt   CorrectionType = "PROMPT"
-	CorrectionWorkflow CorrectionType = "WORKFLOW"
-	CorrectionCode     CorrectionType = "CODE"
+	CorrectionFact             CorrectionType = "FACT"
+	CorrectionJudgment         CorrectionType = "JUDGMENT"
+	CorrectionStrategy         CorrectionType = "STRATEGY"
+	CorrectionPrompt           CorrectionType = "PROMPT"
+	CorrectionWorkflow         CorrectionType = "WORKFLOW"
+	CorrectionCode             CorrectionType = "CODE"
+	CorrectionEvaluationUpdate CorrectionType = "EVALUATION_UPDATE" // AIA-11 §6.1
+	CorrectionMemory           CorrectionType = "MEMORY_CORRECTION"  // AIA-11 §6.1
+	CorrectionGoalProposal     CorrectionType = "GOAL_PROPOSAL"      // AIA-11 §6.1
 )
 
 type AuthorizationLevel string
@@ -88,13 +91,13 @@ func ResolveCorrectionProfile(scope ScopeLevel, cType CorrectionType) (TierProfi
 	}
 
 	switch cType {
-	case CorrectionFact:
+	case CorrectionFact, CorrectionMemory:
 		return Tier1Auto, AuthC0, ValV2
-	case CorrectionJudgment:
+	case CorrectionJudgment, CorrectionEvaluationUpdate:
 		return Tier1Auto, AuthC1, ValV2
 	case CorrectionPrompt:
 		return Tier2Approval, AuthC2, ValV3
-	case CorrectionStrategy, CorrectionWorkflow:
+	case CorrectionStrategy, CorrectionWorkflow, CorrectionGoalProposal:
 		return Tier2Approval, AuthC3, ValV5
 	default:
 		return Tier2Approval, AuthC2, ValV3
@@ -112,12 +115,14 @@ const (
 type RootCauseCategory string
 
 const (
-	RCIncorrectFact      RootCauseCategory = "INCORRECT_FACT"
-	RCBiasedJudgment     RootCauseCategory = "BIASED_JUDGMENT"
-	RCFlawedStrategy     RootCauseCategory = "FLAWED_STRATEGY"
-	RCAmbiguousPrompt    RootCauseCategory = "AMBIGUOUS_PROMPT"
-	RCWorkflowDefect     RootCauseCategory = "WORKFLOW_DEFECT"
-	RCExternalUnexpected RootCauseCategory = "EXTERNAL_UNEXPECTED"
+	RCIncorrectFact        RootCauseCategory = "INCORRECT_FACT"
+	RCBiasedJudgment       RootCauseCategory = "BIASED_JUDGMENT"
+	RCFlawedStrategy       RootCauseCategory = "FLAWED_STRATEGY"
+	RCAmbiguousPrompt      RootCauseCategory = "AMBIGUOUS_PROMPT"
+	RCWorkflowDefect       RootCauseCategory = "WORKFLOW_DEFECT"
+	RCExternalUnexpected   RootCauseCategory = "EXTERNAL_UNEXPECTED"
+	RCEvaluationError      RootCauseCategory = "EVALUATION_ERROR"      // AIA-11 §4
+	RCGoalAssumptionError  RootCauseCategory = "GOAL_ASSUMPTION_ERROR" // AIA-11 §4
 )
 
 type RCAValidityStatus string
@@ -141,14 +146,25 @@ const (
 type VerificationStatus string
 
 const (
-	VerifPending     VerificationStatus = "PENDING"
-	VerifApplied     VerificationStatus = "APPLIED"
-	VerifEffective   VerificationStatus = "VERIFIED_EFFECTIVE"
-	VerifIneffective VerificationStatus = "VERIFIED_INEFFECTIVE"
+	VerifPending      VerificationStatus = "PENDING"
+	VerifApplied      VerificationStatus = "APPLIED"
+	VerifEffective    VerificationStatus = "VERIFIED_EFFECTIVE"
+	VerifIneffective  VerificationStatus = "VERIFIED_INEFFECTIVE"
 	VerifInconclusive VerificationStatus = "INCONCLUSIVE"
-	VerifRegressed   VerificationStatus = "REGRESSED"
-	VerifRolledBack  VerificationStatus = "ROLLED_BACK"
-	VerifBlocked     VerificationStatus = "BLOCKED"
+	VerifPartial      VerificationStatus = "PARTIAL" // AIA-11 §10
+	VerifRegressed    VerificationStatus = "REGRESSED"
+	VerifRolledBack   VerificationStatus = "ROLLED_BACK"
+	VerifBlocked      VerificationStatus = "BLOCKED"
+)
+
+// LearningType distinguishes the epistemic category of the insight (AIA-11 §10.2).
+type LearningType string
+
+const (
+	LearnTypeFact         LearningType = "FACT"
+	LearnTypePattern      LearningType = "PATTERN"
+	LearnTypeHeuristic    LearningType = "HEURISTIC"
+	LearnTypeErrorPattern LearningType = "ERROR_PATTERN"
 )
 
 type LearningLevel string
@@ -245,35 +261,43 @@ type CorrectionAction struct {
 // LearningRecord captures the 7 mandatory epistemic comparison fields (AIA-11 §21.1):
 // 1. Baseline, 2. Hypothesis, 3. Intervention, 4. Verification, 5. Regression, 6. Follow-up, 7. Confidence.
 type LearningRecord struct {
-	ID                      string               `json:"id"`
-	ProjectID               *string              `json:"project_id,omitempty"`
-	Domain                  string               `json:"domain"`
-	SourceCycleID           *string              `json:"source_cycle_id,omitempty"`
-	OutcomeEvaluationID     string               `json:"outcome_evaluation_id"`
-	RCAID                   *string              `json:"rca_id,omitempty"`
-	CorrectionActionID      *string              `json:"correction_action_id,omitempty"`
-	Title                   string               `json:"title"`
-	LearningLevel           LearningLevel        `json:"learning_level"`
-	EffectivenessVerdict    EffectivenessVerdict `json:"effectiveness_verdict"`
-	ComparisonMethod        ComparisonMethod     `json:"comparison_method"`
-	BaselineJSON            string               `json:"baseline_json"`
-	HypothesisJSON          string               `json:"hypothesis_json"`
-	InterventionJSON        string               `json:"intervention_json"`
-	VerificationJSON        string               `json:"verification_json"`
-	RegressionJSON          string               `json:"regression_json"`
-	FollowupJSON            string               `json:"followup_json"`
-	EpistemicConfidence     float64              `json:"epistemic_confidence"`
-	GeneralizedCycleIDsJSON string               `json:"generalized_cycle_ids_json"`
-	CreatedAt               time.Time            `json:"created_at"`
-	UpdatedAt               time.Time            `json:"updated_at"`
+	ID                         string               `json:"id"`
+	ProjectID                  *string              `json:"project_id,omitempty"`
+	Domain                     string               `json:"domain"`
+	SourceCycleID              *string              `json:"source_cycle_id,omitempty"`
+	OutcomeEvaluationID        string               `json:"outcome_evaluation_id"`
+	RCAID                      *string              `json:"rca_id,omitempty"`
+	CorrectionActionID         *string              `json:"correction_action_id,omitempty"`
+	Title                      string               `json:"title"`
+	LearningLevel              LearningLevel        `json:"learning_level"`
+	LearningType               LearningType         `json:"learning_type,omitempty"` // AIA-11 §10.2: FACT, PATTERN, HEURISTIC, ERROR_PATTERN
+	EffectivenessVerdict       EffectivenessVerdict `json:"effectiveness_verdict"`
+	ComparisonMethod           ComparisonMethod     `json:"comparison_method"`
+	BaselineJSON               string               `json:"baseline_json"`
+	HypothesisJSON             string               `json:"hypothesis_json"`
+	InterventionJSON           string               `json:"intervention_json"`
+	VerificationJSON           string               `json:"verification_json"`
+	RegressionJSON             string               `json:"regression_json"`
+	FollowupJSON               string               `json:"followup_json"`
+	ApplicabilityConditionsJSON string              `json:"applicability_conditions_json,omitempty"` // AIA-11 §10.2
+	RolloutMode                string               `json:"rollout_mode,omitempty"`                // AIA-11 §8.3: DIRECT, CANARY
+	VerificationDelayCycles    int                  `json:"verification_delay_cycles,omitempty"`   // AIA-11 §9.3
+	EpistemicConfidence        float64              `json:"epistemic_confidence"`
+	GeneralizedCycleIDsJSON    string               `json:"generalized_cycle_ids_json"`
+	CreatedAt                  time.Time            `json:"created_at"`
+	UpdatedAt                  time.Time            `json:"updated_at"`
 }
 
 type GoalEvolutionMode string
 
 const (
-	EvolutionPersistence  GoalEvolutionMode = "PERSISTENCE"
-	EvolutionOptimization GoalEvolutionMode = "OPTIMIZATION"
-	EvolutionRevision     GoalEvolutionMode = "REVISION"
+	EvolutionPersistence   GoalEvolutionMode = "PERSISTENCE"
+	EvolutionOptimization  GoalEvolutionMode = "OPTIMIZATION"
+	EvolutionRevision      GoalEvolutionMode = "REVISION"
+	EvolutionDecomposition GoalEvolutionMode = "DECOMPOSITION" // AIA-09 §17.2
+	EvolutionMerge         GoalEvolutionMode = "MERGE"         // AIA-09 §17.2
+	EvolutionRetirement    GoalEvolutionMode = "RETIREMENT"    // AIA-09 §17.2
+	EvolutionReplacement   GoalEvolutionMode = "REPLACEMENT"   // AIA-09 §17.2
 )
 
 type GoalEvolutionStatus string
@@ -298,6 +322,11 @@ type GoalEvolutionProposal struct {
 	ProposedTargetMetricJSON string              `json:"proposed_target_metric_json"`
 	InvalidatedClaimIDsJSON  string              `json:"invalidated_claim_ids_json"`
 	ResourceConstraintNote   string              `json:"resource_constraint_note"`
+	ExpectedOutcome          string              `json:"expected_outcome,omitempty"` // AIA-09 §17.1
+	RiskAssessment           string              `json:"risk_assessment,omitempty"`  // AIA-09 §17.1
+	ApprovedBy               string              `json:"approved_by,omitempty"`      // AIA-09 §17.1
+	EffectiveAt              *time.Time          `json:"effective_at,omitempty"`     // AIA-09 §17.1
+	ReviewDate               *time.Time          `json:"review_date,omitempty"`      // AIA-09 §17.1
 	Status                   GoalEvolutionStatus `json:"status"`
 	ApprovalID               *string             `json:"approval_id,omitempty"`
 	ResultingRevisionID      *string             `json:"resulting_revision_id,omitempty"`

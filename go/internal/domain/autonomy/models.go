@@ -66,7 +66,7 @@ type CandidateInitiative struct {
 	UpdatedAt           time.Time           `json:"updated_at"`
 }
 
-// DeliberationOption represents a single evaluated alternative in the deliberation matrix.
+// DeliberationOption represents a single evaluated alternative in the deliberation matrix (AIA-08 §4, AIA-09 §6.1).
 type DeliberationOption struct {
 	Option          string              `json:"option"`
 	ActionCode      decision.ActionType `json:"action_code"`
@@ -76,6 +76,12 @@ type DeliberationOption struct {
 	RiskPenalty     float64             `json:"risk_penalty"`
 	NetUtility      float64             `json:"net_utility"`
 	Reversible      bool                `json:"reversible"`
+	Urgency         float64             `json:"urgency,omitempty"`
+	Importance      float64             `json:"importance,omitempty"`
+	Dependency      string              `json:"dependency,omitempty"`
+	OpportunityCost float64             `json:"opportunity_cost,omitempty"`
+	GoalAlignment   float64             `json:"goal_alignment,omitempty"`
+	Confidence      float64             `json:"confidence,omitempty"`
 	Selected        bool                `json:"selected"`
 	SelectionReason string              `json:"selection_reason,omitempty"`
 }

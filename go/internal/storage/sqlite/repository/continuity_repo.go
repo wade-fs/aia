@@ -87,8 +87,19 @@ func (r *ContinuityRepository) CreateCycle(ctx context.Context, c *continuity.Au
 	startedStr := c.StartedAt.UTC().Format(time.RFC3339)
 	createdStr := c.CreatedAt.UTC().Format(time.RFC3339)
 
+	dbTriggerType := string(c.TriggerType)
+	triggerRefID := c.TriggerRefID
+	switch c.TriggerType {
+	case continuity.TriggerScheduled, continuity.TriggerEventTrigger, continuity.TriggerManual, continuity.TriggerDriftDetected:
+	default:
+		dbTriggerType = string(continuity.TriggerEventTrigger)
+		if triggerRefID == "" {
+			triggerRefID = string(c.TriggerType)
+		}
+	}
+
 	_, err := r.db.RawDB().ExecContext(ctx, query,
-		c.ID, c.CycleNumber, c.TriggerType, c.TriggerRefID, c.Status, c.ContextSnapshotID, c.Summary,
+		c.ID, c.CycleNumber, dbTriggerType, triggerRefID, c.Status, c.ContextSnapshotID, c.Summary,
 		startedStr, createdStr,
 	)
 	return err

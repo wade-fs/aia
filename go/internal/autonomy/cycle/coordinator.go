@@ -389,7 +389,29 @@ func (c *Coordinator) RunCycle(ctx context.Context, in RunInput) (*domainAutonom
 		Justification:              delibRes.Justification,
 		ConsideredAlternativesJSON: delibRes.OptionsEvaluatedJSON,
 		GovernanceResult:           decision.GovernanceAllowed,
+		RiskAssessment:             delibRes.RiskAssessment,
 		CreatedAt:                  clock.Now(ctx),
+	}
+	if chosenInitiative != nil {
+		dec.Domain = chosenInitiative.TargetAgentID
+		dec.ExpectedOutcome = chosenInitiative.ExpectedOutcome
+		dec.Confidence = 0.8
+		if chosenInitiative.ConfidenceLevel == domainAutonomy.ConfidenceConfirmed {
+			dec.Confidence = 0.95
+		} else if chosenInitiative.ConfidenceLevel == domainAutonomy.ConfidenceUnverified {
+			dec.Confidence = 0.4
+		}
+	} else {
+		dec.Confidence = 1.0
+	}
+
+	// Re-evaluation conditions for quiescent decisions (AIA-08 §7.3)
+	if chosenAction == decision.ActionNoAction {
+		dec.ReevaluationConditions = "Re-evaluate if environment anomaly severity increases, project goals mutate, or new external signals arrive"
+	} else if chosenAction == decision.ActionDefer {
+		dec.ReevaluationConditions = "Re-evaluate when blocking dependency resolves or active task execution capacity frees up"
+	} else if chosenAction == decision.ActionSleep {
+		dec.ReevaluationConditions = "Wake on timer expiration, event trigger, or human interrupt"
 	}
 	if recalled.LatestSnapshot != nil {
 		dec.ContextSnapshotID = &recalled.LatestSnapshot.ID

@@ -33,8 +33,10 @@ func (r *DecisionRepository) Create(ctx context.Context, d *decision.Decision, e
 
 		createdStr := d.CreatedAt.UTC().Format(time.RFC3339)
 
+		dbAction := normalizeActionTypeForDB(d.ActionType)
+
 		_, err := tx.ExecContext(ctx, query,
-			d.ID, d.CycleID, d.ProjectID, d.ExperimentID, d.ActionType, d.IntentSummary, d.Justification,
+			d.ID, d.CycleID, d.ProjectID, d.ExperimentID, dbAction, d.IntentSummary, d.Justification,
 			d.ConsideredAlternativesJSON, d.ContextSnapshotID, d.GovernanceResult, d.ActionTaskID,
 			d.ActionExecutionID, createdStr,
 		)
@@ -181,4 +183,19 @@ func (r *DecisionRepository) GetEvidenceLinks(ctx context.Context, decisionID st
 		links = append(links, l)
 	}
 	return links, rows.Err()
+}
+
+func normalizeActionTypeForDB(action decision.ActionType) decision.ActionType {
+	switch action {
+	case decision.ActionAct, decision.ActionDefer, decision.ActionMonitor, decision.ActionAskHuman, decision.ActionNoAction:
+		return action
+	case decision.ActionInvestigate, decision.ActionValidate, decision.ActionDecompose, decision.ActionProceed, decision.ActionResearch:
+		return decision.ActionAct
+	case decision.ActionSleep, decision.ActionProposeDefault:
+		return decision.ActionDefer
+	case decision.ActionEscalate, decision.ActionReassess:
+		return decision.ActionAskHuman
+	default:
+		return decision.ActionAct
+	}
 }

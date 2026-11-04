@@ -364,6 +364,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	scheduler.SetContextAssembler(contextAssembler)
 	pa := orchestrator.NewPersonalAgent(prov, retriever, taskSvc, scheduler, evaluator)
 	pa.SetAutonomyEngine(autonomyEng)
+	pa.SetAgentRepository(agRepo)
 
 	workerMgr := worker.NewManager(
 		worker.DefaultWorkerConfig(),
@@ -379,6 +380,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	)
 	workerMgr.SetGovernanceService(govSvc)
 	workerMgr.SetLogRetention(cfg.Logging.RetainDays, execRepo)
+	workerMgr.SetAutonomyEngine(autonomyEng, 15*time.Minute)
 
 	tracer := tracing.DefaultTracer()
 	metricsReg := metrics.DefaultRegistry()

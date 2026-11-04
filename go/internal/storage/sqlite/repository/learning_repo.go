@@ -115,6 +115,17 @@ func (r *LearningRepository) CreateRCA(ctx context.Context, rca *learning.RootCa
 		rca.RCAValidityStatus = learning.RCAProposed
 	}
 
+	dbCategory := string(rca.RootCauseCategory)
+	switch rca.RootCauseCategory {
+	case learning.RCIncorrectFact, learning.RCBiasedJudgment, learning.RCFlawedStrategy, learning.RCAmbiguousPrompt, learning.RCWorkflowDefect, learning.RCExternalUnexpected:
+	case learning.RCEvaluationError:
+		dbCategory = string(learning.RCBiasedJudgment)
+	case learning.RCGoalAssumptionError:
+		dbCategory = string(learning.RCFlawedStrategy)
+	default:
+		dbCategory = string(learning.RCFlawedStrategy)
+	}
+
 	_, err := r.db.RawDB().ExecContext(ctx, `
 		INSERT INTO root_cause_analyses (
 			id, outcome_evaluation_id, root_cause_category, analysis_narrative,
@@ -124,7 +135,7 @@ func (r *LearningRepository) CreateRCA(ctx context.Context, rca *learning.RootCa
 	`,
 		rca.ID,
 		rca.OutcomeEvaluationID,
-		string(rca.RootCauseCategory),
+		dbCategory,
 		rca.AnalysisNarrative,
 		rca.FalsifiableHypothesis,
 		rca.CausalEvidenceRefsJSON,
@@ -182,6 +193,22 @@ func (r *LearningRepository) CreateCorrectionAction(ctx context.Context, ca *lea
 		applied = sql.NullString{String: ca.AppliedStateJSON, Valid: true}
 	}
 
+	dbCorrectionType := string(ca.CorrectionType)
+	switch ca.CorrectionType {
+	case learning.CorrectionFact, learning.CorrectionJudgment, learning.CorrectionStrategy, learning.CorrectionPrompt, learning.CorrectionWorkflow, learning.CorrectionCode:
+	case learning.CorrectionEvaluationUpdate, learning.CorrectionGoalProposal:
+		dbCorrectionType = string(learning.CorrectionStrategy)
+	case learning.CorrectionMemory:
+		dbCorrectionType = string(learning.CorrectionFact)
+	default:
+		dbCorrectionType = string(learning.CorrectionStrategy)
+	}
+
+	dbVerifStatus := string(ca.VerificationStatus)
+	if ca.VerificationStatus == learning.VerifPartial {
+		dbVerifStatus = string(learning.VerifInconclusive)
+	}
+
 	_, err := r.db.RawDB().ExecContext(ctx, `
 		INSERT INTO correction_actions (
 			id, rca_id, scope_level, correction_type, authorization_level,
@@ -193,7 +220,7 @@ func (r *LearningRepository) CreateCorrectionAction(ctx context.Context, ca *lea
 		ca.ID,
 		ca.RCAID,
 		string(ca.ScopeLevel),
-		string(ca.CorrectionType),
+		dbCorrectionType,
 		string(ca.AuthorizationLevel),
 		string(ca.ValidationLevel),
 		string(ca.TierProfile),
@@ -203,7 +230,7 @@ func (r *LearningRepository) CreateCorrectionAction(ctx context.Context, ca *lea
 		applied,
 		nullStrPtr(ca.ApprovalID),
 		string(ca.RegressionStatus),
-		string(ca.VerificationStatus),
+		dbVerifStatus,
 		ca.CreatedAt.UTC().Format(time.RFC3339),
 		ca.UpdatedAt.UTC().Format(time.RFC3339),
 	)
@@ -527,6 +554,13 @@ func (r *LearningRepository) CreateGoalEvolutionProposal(ctx context.Context, p 
 		p.InvalidatedClaimIDsJSON = "[]"
 	}
 
+	dbEvolutionMode := string(p.EvolutionMode)
+	switch p.EvolutionMode {
+	case learning.EvolutionPersistence, learning.EvolutionOptimization, learning.EvolutionRevision:
+	default:
+		dbEvolutionMode = string(learning.EvolutionRevision)
+	}
+
 	_, err := r.db.RawDB().ExecContext(ctx, `
 		INSERT INTO goal_evolution_proposals (
 			id, goal_id, cycle_id, evolution_mode, actor_type, actor_id,
@@ -538,7 +572,7 @@ func (r *LearningRepository) CreateGoalEvolutionProposal(ctx context.Context, p 
 		p.ID,
 		p.GoalID,
 		nullStrPtr(p.CycleID),
-		string(p.EvolutionMode),
+		dbEvolutionMode,
 		p.ActorType,
 		p.ActorID,
 		p.Rationale,

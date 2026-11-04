@@ -12,6 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/wade/aia/internal/autonomy"
+	domainAutonomy "github.com/wade/aia/internal/domain/autonomy"
+	"github.com/wade/aia/internal/domain/continuity"
 	"github.com/wade/aia/internal/domain/governance"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/eventbus"
@@ -112,6 +115,9 @@ type Manager struct {
 
 	retainDays int
 	execRepo   *repository.ExecutionRepository
+
+	autonomyEng      *autonomy.Engine
+	autonomyInterval time.Duration
 }
 
 // NewManager creates a new background worker runtime manager.
@@ -173,6 +179,38 @@ func (m *Manager) SetLogRetention(retainDays int, execRepo *repository.Execution
 	defer m.mu.Unlock()
 	m.retainDays = retainDays
 	m.execRepo = execRepo
+}
+
+// SetAutonomyEngine attaches the autonomy closed-loop engine and configures auto-wake interval (AIA-08 §12.2).
+func (m *Manager) SetAutonomyEngine(eng *autonomy.Engine, interval time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.autonomyEng = eng
+	if interval <= 0 {
+		interval = 15 * time.Minute
+	}
+	m.autonomyInterval = interval
+}
+
+// TriggerAutonomousCycle triggers an autonomous cycle immediately from external events (AIA-08 §13).
+func (m *Manager) TriggerAutonomousCycle(ctx context.Context, projectID string, triggerType continuity.CycleTriggerType, summary string) (*domainAutonomy.CycleOutcome, error) {
+	if m.IsEmergencyStopped() {
+		return nil, ErrEmergencyStopActive
+	}
+	if m.autonomyEng == nil {
+		return nil, fmt.Errorf("autonomy engine is not attached to worker manager")
+	}
+	if projectID == "" {
+		projectID = "default"
+	}
+	if summary == "" {
+		summary = fmt.Sprintf("Event-driven autonomous cycle triggered by %s", triggerType)
+	}
+	return m.autonomyEng.RunCycle(ctx, autonomy.RunCycleInput{
+		ProjectID:   projectID,
+		TriggerType: triggerType,
+		Summary:     summary,
+	})
 }
 
 // IsEmergencyStopped checks whether dispatch is frozen.
@@ -337,6 +375,15 @@ func (m *Manager) Start(ctx context.Context) error {
 		go func() {
 			defer m.wg.Done()
 			m.runLogRetentionPurger(workerCtx)
+		}()
+	}
+
+	// 4. Start Autonomy Periodic Worker (AIA-08 §12.2)
+	if m.autonomyEng != nil {
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			m.runAutonomyWorker(workerCtx)
 		}()
 	}
 
@@ -563,6 +610,45 @@ func (m *Manager) purgeExpiredLogs(ctx context.Context) {
 	if execRepo != nil {
 		if purged, err := execRepo.PurgeEventsOlderThan(ctx, cutoff); err == nil && purged > 0 {
 			slog.Info("periodic log retention purger removed expired execution events", "count", purged, "retain_days", days)
+		}
+	}
+}
+
+func (m *Manager) runAutonomyWorker(ctx context.Context) {
+	m.mu.RLock()
+	interval := m.autonomyInterval
+	eng := m.autonomyEng
+	m.mu.RUnlock()
+
+	if eng == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 15 * time.Minute
+	}
+
+	slog.Info("autonomy worker periodic loop started", "interval", interval.String())
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if m.IsEmergencyStopped() {
+				slog.Debug("autonomy worker cycle skipped: emergency stop active")
+				continue
+			}
+			slog.Info("autonomy worker auto-waking to execute scheduled closed-loop cycle (AIA-08 §12.2)")
+			_, err := eng.RunCycle(ctx, autonomy.RunCycleInput{
+				ProjectID:   "default",
+				TriggerType: continuity.TriggerScheduled,
+				Summary:     "Periodic autonomous closed loop executed by background autonomy worker (AIA-08 §12.2)",
+			})
+			if err != nil {
+				slog.Warn("periodic autonomy cycle encountered non-fatal notice", "err", err)
+			}
 		}
 	}
 }

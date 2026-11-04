@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/wade/aia/internal/domain/governance"
+	"github.com/wade/aia/internal/domain/learning"
 	"github.com/wade/aia/internal/domain/selfmod"
 	selfmodSvc "github.com/wade/aia/internal/service/selfmod"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
@@ -396,5 +397,79 @@ func TestPipeline_PostDeploymentMonitoring_And_Rollback(t *testing.T) {
 	rolledBack, _ := repo.Get(ctx, verified.ID)
 	if rolledBack.Status != selfmod.StatusRolledBack {
 		t.Errorf("expected StatusRolledBack, got %s", rolledBack.Status)
+	}
+}
+
+func TestPipeline_V1toV6_UnifiedValidationLevel_And_C0toC5_Mapping(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	// 1. Verify V1~V6 and C0~C5 type interoperability
+	if selfmod.NormalizeValidationLevel("V1") != selfmod.VerifLevelL1Syntax {
+		t.Errorf("expected V1 to normalize to L1_SYNTAX")
+	}
+	if selfmod.NormalizeValidationLevel("v2") != selfmod.VerifLevelL2Unit {
+		t.Errorf("expected v2 to normalize to L2_UNIT")
+	}
+	if selfmod.NormalizeValidationLevel("V3") != selfmod.VerifLevelL3Integration {
+		t.Errorf("expected V3 to normalize to L3_INTEGRATION")
+	}
+	if selfmod.ToValidationLevel("V1") != learning.ValV1 {
+		t.Errorf("expected learning.ValV1 for V1")
+	}
+	if selfmod.ToValidationLevel("V2") != learning.ValV2 {
+		t.Errorf("expected learning.ValV2 for V2")
+	}
+	if selfmod.ToValidationLevel("V3") != learning.ValV3 {
+		t.Errorf("expected learning.ValV3 for V3")
+	}
+	if selfmod.ScopeToAuthorizationLevel(selfmod.LevelADomain) != learning.AuthC1 {
+		t.Errorf("expected AuthC1 for Level A Domain")
+	}
+	if selfmod.ScopeToAuthorizationLevel(selfmod.LevelBCore) != learning.AuthC5 {
+		t.Errorf("expected AuthC5 for Level B Core")
+	}
+
+	// 2. Test sandbox execution using V1, V2, V3 in ValidationPlan
+	repo := repository.NewSelfModRepository(db)
+	gitRepo := setupSelfModTestGitRepo(t)
+	pipeline := selfmodSvc.NewPipeline(gitRepo, repo, nil, nil, nil, nil)
+
+	input := selfmodSvc.ProposalInput{
+		Title:          "V1~V3 Stage Execution Proposal",
+		Description:    "Verify V1 compile, V2 unit, V3 integration pipeline",
+		Rationale:      "cross-spec-consistency-audit §2.1",
+		TargetFiles:    []string{"configs/rules.json"},
+		Patches: map[string]string{
+			"configs/rules.json": `{"version": 1, "enabled": true}`,
+		},
+		ValidationPlan: []string{"V1", "V2", "V3"},
+	}
+
+	prop, err := pipeline.Propose(ctx, input)
+	if err != nil {
+		t.Fatalf("Propose failed: %v", err)
+	}
+
+	executedStages := make(map[string]bool)
+	verifiedProp, err := pipeline.ExecuteVerificationWithOptions(ctx, prop.ID, selfmodSvc.VerificationOptions{
+		MultiLevelRunner: func(ctx context.Context, workDir string, level string) (*selfmod.TestVerificationResult, error) {
+			executedStages[level] = true
+			return &selfmod.TestVerificationResult{
+				Level:  level,
+				Passed: true,
+				Output: fmt.Sprintf("%s stage passed", level),
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteVerificationWithOptions failed: %v", err)
+	}
+	if verifiedProp.Status != selfmod.StatusMerged { // Level A domain auto-merges
+		t.Errorf("expected StatusMerged for Level A proposal, got %s", verifiedProp.Status)
+	}
+	if !executedStages[selfmod.VerifLevelL1Syntax] || !executedStages[selfmod.VerifLevelL2Unit] || !executedStages[selfmod.VerifLevelL3Integration] {
+		t.Errorf("expected V1~V3 stages executed, got %v", executedStages)
 	}
 }

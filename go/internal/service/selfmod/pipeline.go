@@ -245,14 +245,15 @@ func (p *Pipeline) ExecuteVerificationWithOptions(
 		var currentStageResults []selfmod.TestVerificationResult
 
 		for _, stage := range stages {
+			normStage := selfmod.NormalizeValidationLevel(stage)
 			start := time.Now()
 			var res *selfmod.TestVerificationResult
 
 			if opts.MultiLevelRunner != nil {
-				res, err = opts.MultiLevelRunner(ctx, tmpWorktree, stage)
+				res, err = opts.MultiLevelRunner(ctx, tmpWorktree, normStage)
 				if err != nil && res == nil {
 					res = &selfmod.TestVerificationResult{
-						Level:      stage,
+						Level:      normStage,
 						Passed:     false,
 						Output:     err.Error(),
 						ExecutedAt: start,
@@ -260,7 +261,7 @@ func (p *Pipeline) ExecuteVerificationWithOptions(
 				}
 			} else {
 				// Built-in runner fallbacks
-				switch stage {
+				switch normStage {
 				case selfmod.VerifLevelL1Syntax:
 					res = runL1SyntaxVerification(tmpWorktree, proposal.TargetFiles)
 				case selfmod.VerifLevelL2Unit:
@@ -285,16 +286,16 @@ func (p *Pipeline) ExecuteVerificationWithOptions(
 						}
 					}
 				default:
-					// For L3~L6 when only TestRunner is provided, propagate L2 outcome
+					// For L3~L6 / V3~V6 when only TestRunner is provided, propagate L2 outcome
 					passed := true
-					outStr := fmt.Sprintf("Stage %s passed via default verification baseline", stage)
+					outStr := fmt.Sprintf("Stage %s passed via default verification baseline", normStage)
 					if opts.TestRunner != nil {
 						pOk, o, tErr := opts.TestRunner(ctx, tmpWorktree)
 						passed = pOk && tErr == nil
 						outStr = o
 					}
 					res = &selfmod.TestVerificationResult{
-						Level:      stage,
+						Level:      normStage,
 						Passed:     passed,
 						Output:     outStr,
 						DurationMs: time.Since(start).Milliseconds(),

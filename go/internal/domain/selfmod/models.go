@@ -2,7 +2,10 @@ package selfmod
 
 import (
 	"errors"
+	"strings"
 	"time"
+
+	"github.com/wade/aia/internal/domain/learning"
 )
 
 var (
@@ -38,7 +41,7 @@ const (
 	StatusDeferred         ModificationStatus = "DEFERRED"        // AIA-14 §4.8
 )
 
-// Verification level constants (AIA-14 §7.1)
+// Verification level constants (AIA-14 §7.1, cross-spec-consistency-audit §2.1)
 const (
 	VerifLevelL1Syntax      = "L1_SYNTAX"
 	VerifLevelL2Unit        = "L2_UNIT"
@@ -46,7 +49,69 @@ const (
 	VerifLevelL4Regression  = "L4_REGRESSION"
 	VerifLevelL5Behavioral  = "L5_BEHAVIORAL"
 	VerifLevelL6Autonomy    = "L6_AUTONOMY"
+
+	// V1~V6 Aliases unified with Learning System (AIA-11 / cross-spec §2.1)
+	VerifLevelV1 = "V1"
+	VerifLevelV2 = "V2"
+	VerifLevelV3 = "V3"
+	VerifLevelV4 = "V4"
+	VerifLevelV5 = "V5"
+	VerifLevelV6 = "V6"
 )
+
+// NormalizeValidationLevel normalizes V1~V6 and L1~L6 interchangeably into standard level names.
+func NormalizeValidationLevel(level string) string {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "V1", "V1_STATIC", "L1", "L1_SYNTAX":
+		return VerifLevelL1Syntax
+	case "V2", "V2_UNIT", "L2", "L2_UNIT":
+		return VerifLevelL2Unit
+	case "V3", "V3_INTEGRATION", "L3", "L3_INTEGRATION":
+		return VerifLevelL3Integration
+	case "V4", "V4_REGRESSION", "L4", "L4_REGRESSION":
+		return VerifLevelL4Regression
+	case "V5", "V5_BEHAVIORAL", "L5", "L5_BEHAVIORAL":
+		return VerifLevelL5Behavioral
+	case "V6", "V6_BENCHMARK", "L6", "L6_AUTONOMY":
+		return VerifLevelL6Autonomy
+	default:
+		return level
+	}
+}
+
+// ToValidationLevel maps selfmod verification levels to learning.ValidationLevel (V1~V6).
+func ToValidationLevel(level string) learning.ValidationLevel {
+	switch NormalizeValidationLevel(level) {
+	case VerifLevelL1Syntax:
+		return learning.ValV1
+	case VerifLevelL2Unit:
+		return learning.ValV2
+	case VerifLevelL3Integration:
+		return learning.ValV3
+	case VerifLevelL4Regression:
+		return learning.ValV4
+	case VerifLevelL5Behavioral:
+		return learning.ValV5
+	case VerifLevelL6Autonomy:
+		return learning.ValV6
+	default:
+		return learning.ValV2
+	}
+}
+
+// ScopeToAuthorizationLevel maps Scope Level (A/B/C) to C0~C5 (cross-spec §2.1).
+func ScopeToAuthorizationLevel(level ModificationLevel) learning.AuthorizationLevel {
+	switch level {
+	case LevelADomain:
+		return learning.AuthC1 // C1: autonomous low-risk domain modification
+	case LevelBCore:
+		return learning.AuthC5 // C5: core architecture change requiring highest approval
+	case LevelCGovernance:
+		return learning.AuthC5 // Immutable / blocked
+	default:
+		return learning.AuthC2
+	}
+}
 
 // SelfModificationProposal represents a proposed change to AIA's codebase or configurations.
 type SelfModificationProposal struct {

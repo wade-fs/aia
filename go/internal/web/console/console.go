@@ -36,34 +36,39 @@ import (
 	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
+	telemetryMetrics "github.com/wade/aia/internal/telemetry/metrics"
+	"github.com/wade/aia/internal/telemetry/tracing"
 	"github.com/wade/aia/internal/web/host"
 	"github.com/wade/aia/internal/worker"
 )
 
 type ConsoleServices struct {
-	TaskSvc        *taskService.Service
-	AgentSvc       *agentService.Service
-	ExecSvc        *execService.Service
-	MemorySvc      *memoryService.Service
-	AuditRepo      *repository.AuditRepository
-	InvSvc         *invService.Service
-	DB             *sqlite.DB
-	Provider       provider.Provider
-	Host           *host.Host
-	WorkerMgr      *worker.Manager
-	ApprovalSvc    *approvalService.Service
-	GovernanceSvc  *govService.Service
-	GoalSvc        *goalService.Service
-	AutonomyEngine *autonomy.Engine
-	AutonomyRepo   *repository.AutonomyRepository
-	ContinuityRepo *repository.ContinuityRepository
-	LearningRepo   *repository.LearningRepository
-	ExperimentRepo *repository.ExperimentRepository
-	ExperimentCtrl *experiment.Controller
-	DelegationSvc  *delegationService.Service
-	BriefSvc       *briefService.Service
-	ClarifySvc     *clarifyService.Service
-	ProblemSvc     *problemService.Service
+	TaskSvc         *taskService.Service
+	AgentSvc        *agentService.Service
+	ExecSvc         *execService.Service
+	MemorySvc       *memoryService.Service
+	AuditRepo       *repository.AuditRepository
+	InvSvc          *invService.Service
+	DB              *sqlite.DB
+	Provider        provider.Provider
+	Host            *host.Host
+	WorkerMgr       *worker.Manager
+	ApprovalSvc     *approvalService.Service
+	GovernanceSvc   *govService.Service
+	GoalSvc         *goalService.Service
+	AutonomyEngine  *autonomy.Engine
+	AutonomyRepo    *repository.AutonomyRepository
+	DecisionRepo    *repository.DecisionRepository
+	ContinuityRepo  *repository.ContinuityRepository
+	LearningRepo    *repository.LearningRepository
+	ExperimentRepo  *repository.ExperimentRepository
+	ExperimentCtrl  *experiment.Controller
+	DelegationSvc   *delegationService.Service
+	BriefSvc        *briefService.Service
+	ClarifySvc      *clarifyService.Service
+	ProblemSvc      *problemService.Service
+	MetricsRegistry *telemetryMetrics.Registry
+	Tracer          *tracing.Tracer
 }
 
 func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
@@ -76,6 +81,8 @@ func RegisterConsoleRoutes(mux *http.ServeMux, s *ConsoleServices) {
 	mux.HandleFunc("/api/v1/system/status", s.handleSystemStatus)
 	mux.HandleFunc("/api/v1/system/health", s.handleSystemHealth)
 	mux.HandleFunc("/api/v1/system/activity", s.handleActivityMonitor)
+	mux.HandleFunc("/api/v1/system/metrics", s.handleSystemMetrics)
+	mux.HandleFunc("/api/v1/system/traces", s.handleSystemTraces)
 
 	// 2.1 Governance & Emergency Stop
 	mux.HandleFunc("/api/v1/system/emergency-stop", s.handleEmergencyStop)
@@ -272,6 +279,42 @@ func (s *ConsoleServices) handleActivityMonitor(w http.ResponseWriter, r *http.R
 		return
 	}
 	host.WriteJSON(w, http.StatusOK, snap, reqID)
+}
+
+func (s *ConsoleServices) handleSystemMetrics(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	ctx := r.Context()
+	reg := s.MetricsRegistry
+	if reg == nil {
+		reg = telemetryMetrics.DefaultRegistry()
+	}
+	snap, err := reg.Collect(ctx, telemetryMetrics.MetricCollectorDeps{
+		TaskRepo:     repository.NewTaskRepository(s.DB),
+		ExecRepo:     repository.NewExecutionRepository(s.DB),
+		AutonomyRepo: s.AutonomyRepo,
+		DecisionRepo: s.DecisionRepo,
+	})
+	if err != nil {
+		host.WriteError(w, http.StatusInternalServerError, "METRICS_ERROR", err.Error(), reqID)
+		return
+	}
+	host.WriteJSON(w, http.StatusOK, snap, reqID)
+}
+
+func (s *ConsoleServices) handleSystemTraces(w http.ResponseWriter, r *http.Request) {
+	reqID := getReqID(r)
+	tracer := s.Tracer
+	if tracer == nil {
+		tracer = tracing.DefaultTracer()
+	}
+	traceID := r.URL.Query().Get("trace_id")
+	if traceID != "" {
+		spans := tracer.GetSpansByTrace(traceID)
+		host.WriteJSON(w, http.StatusOK, map[string]any{"trace_id": traceID, "spans": spans}, reqID)
+		return
+	}
+	spans := tracer.GetRecentSpans(100)
+	host.WriteJSON(w, http.StatusOK, map[string]any{"spans": spans, "count": len(spans)}, reqID)
 }
 
 // -------------------------------------------------------------

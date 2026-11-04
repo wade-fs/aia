@@ -11,6 +11,7 @@ import (
 	"github.com/wade/aia/internal/audit"
 	"github.com/wade/aia/internal/domain"
 	"github.com/wade/aia/internal/storage/sqlite"
+	"github.com/wade/aia/internal/telemetry/tracing"
 )
 
 type AuditLogEntry struct {
@@ -77,6 +78,11 @@ func (r *AuditRepository) Append(ctx context.Context, entry *AuditLogEntry) erro
 	}
 	if entry.Source == "" {
 		entry.Source = string(audit.SourceRuntime)
+	}
+	if entry.RequestID == "" {
+		if traceID := tracing.TraceIDFromContext(ctx); traceID != "" {
+			entry.RequestID = traceID
+		}
 	}
 	entry.Metadata = audit.SanitizeRaw(entry.Metadata)
 	entry.Details = audit.SanitizeRaw(entry.Details)

@@ -2,11 +2,14 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"github.com/wade/aia/internal/storage/sqlite/repository"
+	telemetryMetrics "github.com/wade/aia/internal/telemetry/metrics"
 )
 
 var workerCmd = &cobra.Command{
@@ -114,40 +117,87 @@ var workerProcessCmd = &cobra.Command{
 	},
 }
 
+var monitorJSON bool
+
 var monitorCmd = &cobra.Command{
 	Use:   "monitor",
-	Short: "Show real-time AIA Activity Monitor dashboard",
+	Short: "Show real-time AIA Activity Monitor and operational telemetry dashboard (AIA-19 §7)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runActivityMonitor(cmd)
 	},
 }
 
 func runActivityMonitor(cmd *cobra.Command) error {
-	if appInst.WorkerMgr == nil {
-		return fmt.Errorf("worker manager not initialized")
-	}
 	ctx := context.Background()
-	snap, err := appInst.WorkerMgr.GetActivityMonitor(ctx)
-	if err != nil {
-		return err
+
+	var snap *telemetryMetrics.SystemMetricsSnapshot
+	if appInst.MetricsRegistry != nil {
+		var err error
+		snap, err = appInst.MetricsRegistry.Collect(ctx, telemetryMetrics.MetricCollectorDeps{
+			DBPath:       appInst.Config.Database.Path,
+			TaskRepo:     repository.NewTaskRepository(appInst.DB),
+			ExecRepo:     repository.NewExecutionRepository(appInst.DB),
+			AutonomyRepo: appInst.AutonomyRepo,
+			DecisionRepo: appInst.DecisionRepo,
+			GoalRepo:     appInst.GoalRepo,
+			ProblemRepo:  appInst.ProblemRepo,
+			PlanRepo:     appInst.PlanRepo,
+		})
+		if err != nil {
+			return err
+		}
 	}
 
-	fmt.Println("=== AIA Activity Monitor ===")
+	if monitorJSON && snap != nil {
+		data, _ := json.MarshalIndent(snap, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	}
+
+	fmt.Println("=== AIA Operational Monitor & Telemetry (AIA-19 §7) ===")
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "項目\t狀態 / 時間")
-	fmt.Fprintln(w, "----\t-----------")
-	fmt.Fprintf(w, "Runtime\t%s\n", snap.Runtime)
-	fmt.Fprintf(w, "Schedule Worker\t%s\n", snap.ScheduleWorker)
-	fmt.Fprintf(w, "Task Worker\t%s\n", snap.TaskWorker)
-	fmt.Fprintf(w, "Last Data Sync\t%s\n", snap.LastDataSync)
-	fmt.Fprintf(w, "Last Investment Research\t%s\n", snap.LastInvestmentResearch)
-	fmt.Fprintf(w, "Pending Tasks\t%d\n", snap.PendingTasks)
-	fmt.Fprintf(w, "Next Scheduled Run\t%s\n", snap.NextScheduledRun)
+	fmt.Fprintln(w, "指標類別\t指標名稱\t數值")
+	fmt.Fprintln(w, "--------\t--------\t----")
+
+	if appInst.WorkerMgr != nil {
+		if actSnap, err := appInst.WorkerMgr.GetActivityMonitor(ctx); err == nil {
+			fmt.Fprintf(w, "Worker\tSchedule Worker\t%s\n", actSnap.ScheduleWorker)
+			fmt.Fprintf(w, "Worker\tTask Worker\t%s\n", actSnap.TaskWorker)
+			fmt.Fprintf(w, "Worker\tNext Scheduled Run\t%s\n", actSnap.NextScheduledRun)
+		}
+	}
+
+	if snap != nil {
+		fmt.Fprintf(w, "Runtime\tUptime\t%.1fs\n", snap.Runtime.UptimeSeconds)
+		fmt.Fprintf(w, "Runtime\tActive Goroutines\t%d\n", snap.Runtime.ActiveGoroutines)
+		fmt.Fprintf(w, "Runtime\tAllocated Memory\t%.2f MB\n", float64(snap.Runtime.AllocMemoryBytes)/(1024*1024))
+		fmt.Fprintf(w, "Runtime\tStorage Database Size\t%.2f KB\n", float64(snap.Runtime.StorageDBSizeByte)/1024)
+		fmt.Fprintf(w, "Runtime\tGC Runs\t%d\n", snap.Runtime.NumGC)
+
+		fmt.Fprintf(w, "Execution\tTotal Tasks\t%d (Pending: %d, Running: %d)\n",
+			snap.Execution.TotalTasks, snap.Execution.PendingTasks, snap.Execution.ActiveTasks)
+		fmt.Fprintf(w, "Execution\tTask Success Rate\t%.1f%% (Completed: %d, Failed: %d)\n",
+			snap.Execution.TaskSuccessRate*100, snap.Execution.CompletedTasks, snap.Execution.FailedTasks)
+		fmt.Fprintf(w, "Execution\tTotal Tokens Consumed\t%d tokens\n", snap.Execution.TotalTokensConsumed)
+		fmt.Fprintf(w, "Execution\tEstimated Spend USD\t$%.4f\n", snap.Execution.TotalSpendUSD)
+
+		fmt.Fprintf(w, "Autonomy\tTotal Cycles\t%d\n", snap.Autonomy.TotalCycles)
+		fmt.Fprintf(w, "Autonomy\tTotal Decisions\t%d (No-Action: %d)\n",
+			snap.Autonomy.TotalDecisions, snap.Autonomy.NoActionDecisions)
+		fmt.Fprintf(w, "Autonomy\tCandidate Initiatives\t%d\n", snap.Autonomy.CandidateActionsGenerated)
+		fmt.Fprintf(w, "Autonomy\tComposite Score\t%.2f%%\n", snap.Autonomy.CompositeAutonomyScore*100)
+
+		fmt.Fprintf(w, "Domain\tActive Strategic Goals\t%d\n", snap.Domain.ActiveGoals)
+		fmt.Fprintf(w, "Domain\tActive Complex Problems\t%d\n", snap.Domain.ActiveProblems)
+	}
+
 	w.Flush()
 	return nil
 }
 
 func init() {
+	monitorCmd.Flags().BoolVar(&monitorJSON, "json", false, "Output metrics in JSON format")
+
 	workerCmd.AddCommand(workerStatusCmd)
 	workerCmd.AddCommand(workerRunOnceCmd)
 	workerCmd.AddCommand(workerDispatchCmd)

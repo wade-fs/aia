@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/wade/aia/internal/recovery"
 	agentService "github.com/wade/aia/internal/service/agent"
 	approvalService "github.com/wade/aia/internal/service/approval"
+	backupService "github.com/wade/aia/internal/service/backup"
 	briefService "github.com/wade/aia/internal/service/brief"
 	clarifyService "github.com/wade/aia/internal/service/clarification"
 	delegationService "github.com/wade/aia/internal/service/delegation"
@@ -41,6 +43,8 @@ import (
 	writingService "github.com/wade/aia/internal/service/writing"
 	"github.com/wade/aia/internal/storage/sqlite"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
+	"github.com/wade/aia/internal/telemetry/metrics"
+	"github.com/wade/aia/internal/telemetry/tracing"
 	"github.com/wade/aia/internal/validation"
 	"github.com/wade/aia/internal/web/agents"
 	"github.com/wade/aia/internal/web/console"
@@ -107,6 +111,9 @@ type App struct {
 	ProblemRepo         *repository.ProblemRepository
 	PlanRepo            *repository.PlanRepository
 	ProblemSvc          *problemService.Service
+	BackupSvc           *backupService.Service
+	Tracer              *tracing.Tracer
+	MetricsRegistry     *metrics.Registry
 }
 
 func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
@@ -369,6 +376,11 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	)
 	workerMgr.SetGovernanceService(govSvc)
 
+	tracer := tracing.DefaultTracer()
+	metricsReg := metrics.DefaultRegistry()
+	backupDir := filepath.Join(cfg.Runtime.DataDir, "backups")
+	backupSvc := backupService.NewService(backupDir, db, cfg.Database.Path, cfgPath, auditRepo, bus)
+
 	a := &App{
 		Config:           cfg,
 		DB:               db,
@@ -425,6 +437,9 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		ProblemRepo:         problemRepo,
 		PlanRepo:            planRepo,
 		ProblemSvc:          problemSvc,
+		BackupSvc:           backupSvc,
+		Tracer:              tracer,
+		MetricsRegistry:     metricsReg,
 	}
 
 	// Seed default domain agents, default project & recurring schedules
@@ -484,16 +499,19 @@ func (a *App) CreateWebHost() (*host.Host, string, error) {
 		ApprovalSvc:    a.ApprovalSvc,
 		GovernanceSvc:  a.GovernanceSvc,
 		GoalSvc:        a.GoalSvc,
-		AutonomyEngine: a.AutonomyEngine,
-		AutonomyRepo:   a.AutonomyRepo,
-		ContinuityRepo: a.ContinuityRepo,
+		AutonomyEngine:  a.AutonomyEngine,
+		AutonomyRepo:    a.AutonomyRepo,
+		DecisionRepo:    a.DecisionRepo,
+		ContinuityRepo:  a.ContinuityRepo,
 		LearningRepo:   a.LearningRepo,
 		ExperimentRepo: a.ExperimentRepo,
 		ExperimentCtrl: a.ExperimentCtrl,
 		DelegationSvc:  a.DelegationSvc,
 		BriefSvc:       a.GenericBriefSvc,
-		ClarifySvc:     a.ClarificationSvc,
-		ProblemSvc:     a.ProblemSvc,
+		ClarifySvc:      a.ClarificationSvc,
+		ProblemSvc:      a.ProblemSvc,
+		MetricsRegistry: a.MetricsRegistry,
+		Tracer:          a.Tracer,
 	})
 
 	// 2. Register Agent Modules with isolated dedicated muxes

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/wade/aia/internal/domain"
+	domainContinuity "github.com/wade/aia/internal/domain/continuity"
 	"github.com/wade/aia/internal/domain/execution"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/provider"
@@ -25,16 +26,20 @@ type Summary struct {
 	ReadyTasksPromoted    int
 	PreservedWaitingInput int
 	ExpiredClarifications int
+	AbortedStuckCycles    int
+	ReconciledDelegations int
 }
 
 type Manager struct {
-	taskRepo      *repository.TaskRepository
-	executionRepo *repository.ExecutionRepository
-	auditRepo     *repository.AuditRepository
-	clarifyRepo   *repository.ClarificationRepository
-	validator     validation.Validator
-	wsMgr         *workspace.Manager
-	artRepo       *repository.ArtifactRepository
+	taskRepo       *repository.TaskRepository
+	executionRepo  *repository.ExecutionRepository
+	auditRepo      *repository.AuditRepository
+	clarifyRepo    *repository.ClarificationRepository
+	continuityRepo *repository.ContinuityRepository
+	expRepo        *repository.ExperimentRepository
+	validator      validation.Validator
+	wsMgr          *workspace.Manager
+	artRepo        *repository.ArtifactRepository
 }
 
 func NewManager(
@@ -51,6 +56,14 @@ func NewManager(
 
 func (m *Manager) SetClarificationRepository(repo *repository.ClarificationRepository) {
 	m.clarifyRepo = repo
+}
+
+func (m *Manager) SetContinuityRepository(repo *repository.ContinuityRepository) {
+	m.continuityRepo = repo
+}
+
+func (m *Manager) SetExperimentRepository(repo *repository.ExperimentRepository) {
+	m.expRepo = repo
 }
 
 func (m *Manager) SetValidator(v validation.Validator) {
@@ -271,6 +284,41 @@ func (m *Manager) Recover(ctx context.Context) (*Summary, error) {
 			// Retain WAITING_FOR_INPUT: Never crash, never mark failed, never assume consent (AIA-21 §7.2)
 			summary.PreservedWaitingInput++
 			slog.Info("preserved WAITING_FOR_INPUT task awaiting user input across restart", "task_id", wit.ID, "project_id", wit.ProjectID)
+		}
+	}
+
+	// 5. Reconcile Stuck Autonomy Cycles (AIA-10 §16.3)
+	if m.continuityRepo != nil {
+		cycles, err := m.continuityRepo.ListCycles(ctx, 50)
+		if err == nil {
+			for _, c := range cycles {
+				if c.Status == domainContinuity.CycleStatusStarted ||
+					c.Status == domainContinuity.CycleStatusDeliberating ||
+					c.Status == domainContinuity.CycleStatusExecuting ||
+					c.Status == domainContinuity.CycleStatusEvaluating {
+					abortedSummary := "Interrupted by runtime restart / crash recovery"
+					_ = m.continuityRepo.UpdateCycleStatus(ctx, c.ID, domainContinuity.CycleStatusAborted, abortedSummary, &now)
+					summary.AbortedStuckCycles++
+					slog.Warn("reconciled stuck autonomy cycle to ABORTED", "cycle_id", c.ID, "previous_status", c.Status)
+				}
+			}
+		}
+	}
+
+	// 6. Reconcile Stuck Delegations (AIA-10 §16.3, AIA-12)
+	if m.expRepo != nil && m.taskRepo != nil {
+		inProgDels, err := m.expRepo.ListDelegationRequests(ctx, "", "", "IN_PROGRESS", 50)
+		if err == nil {
+			for _, d := range inProgDels {
+				if d.SpawnedTaskID != nil {
+					tk, err := m.taskRepo.Get(ctx, domain.ID(*d.SpawnedTaskID))
+					if err == nil && (tk.Status == task.StatusFailed || tk.Status == task.StatusCancelled) {
+						_ = m.expRepo.UpdateDelegationStatus(ctx, d.ID, "FAILED", `{"reason":"Underlying spawned task failed or cancelled"}`)
+						summary.ReconciledDelegations++
+						slog.Warn("reconciled stuck delegation to FAILED due to task failure", "delegation_id", d.ID, "task_id", *d.SpawnedTaskID)
+					}
+				}
+			}
 		}
 	}
 

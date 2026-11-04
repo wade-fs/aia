@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -466,5 +467,27 @@ func scanDelegationRequest(s rowScanner) (*domainExp.DelegationRequest, error) {
 	}
 	d.CreatedAt, _ = time.Parse(time.RFC3339, ca)
 	d.UpdatedAt, _ = time.Parse(time.RFC3339, ua)
+
+	// Unpack extended delegation spec fields if stored in TaskSpecJSON
+	if d.TaskSpecJSON != "" && d.TaskSpecJSON != "{}" {
+		var spec map[string]any
+		if err := json.Unmarshal([]byte(d.TaskSpecJSON), &spec); err == nil {
+			if pt, ok := spec["parent_task_id"].(string); ok && pt != "" {
+				d.ParentTaskID = &pt
+			}
+			if dlStr, ok := spec["deadline"].(string); ok && dlStr != "" {
+				if t, err := time.Parse(time.RFC3339, dlStr); err == nil {
+					d.Deadline = &t
+				}
+			}
+			if cm, ok := spec["collaboration_mode"].(string); ok && cm != "" {
+				d.CollaborationMode = domainExp.CollaborationMode(cm)
+			}
+			if ps, ok := spec["permission_scope"].(string); ok && ps != "" {
+				d.PermissionScope = ps
+			}
+		}
+	}
+
 	return &d, nil
 }

@@ -247,6 +247,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	recMgr.SetValidator(validator)
 	recMgr.SetWorkspaceManager(wsMgr)
 	recMgr.SetArtifactRepository(artRepo)
+	recMgr.SetContinuityRepository(continuityRepo)
+	recMgr.SetExperimentRepository(experimentRepo)
 
 	// 7. Orchestrator, Policy Evaluator, Governance Service & Memory Retrieval
 	retriever := retrieval.NewRetriever(memRepo, cfg.Memory)

@@ -31,6 +31,10 @@ type AgentResponse struct {
 	RequiresApproval bool
 }
 
+type AgentRepositoryInterface interface {
+	List(ctx context.Context) ([]agent.Agent, error)
+}
+
 type PersonalAgent struct {
 	prov        provider.Provider
 	retriever   *retrieval.Retriever
@@ -38,6 +42,7 @@ type PersonalAgent struct {
 	scheduler   *Scheduler
 	evaluator   *policy.Evaluator
 	autonomyEng *autonomy.Engine
+	agentRepo   AgentRepositoryInterface
 }
 
 func NewPersonalAgent(
@@ -54,6 +59,11 @@ func NewPersonalAgent(
 		scheduler: scheduler,
 		evaluator: evaluator,
 	}
+}
+
+// SetAgentRepository attaches agent repository for dynamic capability discovery (AIA-12 §4).
+func (pa *PersonalAgent) SetAgentRepository(repo AgentRepositoryInterface) {
+	pa.agentRepo = repo
 }
 
 // SetAutonomyEngine wires the Autonomy Core Engine via Strangler Fig delegation (Plan §5.2).
@@ -122,7 +132,7 @@ func (pa *PersonalAgent) HandleInput(ctx context.Context, input UserInput) (*Age
 		}, nil
 	}
 
-	assignedAgent := selectAgentForTask(input.Content)
+	assignedAgent := pa.SelectAgentForTask(ctx, input.Content)
 
 	// Create Parent Root Task
 	rootTask, err := pa.taskSvc.Create(ctx, taskService.CreateTaskRequest{
@@ -169,6 +179,56 @@ func isActionableTask(input string) bool {
 		}
 	}
 	return false
+}
+
+// SelectAgentForTask chooses the best agent using capability discovery with fallback (AIA-12 §4).
+func (pa *PersonalAgent) SelectAgentForTask(ctx context.Context, input string) string {
+	if pa.agentRepo != nil {
+		if agents, err := pa.agentRepo.List(ctx); err == nil && len(agents) > 0 {
+			if matched := MatchAgentByCapabilities(input, agents); matched != "" {
+				return matched
+			}
+		}
+	}
+	return selectAgentForTask(input)
+}
+
+// MatchAgentByCapabilities selects the best agent by analyzing declared capabilities and domain profiles (AIA-12 §4).
+func MatchAgentByCapabilities(input string, availableAgents []agent.Agent) string {
+	lower := strings.ToLower(input)
+	var bestMatch string
+	bestScore := 0
+
+	for _, ag := range availableAgents {
+		if !ag.Enabled {
+			continue
+		}
+		score := 0
+		// 1. Check declared capabilities
+		for _, cap := range ag.Capabilities {
+			capLower := strings.ToLower(cap)
+			if capLower != "" && strings.Contains(lower, capLower) {
+				score += 10
+			}
+		}
+		// 2. Check domain alignment
+		if ag.Domain != "" && strings.Contains(lower, strings.ToLower(ag.Domain)) {
+			score += 5
+		}
+		// 3. Check name and description
+		if strings.Contains(lower, strings.ToLower(ag.Name)) {
+			score += 3
+		}
+		if score > bestScore {
+			bestScore = score
+			bestMatch = string(ag.ID)
+		}
+	}
+
+	if bestScore > 0 {
+		return bestMatch
+	}
+	return ""
 }
 
 func selectAgentForTask(input string) string {

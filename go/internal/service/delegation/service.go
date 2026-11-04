@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,13 +15,18 @@ import (
 )
 
 type CreateDelegationInput struct {
-	ExperimentID       *string        `json:"experiment_id,omitempty"`
-	RequesterAgentID   string         `json:"requester_agent_id"`
-	TargetAgentID      string         `json:"target_agent_id"`
-	SourceProjectID    *string        `json:"source_project_id,omitempty"`
-	GoalID             *string        `json:"goal_id,omitempty"`
-	TaskSpec           map[string]any `json:"task_spec"`
-	AcceptanceCriteria map[string]any `json:"acceptance_criteria"`
+	ExperimentID       *string                     `json:"experiment_id,omitempty"`
+	RequesterAgentID   string                      `json:"requester_agent_id"`
+	TargetAgentID      string                      `json:"target_agent_id"`
+	SourceProjectID    *string                     `json:"source_project_id,omitempty"`
+	GoalID             *string                     `json:"goal_id,omitempty"`
+	ParentTaskID       *string                     `json:"parent_task_id,omitempty"`
+	Deadline           *time.Time                  `json:"deadline,omitempty"`
+	ResourceBudget     map[string]any              `json:"resource_budget,omitempty"`
+	PermissionScope    string                      `json:"permission_scope,omitempty"`
+	CollaborationMode  domainExp.CollaborationMode `json:"collaboration_mode,omitempty"`
+	TaskSpec           map[string]any              `json:"task_spec"`
+	AcceptanceCriteria map[string]any              `json:"acceptance_criteria"`
 }
 
 type Service struct {
@@ -46,7 +52,27 @@ func (s *Service) RequestDelegation(ctx context.Context, in CreateDelegationInpu
 		return nil, fmt.Errorf("cannot delegate to self: requester and target must be distinct agents")
 	}
 
-	specJSON, _ := json.Marshal(in.TaskSpec)
+	taskSpec := in.TaskSpec
+	if taskSpec == nil {
+		taskSpec = make(map[string]any)
+	}
+	if in.ParentTaskID != nil {
+		taskSpec["parent_task_id"] = *in.ParentTaskID
+	}
+	if in.Deadline != nil {
+		taskSpec["deadline"] = in.Deadline.Format(time.RFC3339)
+	}
+	if in.ResourceBudget != nil {
+		taskSpec["resource_budget"] = in.ResourceBudget
+	}
+	if in.PermissionScope != "" {
+		taskSpec["permission_scope"] = in.PermissionScope
+	}
+	if in.CollaborationMode != "" {
+		taskSpec["collaboration_mode"] = string(in.CollaborationMode)
+	}
+
+	specJSON, _ := json.Marshal(taskSpec)
 	gateJSON, _ := json.Marshal(in.AcceptanceCriteria)
 
 	reqID := uuid.New().String()
@@ -55,7 +81,7 @@ func (s *Service) RequestDelegation(ctx context.Context, in CreateDelegationInpu
 	var spawnedTaskID *string
 	if s.taskSvc != nil && in.SourceProjectID != nil {
 		title := fmt.Sprintf("Delegated from %s to %s", in.RequesterAgentID, in.TargetAgentID)
-		if t, ok := in.TaskSpec["title"].(string); ok && t != "" {
+		if t, ok := taskSpec["title"].(string); ok && t != "" {
 			title = t
 		}
 		tk, err := s.taskSvc.Create(ctx, taskService.CreateTaskRequest{
@@ -65,7 +91,10 @@ func (s *Service) RequestDelegation(ctx context.Context, in CreateDelegationInpu
 			Description: string(specJSON),
 			Priority:    1,
 		})
-		if err == nil && tk != nil {
+		if err != nil {
+			return nil, fmt.Errorf("spawn delegated task: %w", err)
+		}
+		if tk != nil {
 			idStr := string(tk.ID)
 			spawnedTaskID = &idStr
 		}
@@ -78,6 +107,10 @@ func (s *Service) RequestDelegation(ctx context.Context, in CreateDelegationInpu
 		TargetAgentID:      in.TargetAgentID,
 		SourceProjectID:    in.SourceProjectID,
 		GoalID:             in.GoalID,
+		ParentTaskID:       in.ParentTaskID,
+		Deadline:           in.Deadline,
+		CollaborationMode:  in.CollaborationMode,
+		PermissionScope:    in.PermissionScope,
 		SpawnedTaskID:      spawnedTaskID,
 		TaskSpecJSON:       string(specJSON),
 		AcceptanceGateJSON: string(gateJSON),
@@ -133,8 +166,93 @@ func (s *Service) DeliverWork(ctx context.Context, id string, deliverable map[st
 	return s.repo.UpdateDelegationStatus(ctx, id, "DELIVERED", string(b))
 }
 
+// EvaluateAcceptanceGate evaluates the submitted deliverable against the acceptance criteria (AIA-12 §6).
+func EvaluateAcceptanceGate(acceptanceGateJSON, deliverableJSON string) (bool, string) {
+	if strings.TrimSpace(acceptanceGateJSON) == "" || strings.TrimSpace(acceptanceGateJSON) == "{}" {
+		return true, "No acceptance criteria specified"
+	}
+	var gate map[string]any
+	if err := json.Unmarshal([]byte(acceptanceGateJSON), &gate); err != nil {
+		return true, "Unparseable acceptance criteria, skipped"
+	}
+	if len(gate) == 0 {
+		return true, "Empty criteria"
+	}
+
+	var deliv map[string]any
+	if err := json.Unmarshal([]byte(deliverableJSON), &deliv); err != nil {
+		return false, "Invalid deliverable JSON format"
+	}
+
+	// 1. Check required keys
+	if reqKeys, ok := gate["required_keys"].([]any); ok {
+		for _, k := range reqKeys {
+			keyStr, _ := k.(string)
+			if keyStr != "" {
+				if _, exists := deliv[keyStr]; !exists {
+					return false, fmt.Sprintf("Missing required deliverable key: %s", keyStr)
+				}
+			}
+		}
+	}
+
+	// 2. Check min_score
+	if minScoreVal, ok := gate["min_score"]; ok {
+		minScore := toFloat(minScoreVal)
+		actualScore := toFloat(deliv["score"])
+		if actualScore == 0 {
+			actualScore = toFloat(deliv["evaluation_score"])
+		}
+		if actualScore < minScore {
+			return false, fmt.Sprintf("Score %.2f is below required minimum %.2f", actualScore, minScore)
+		}
+	}
+
+	// 3. Check min_pass
+	if minPassVal, ok := gate["min_pass"]; ok {
+		minPass := toFloat(minPassVal)
+		actualPass := toFloat(deliv["pass_rate"])
+		if actualPass == 0 && deliv["min_pass"] != nil {
+			actualPass = toFloat(deliv["min_pass"])
+		}
+		if actualPass < minPass {
+			// If boolean tests_passed is provided and true, treat as passing
+			if tp, ok := deliv["tests_passed"].(bool); !ok || !tp {
+				return false, fmt.Sprintf("Pass rate %.2f is below required %.2f", actualPass, minPass)
+			}
+		}
+	}
+
+	// 4. Check explicit tests_passed requirement
+	if reqTests, ok := gate["require_tests_passed"].(bool); ok && reqTests {
+		if tp, ok := deliv["tests_passed"].(bool); !ok || !tp {
+			return false, "Tests did not pass as required by acceptance gate"
+		}
+	}
+
+	return true, "Acceptance criteria satisfied"
+}
+
+func toFloat(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case float32:
+		return float64(n)
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	case json.Number:
+		f, _ := n.Float64()
+		return f
+	default:
+		return 0
+	}
+}
+
 // VerifyDelivery checks if the deliverable satisfies the acceptance gate.
-func (s *Service) VerifyDelivery(ctx context.Context, id string, passed bool, comment string) error {
+func (s *Service) VerifyDelivery(ctx context.Context, id string, callerPassed bool, comment string) error {
 	d, err := s.repo.GetDelegationRequest(ctx, id)
 	if err != nil {
 		return err
@@ -143,10 +261,22 @@ func (s *Service) VerifyDelivery(ctx context.Context, id string, passed bool, co
 		return fmt.Errorf("delegation %s is not in DELIVERED state (current: %s)", id, d.Status)
 	}
 
+	gatePassed, gateReason := EvaluateAcceptanceGate(d.AcceptanceGateJSON, d.DeliverableJSON)
+	finalPassed := callerPassed && gatePassed
+
 	newStatus := "VERIFIED"
-	if !passed {
+	finalComment := comment
+	if !finalPassed {
 		newStatus = "FAILED"
+		if !gatePassed {
+			if finalComment != "" {
+				finalComment = fmt.Sprintf("%s (Acceptance Gate: %s)", finalComment, gateReason)
+			} else {
+				finalComment = fmt.Sprintf("Acceptance Gate Failed: %s", gateReason)
+			}
+		}
 	}
+
 	now := time.Now().UTC()
 	if s.auditRepo != nil {
 		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
@@ -157,7 +287,7 @@ func (s *Service) VerifyDelivery(ctx context.Context, id string, passed bool, co
 			ResourceType: "DELEGATION_REQUEST",
 			ResourceID:   d.ID,
 			Outcome:      newStatus,
-			Details:      json.RawMessage(fmt.Sprintf(`{"passed":%v,"comment":%q}`, passed, comment)),
+			Details:      json.RawMessage(fmt.Sprintf(`{"passed":%v,"gate_passed":%v,"comment":%q}`, finalPassed, gatePassed, finalComment)),
 			CreatedAt:    now,
 		})
 	}

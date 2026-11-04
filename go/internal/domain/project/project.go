@@ -1,19 +1,56 @@
 package project
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/wade/aia/internal/domain"
 )
 
-// ProjectStatus represents the lifecycle state of a project.
+// ProjectStatus represents the lifecycle state of a project (AIA-10 §4.2).
 type ProjectStatus string
 
 const (
-	StatusActive   ProjectStatus = "ACTIVE"
-	StatusPaused   ProjectStatus = "PAUSED"
-	StatusArchived ProjectStatus = "ARCHIVED"
+	StatusDraft     ProjectStatus = "DRAFT"
+	StatusActive    ProjectStatus = "ACTIVE"
+	StatusPaused    ProjectStatus = "PAUSED"
+	StatusBlocked   ProjectStatus = "BLOCKED"
+	StatusReview    ProjectStatus = "REVIEW"
+	StatusCompleted ProjectStatus = "COMPLETED"
+	StatusArchived  ProjectStatus = "ARCHIVED"
+	StatusCancelled ProjectStatus = "CANCELLED"
 )
+
+// PendingIssueSeverity defines criticality of an open project issue (AIA-10 §8.2).
+type PendingIssueSeverity string
+
+const (
+	IssueSeverityLow      PendingIssueSeverity = "LOW"
+	IssueSeverityMedium   PendingIssueSeverity = "MEDIUM"
+	IssueSeverityHigh     PendingIssueSeverity = "HIGH"
+	IssueSeverityCritical PendingIssueSeverity = "CRITICAL"
+)
+
+// PendingIssueStatus defines the progress lifecycle of a tracked issue (AIA-10 §8.2).
+type PendingIssueStatus string
+
+const (
+	IssueStatusOpen               PendingIssueStatus = "OPEN"
+	IssueStatusInProgress         PendingIssueStatus = "IN_PROGRESS"
+	IssueStatusResolvedUnverified PendingIssueStatus = "RESOLVED_UNVERIFIED"
+	IssueStatusBlocked            PendingIssueStatus = "BLOCKED"
+)
+
+// PendingIssue represents a structured issue tracked across sessions (AIA-10 §8.2).
+type PendingIssue struct {
+	ID            string               `json:"id"`
+	Title         string               `json:"title"`
+	Severity      PendingIssueSeverity `json:"severity"`
+	AssignedAgent string               `json:"assigned_agent,omitempty"`
+	Status        PendingIssueStatus   `json:"status"`
+	CreatedAt     time.Time            `json:"created_at"`
+}
 
 // DomainType classifies the project by its managing domain agent.
 // This determines which Observer seeds workspace paths and which Pilot
@@ -37,11 +74,53 @@ type Project struct {
 	DomainType        DomainType    `json:"domain_type,omitempty"`
 	PolicyID          domain.ID     `json:"policy_id"`
 	Status            ProjectStatus `json:"status"`
+	StatusReason      string        `json:"status_reason,omitempty"`
+	Version           int           `json:"version,omitempty"`
 	CreatedAt         time.Time     `json:"created_at"`
 	UpdatedAt         time.Time     `json:"updated_at"`
 	PrimaryGoalID     *string       `json:"primary_goal_id,omitempty"`
 	LatestSnapshotID  *string       `json:"latest_snapshot_id,omitempty"`
 	PendingIssuesJSON string        `json:"pending_issues_json,omitempty"`
+}
+
+// GetPendingIssues decodes structured pending issues, gracefully handling legacy string arrays (AIA-10 §8.2).
+func (p *Project) GetPendingIssues() []PendingIssue {
+	if p.PendingIssuesJSON == "" || p.PendingIssuesJSON == "[]" {
+		return nil
+	}
+	// Try parsing structured issues
+	var structured []PendingIssue
+	if err := json.Unmarshal([]byte(p.PendingIssuesJSON), &structured); err == nil && len(structured) > 0 {
+		return structured
+	}
+	// Fallback to legacy string array
+	var strList []string
+	if err := json.Unmarshal([]byte(p.PendingIssuesJSON), &strList); err == nil {
+		out := make([]PendingIssue, len(strList))
+		for i, s := range strList {
+			out[i] = PendingIssue{
+				ID:        fmt.Sprintf("issue-%d", i+1),
+				Title:     s,
+				Severity:  IssueSeverityMedium,
+				Status:    IssueStatusOpen,
+				CreatedAt: p.UpdatedAt,
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// SetPendingIssues encodes structured issues into the JSON payload (AIA-10 §8.2).
+func (p *Project) SetPendingIssues(issues []PendingIssue) {
+	if len(issues) == 0 {
+		p.PendingIssuesJSON = "[]"
+		return
+	}
+	b, err := json.Marshal(issues)
+	if err == nil {
+		p.PendingIssuesJSON = string(b)
+	}
 }
 
 // ManifestProfile designates the domain profile governing knowledge schema and rules (Plan2.md §5).

@@ -15,12 +15,22 @@ import (
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 )
 
+// CompletenessEvaluation reports context integrity and flags if high-risk operations must pause (AIA-10 §9.4).
+type CompletenessEvaluation struct {
+	Score                float64  `json:"score"`                  // 0.0 ~ 1.0
+	IsComplete           bool     `json:"is_complete"`
+	MissingElements      []string `json:"missing_elements,omitempty"`
+	PauseHighRiskActions bool     `json:"pause_high_risk_actions"`
+	EvaluationNotes      string   `json:"evaluation_notes"`
+}
+
 // ProjectReconstruction represents the fully reconstructed contextual state of a project.
 type ProjectReconstruction struct {
 	ProjectID       string                      `json:"project_id"`
 	ProjectName     string                      `json:"project_name"`
 	Workspace       string                      `json:"workspace"`
 	Status          string                      `json:"status"`
+	Completeness    CompletenessEvaluation      `json:"completeness"`
 	LatestSnapshot  *continuity.ContextSnapshot `json:"latest_snapshot,omitempty"`
 	ActiveGoals     []*goal.Goal                `json:"active_goals"`
 	RecentDecisions []*decision.Decision        `json:"recent_decisions"`
@@ -130,6 +140,56 @@ func (r *Reconstructor) ReconstructProjectState(ctx context.Context, projectID s
 				}
 			}
 		}
+	}
+
+	// 7. Evaluate Context Completeness (AIA-10 §9.4)
+	comp := CompletenessEvaluation{
+		Score:      1.0,
+		IsComplete: true,
+	}
+	if recon.LatestSnapshot == nil {
+		comp.Score -= 0.35
+		comp.MissingElements = append(comp.MissingElements, "SNAPSHOT")
+	}
+	if len(recon.ActiveGoals) == 0 {
+		comp.Score -= 0.35
+		comp.MissingElements = append(comp.MissingElements, "ACTIVE_GOALS")
+	}
+	if len(recon.RecentDecisions) == 0 {
+		comp.Score -= 0.15
+		comp.MissingElements = append(comp.MissingElements, "DECISION_HISTORY")
+	}
+	if comp.Score < 0 {
+		comp.Score = 0
+	}
+	if len(comp.MissingElements) > 0 {
+		comp.IsComplete = false
+		comp.EvaluationNotes = fmt.Sprintf("Context gaps detected: %v", comp.MissingElements)
+	} else {
+		comp.EvaluationNotes = "Context complete and fully verified"
+	}
+
+	// Pause high-risk decisions if score is below safe threshold (< 0.65)
+	if comp.Score < 0.65 {
+		comp.PauseHighRiskActions = true
+	}
+	recon.Completeness = comp
+
+	// Record context loss event if significant gap exists
+	if !comp.IsComplete && r.eventRepo != nil {
+		_ = r.eventRepo.Append(ctx, nil, &continuity.EventHistory{
+			EventID:          uuid.New().String(),
+			EventType:        "CONTEXT_GAPS_DETECTED",
+			EventVersion:     1,
+			AggregateType:    "PROJECT",
+			AggregateID:      projectID,
+			AggregateVersion: 1,
+			ActorID:          "CONTINUITY_RECONSTRUCTOR",
+			PayloadJSON:      fmt.Sprintf(`{"missing_elements":%q,"score":%.2f}`, comp.MissingElements, comp.Score),
+			PayloadHash:      continuity.ComputePayloadHash(fmt.Sprintf("%v:%.2f", comp.MissingElements, comp.Score)),
+			OccurredAt:       time.Now().UTC(),
+			RecordedAt:       time.Now().UTC(),
+		})
 	}
 
 	return recon, nil

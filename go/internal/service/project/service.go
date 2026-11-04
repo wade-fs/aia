@@ -111,8 +111,23 @@ func (s *Service) ListByDomain(ctx context.Context, dt project.DomainType) ([]pr
 	return s.repo.ListByDomain(ctx, dt)
 }
 
-func (s *Service) Archive(ctx context.Context, id domain.ID) error {
-	return s.repo.UpdateStatus(ctx, id, project.StatusArchived)
+// UpdateStatusWithReason transitions a project's state with an explanatory rationale (AIA-10 §4.3).
+func (s *Service) UpdateStatusWithReason(ctx context.Context, id domain.ID, status project.ProjectStatus, reason string) error {
+	p, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	p.Status = status
+	p.StatusReason = reason
+	return s.repo.UpdateStatus(ctx, id, status)
+}
+
+func (s *Service) Archive(ctx context.Context, id domain.ID, reason ...string) error {
+	r := "Project archived"
+	if len(reason) > 0 && reason[0] != "" {
+		r = reason[0]
+	}
+	return s.UpdateStatusWithReason(ctx, id, project.StatusArchived, r)
 }
 
 func (s *Service) Delete(ctx context.Context, id domain.ID) error {
@@ -122,12 +137,48 @@ func (s *Service) Delete(ctx context.Context, id domain.ID) error {
 	return s.repo.Delete(ctx, id)
 }
 
-func (s *Service) Pause(ctx context.Context, id domain.ID) error {
-	return s.repo.UpdateStatus(ctx, id, project.StatusPaused)
+func (s *Service) Pause(ctx context.Context, id domain.ID, reason ...string) error {
+	r := "Project paused"
+	if len(reason) > 0 && reason[0] != "" {
+		r = reason[0]
+	}
+	return s.UpdateStatusWithReason(ctx, id, project.StatusPaused, r)
 }
 
-func (s *Service) Reopen(ctx context.Context, id domain.ID) error {
-	return s.repo.UpdateStatus(ctx, id, project.StatusActive)
+func (s *Service) Reopen(ctx context.Context, id domain.ID, reason ...string) error {
+	r := "Project reopened"
+	if len(reason) > 0 && reason[0] != "" {
+		r = reason[0]
+	}
+	return s.UpdateStatusWithReason(ctx, id, project.StatusActive, r)
+}
+
+func (s *Service) Block(ctx context.Context, id domain.ID, reason string) error {
+	if reason == "" {
+		reason = "Project blocked by policy or unresolved blockers"
+	}
+	return s.UpdateStatusWithReason(ctx, id, project.StatusBlocked, reason)
+}
+
+func (s *Service) MarkReview(ctx context.Context, id domain.ID, reason string) error {
+	if reason == "" {
+		reason = "Project submitted for review"
+	}
+	return s.UpdateStatusWithReason(ctx, id, project.StatusReview, reason)
+}
+
+func (s *Service) Complete(ctx context.Context, id domain.ID, reason string) error {
+	if reason == "" {
+		reason = "Project goals completed"
+	}
+	return s.UpdateStatusWithReason(ctx, id, project.StatusCompleted, reason)
+}
+
+func (s *Service) Cancel(ctx context.Context, id domain.ID, reason string) error {
+	if reason == "" {
+		reason = "Project cancelled"
+	}
+	return s.UpdateStatusWithReason(ctx, id, project.StatusCancelled, reason)
 }
 
 type ProjectValidationReport struct {

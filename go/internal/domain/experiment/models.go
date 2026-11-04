@@ -168,19 +168,32 @@ type ExperimentComparison struct {
 	CandidateTrackB           TrackBAutonomy    `json:"candidate_track_b"`
 }
 
+// CollaborationMode defines multi-agent interaction patterns (AIA-12 §7).
+type CollaborationMode string
+
+const (
+	CollabSequential CollaborationMode = "SEQUENTIAL"
+	CollabParallel   CollaborationMode = "PARALLEL"
+	CollabReviewLoop CollaborationMode = "REVIEW_LOOP"
+)
+
 // DelegationRequest models cross-domain agent delegation (AIA-12, Migration 012).
 type DelegationRequest struct {
-	ID                 string    `json:"id"`
-	ExperimentID       *string   `json:"experiment_id,omitempty"`
-	RequesterAgentID   string    `json:"requester_agent_id"`
-	TargetAgentID      string    `json:"target_agent_id"`
-	SourceProjectID    *string   `json:"source_project_id,omitempty"`
-	GoalID             *string   `json:"goal_id,omitempty"`
-	SpawnedTaskID      *string   `json:"spawned_task_id,omitempty"`
-	TaskSpecJSON       string    `json:"task_spec_json"`
-	AcceptanceGateJSON string    `json:"acceptance_gate_json"`
-	DeliverableJSON    string    `json:"deliverable_json"`
-	Status             string    `json:"status"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                 string             `json:"id"`
+	ExperimentID       *string            `json:"experiment_id,omitempty"`
+	RequesterAgentID   string             `json:"requester_agent_id"`
+	TargetAgentID      string             `json:"target_agent_id"`
+	SourceProjectID    *string            `json:"source_project_id,omitempty"`
+	GoalID             *string            `json:"goal_id,omitempty"`
+	ParentTaskID       *string            `json:"parent_task_id,omitempty"`
+	Deadline           *time.Time         `json:"deadline,omitempty"`
+	CollaborationMode  CollaborationMode  `json:"collaboration_mode,omitempty"`
+	PermissionScope    string             `json:"permission_scope,omitempty"`
+	SpawnedTaskID      *string            `json:"spawned_task_id,omitempty"`
+	TaskSpecJSON       string             `json:"task_spec_json"`
+	AcceptanceGateJSON string             `json:"acceptance_gate_json"`
+	DeliverableJSON    string             `json:"deliverable_json"`
+	Status             string             `json:"status"`
+	CreatedAt          time.Time          `json:"created_at"`
+	UpdatedAt          time.Time          `json:"updated_at"`
 }

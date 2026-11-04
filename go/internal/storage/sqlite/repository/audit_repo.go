@@ -227,3 +227,13 @@ func (r *AuditRepository) Query(ctx context.Context, f AuditFilter) ([]AuditLogE
 	}
 	return list, rows.Err()
 }
+
+// PurgeOlderThan removes audit logs created before cutoff (implements AIA-19 logging.retain_days).
+func (r *AuditRepository) PurgeOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	cutoffStr := cutoff.UTC().Format(time.RFC3339)
+	res, err := r.db.RawDB().ExecContext(ctx, "DELETE FROM audit_logs WHERE created_at < ?", cutoffStr)
+	if err != nil {
+		return 0, fmt.Errorf("failed to purge old audit logs: %w", err)
+	}
+	return res.RowsAffected()
+}

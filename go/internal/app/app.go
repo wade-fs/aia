@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/wade/aia/internal/autonomy"
 	"github.com/wade/aia/internal/config"
@@ -114,6 +116,26 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	// 0. Initialize Structured Logger from Configuration (AIA-19)
+	var logLevel slog.Level
+	switch strings.ToLower(cfg.Logging.Level) {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "warn", "warning":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	default:
+		logLevel = slog.LevelInfo
+	}
+	var logHandler slog.Handler
+	if strings.ToLower(cfg.Logging.Format) == "text" {
+		logHandler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})
+	} else {
+		logHandler = slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})
+	}
+	slog.SetDefault(slog.New(logHandler))
+
 	// 1. Initialize SQLite Database
 	db, err := sqlite.NewDB(cfg.Database.Path)
 	if err != nil {
@@ -129,6 +151,17 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	memRepo := repository.NewMemoryRepository(db)
 	artRepo := repository.NewArtifactRepository(db)
 	auditRepo := repository.NewAuditRepository(db)
+
+	// 2.1 Enforce Log Retention Policy (AIA-19, config.Logging.RetainDays)
+	if cfg.Logging.RetainDays > 0 {
+		cutoff := time.Now().UTC().AddDate(0, 0, -cfg.Logging.RetainDays)
+		if purged, err := auditRepo.PurgeOlderThan(ctx, cutoff); err == nil && purged > 0 {
+			slog.Info("purged expired audit logs based on logging.retain_days", "count", purged, "retain_days", cfg.Logging.RetainDays)
+		}
+		if purged, err := execRepo.PurgeEventsOlderThan(ctx, cutoff); err == nil && purged > 0 {
+			slog.Info("purged expired execution events based on logging.retain_days", "count", purged, "retain_days", cfg.Logging.RetainDays)
+		}
+	}
 	invRepo := repository.NewInvestmentRepository(db)
 	invDataRepo := repository.NewInvestmentDataRepository(db)
 	schedRepo := repository.NewScheduleRepository(db)

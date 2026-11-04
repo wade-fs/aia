@@ -2,8 +2,8 @@
 
 **Project:** Autonomous Intelligence Architecture (AIA)  
 **Version:** v2.0 (Official Baseline)  
-**Baseline Roadmap:** Master Implementation Plan fulfilled across Phases 0–6  
-**Last Updated:** 2026-11-02  
+**Baseline Roadmap:** Master Implementation Plan fulfilled across Phases 0–7  
+**Last Updated:** 2026-11-04  
 
 ---
 
@@ -13,12 +13,12 @@
 AIA operates as a resident, local-first autonomous intelligence platform (`systemd --user`) on Linux / macOS. It coordinates specialized domain agents (Investment, Coding, Writing), manages long-term project continuity, maintains verifiable evidence provenance, and continuously improves its capabilities through safe closed-loop self-correction.
 
 AIA executes a **Dual-Track Evolution Model**:
-- **Infrastructure Track:** Runtime ➔ Continuity ➔ Evidence ➔ Governance ➔ Autonomy Core ➔ Learning ➔ Safe Evolution.
-- **Autonomy Capability Validation Track:** Investment Pilot ➔ Closed Loop ➔ Self-Correction ➔ Multi-Domain Integration ➔ Safe Self-Modification.
+- **Infrastructure Track:** Runtime ➔ Continuity ➔ Evidence ➔ Governance ➔ Autonomy Core ➔ Learning ➔ Safe Evolution ➔ Universal Planning.
+- **Autonomy Capability Validation Track:** Investment Pilot ➔ Closed Loop ➔ Self-Correction ➔ Multi-Domain Integration ➔ Safe Self-Modification ➔ Complex Problem Decomposition.
 
 ---
 
-## 2. Seven-Phase Implementation Roadmap
+## 2. Master Implementation Roadmap
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -34,12 +34,15 @@ AIA executes a **Dual-Track Evolution Model**:
 ├───────────────────┴───────────────────┴────────────────────────────────┤
 │ Phase 6: Safe Self-Modification & Autonomous System Evolution          │
 │                              [COMPLETED]                               │
+├────────────────────────────────────────────────────────────────────────┤
+│ Phase 7: Universal Brief, Clarification & Complex Problem Planning     │
+│ [COMPLETED IN DATA & SERVICES, INTEGRATION IN PROGRESS] (AIA-21, 22)   │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. Autonomy Milestones (M0 ～ M8)
+## 3. Autonomy Milestones (M0 ～ M10)
 
 Progress is evaluated by verifiable, computable autonomous behavior rather than package or table count (see [AIA-13](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md) for M3–M7 quantitative acceptance thresholds):
 
@@ -52,6 +55,8 @@ Progress is evaluated by verifiable, computable autonomous behavior rather than 
 - **M6: Governed Goal Evolution** ── 3-way goal evolution taxonomy (`PERSISTENCE`, `OPTIMIZATION`, `REVISION`) with Anti-Goalpost-Moving guard preventing unapproved metric weakening on `STRATEGIC` goals. *(Completed — Phase 4)*
 - **M7: Domain Experiments & Longitudinal Validation** ── Longitudinal validation of `L3_GENERALIZED` learning across Investment (NT$100,000 virtual capital + historical PiT replay), Coding, and Writing experiments, plus cross-domain `DelegationRequest`. *(Completed — Phase 5)*
 - **M8: Safe Self-Modification** ── OS-isolated sandbox code modification, automated multi-level test verification, human approval gate, and automatic rollback. *(Completed — Phase 6)*
+- **M9: Universal Intent & Proactive Clarification** ── Dynamic Project Brief YAML generation, schema validation, blocking clarification management, and field change provenance history (AIA-21). *(Completed in Data & Service layers)*
+- **M10: Complex Problem Modeling & Versioned Planning** ── Multi-perspective problem modeling (objectives, facts, assumptions, risks), analysis deduction records, versioned execution plans with approval-gated modifications (AIA-22). *(Completed in Data & Service layers)*
 
 ---
 
@@ -110,3 +115,16 @@ Progress is evaluated by verifiable, computable autonomous behavior rather than 
   - `ApplyMerge`: Merges verified changes into target branch (strictly enforcing human ownership for Level B).
   - **Zero-Residual Rollback**: Automatic clean teardown of worktrees, branch pruning, and zero workspace pollution on verification failure.
 - **Autonomous System Evolution Engine (`internal/autonomy/self_evolution_engine.go`)**: Coordinates periodic autonomous inspection, hypothesis generation, modification proposal creation, sandbox verification, and end-to-end evolution cycles.
+
+### Phase 7: Universal Brief, Clarification & Complex Problem Planning *(Data & Services Complete, Autonomy Core Integration Next)*
+- **Universal Project Brief & Dynamic Clarification (AIA-21)**:
+  - **Migration `016` (`project_briefs`, `brief_field_history`) & `017` (`clarification_requests`)**: Unified schema persistence for project briefs, immutable field version history, and structured clarification questions with blocking flags.
+  - **Domain Brief Service (`internal/service/brief/`)**: Domain template validation, YAML parsing, readiness status checks, and field history tracking.
+  - **Clarification Service (`internal/service/clarification/`)**: Management of interactive questions, options serialization, user answer recording, and task unblocking.
+  - **CLI & REST API**: CLI commands (`aia brief`, `aia clarify`) and HTTP endpoints (`/api/v1/briefs`, `/api/v1/clarifications`).
+- **Complex Problem Analysis & Versioned Planning (AIA-22)**:
+  - **Migration `018` (`problems`, `problem_models`, `analysis_records`, `plans`, `plan_changes`)**: Relational problem modeling (objectives, constraints, facts, assumptions, unknowns, risks, success criteria), deduction analysis records, and versioned plan trees.
+  - **Problem Analysis Service (`internal/service/problem/`)**: Multi-stage problem decomposition and validation (verified by `tests/integration/problem_stage1_to_5_test.go`).
+  - **Versioned Plan Service (`internal/service/plan/`)**: Versioned work item graphs, supersede chains, and plan alteration governance.
+  - **CLI & REST API**: CLI commands (`aia problem`, `aia plan`) and HTTP endpoints (`/api/v1/problems`, `/api/v1/plans`).
+  - **Autonomy Core Integration**: Wiring problem modeling and plan generation into the 11-step Autonomy Loop (`internal/autonomy/cycle.go`), Initiative proactive discovery, and Self-Correction workflows.

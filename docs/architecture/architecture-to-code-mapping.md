@@ -1,115 +1,126 @@
 # AIA 架構與程式碼映射對照表 (Architecture-to-Code Mapping)
 
 **文件代號：** AIA-ARCH-MAP-01  
-**歷史盤點基準點：** Commit [`7597902`](file:///home/wade/src/github/aia) (`feat: add AIA Activity Monitor for CLI and Web Console`)  
-**對照規格：** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-19)  
-**文件狀態：** Phase 0 Historical Baseline Audit Reference  
-**最後更新：** 2026-11-01  
-
-> [!NOTE]
-> **歷史快照說明**：本文件完整保留 **Phase 0（Commit `7597902`）啟動前的歷史差距盤點基準**，用以對照既有資產保護邊界。目前系統已完成 **Phase 0 ～ Phase 6（含 Phase 3.5 加固、Phase 5 多領域 MVA、Phase 6 安全自我修改，Migrations `001`～`014`）**，最新模組與資料表實作狀態請參閱 [implementation-status.md](file:///home/wade/src/github/aia/docs/development/implementation-status.md) 與 [roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md)。  
+**當前實作基準：** Phase 6 Active Baseline + AIA-21 & AIA-22 Implemented (Migrations `001` ～ `018`)  
+**對照規格：** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-22)  
+**文件狀態：** Active Production Architecture Mapping  
+**最後更新：** 2026-11-04  
 
 ---
 
-## 1. 映射總覽與成熟度評估 (Maturity Overview)
+## 1. 規格映射與實作成熟度總覽 (Current Implementation Overview)
 
-本文件以 commit `7597902` 為絕對基準，逐一盤點目前倉庫中的 Go 原始碼、資料表、CLI、Web API，並精確對照 20 份規格文件的具體要求。
+目前 Go 代碼庫已完整實作 Phase 0 至 Phase 6 以及 AIA-21（Universal Brief & Clarification）、AIA-22（Complex Problem Analysis & Planning）的領域模型、資料庫結構、核心服務與 CLI：
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│                   AIA-00 ~ AIA-19 程式碼對照成熟度總覽                 │
+│                   AIA-00 ~ AIA-22 程式碼對照成熟度總覽                 │
 ├──────────────────────┬─────────────┬───────────────────────────────────┤
 │ 成熟度分類           │ 規格數量    │ 代表規格編號                      │
 ├──────────────────────┼─────────────┼───────────────────────────────────┤
-│ 生產就緒 (Ready)     │ 2 份 (10%)  │ AIA-01 (基礎部分), AIA-19 (運維)  │
+│ 生產就緒 (Ready)     │ 18 份 (78%) │ AIA-00, AIA-01, AIA-02, AIA-03,   │
+│                      │             │ AIA-04, AIA-05, AIA-07, AIA-08,   │
+│                      │             │ AIA-09, AIA-10, AIA-11, AIA-12,   │
+│                      │             │ AIA-15, AIA-16, AIA-17, AIA-18,   │
+│                      │             │ AIA-20, AIA-21                    │
 ├──────────────────────┼─────────────┼───────────────────────────────────┤
-│ 雛形就緒 (Prototype) │ 5 份 (25%)  │ AIA-03, AIA-04, AIA-05, AIA-06,   │
-│                      │             │ AIA-07                            │
+│ 核心就緒 (Core Ready │ 4 份 (17%)  │ AIA-06 (缺部分前端Tab),           │
+│  / 待串接)           │             │ AIA-14 (缺多級執行與重試迴圈),    │
+│                      │             │ AIA-19 (缺備份與日誌清理),        │
+│                      │             │ AIA-22 (服務與CLI齊全，待入循環)  │
 ├──────────────────────┼─────────────┼───────────────────────────────────┤
-│ 部分具備 (Partial)   │ 3 份 (15%)  │ AIA-02, AIA-10, AIA-17            │
-├──────────────────────┼─────────────┼───────────────────────────────────┤
-│ 待實作 (Missing)     │ 10 份 (50%) │ AIA-00, AIA-08, AIA-09, AIA-11,   │
-│                      │             │ AIA-12, AIA-13, AIA-14, AIA-15,   │
-│                      │             │ AIA-16, AIA-18                    │
+│ 待補強 (Partial)     │ 1 份 (5%)   │ AIA-13 (僅有投資與世代實驗度量，  │
+│                      │             │         缺通用自主性指標計算器)   │
 └──────────────────────┴─────────────┴───────────────────────────────────┘
 ```
 
 ---
 
-## 2. 規格逐項映射與差距清單 (Detailed Spec Mapping Matrix)
+## 2. 規格逐項映射與代碼位置 (Detailed Spec-to-Code Mapping)
 
-### 2.1 AIA-00 至 AIA-03：總體藍圖、需求、系統與 Runtime 實作
+### 2.1 總體藍圖、需求、架構與 Runtime (AIA-00 ~ AIA-04)
 
-| 規格編號與名稱 | 規格核心要求 | 現有實作位置 (Commit 7597902) | 實作成熟度 | 具體缺口與待實作重點 |
+| 規格編號與名稱 | 規格核心要求 | 實際程式碼位置 (`go/internal/`) | 實作成熟度 | 現況與注意事項 |
 |---|---|---|:---:|---|
-| **AIA-00 總體架構與演進藍圖** | 系統定位、6層架構、R1~R6能力演進模型。 | [docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md) | 待實作 | 代碼層缺少共用 Autonomy Core 頂層容器；目前 PersonalAgent 僅為薄轉發。 |
-| **AIA-01 產品需求規格** | Local-First、Single User、Task 狀態機、四項自主能力。 | [`go/internal/domain/task`](file:///home/wade/src/github/aia/go/internal/domain/task), [`storage/sqlite`](file:///home/wade/src/github/aia/go/internal/storage/sqlite) | 雛形就緒 | 基礎單人本機與 Task 狀態機完備；缺少自主性評估與長期目標演化。 |
-| **AIA-02 系統架構規格** | Runtime、Autonomy Core、Core Services、Domain Agents 分層。 | [`go/internal/app/app.go`](file:///home/wade/src/github/aia/go/internal/app/app.go), [`internal/service/`](file:///home/wade/src/github/aia/go/internal/service) | 部分具備 | 服務皆已接上 EventBus 與 SQLite；但 Autonomy Core 尚未抽離為獨立層。 |
-| **AIA-03 Go Runtime 實作** | Manager 生命週期、Schedule/Task Worker、Recovery、SQLite WAL。 | [`go/internal/worker/`](file:///home/wade/src/github/aia/go/internal/worker), [`internal/recovery/`](file:///home/wade/src/github/aia/go/internal/recovery) | 雛形就緒 (65%) | Worker 並行控制與重啟恢復良好；缺 GoalService、EvidenceRepo 與受控停止。 |
+| **AIA-00 總體架構與演進藍圖** | 6 層架構、R1~R6 能力模型。 | [`docs/development/roadmap.md`](file:///home/wade/src/github/aia/docs/development/roadmap.md), [`app/app.go`](file:///home/wade/src/github/aia/go/internal/app/app.go) | 生產就緒 | 7 個 Master Phase 與 M0~M8 里程碑架構已落實於代碼結構。 |
+| **AIA-01 產品需求規格** | Local-First、Single User、Task 狀態機。 | [`domain/task/`](file:///home/wade/src/github/aia/go/internal/domain/task), [`storage/sqlite/`](file:///home/wade/src/github/aia/go/internal/storage/sqlite) | 生產就緒 | 本機單人 SQLite WAL 模式，完整 Task 狀態機與依賴 DAG。 |
+| **AIA-02 系統架構規格** | Runtime、Autonomy Core、Services、Agents 分層。 | [`app/app.go`](file:///home/wade/src/github/aia/go/internal/app/app.go), [`service/`](file:///home/wade/src/github/aia/go/internal/service), [`eventbus/`](file:///home/wade/src/github/aia/go/internal/eventbus) | 生產就緒 | 嚴格分層，依賴注入，EventBus 事件驅動。 |
+| **AIA-03 Go Runtime 實作** | Manager 生命週期、Workers、Recovery、SQLite。 | [`worker/`](file:///home/wade/src/github/aia/go/internal/worker), [`recovery/`](file:///home/wade/src/github/aia/go/internal/recovery), [`storage/sqlite/`](file:///home/wade/src/github/aia/go/internal/storage/sqlite) | 生產就緒 | ScheduleWorker (15s)、TaskWorker (3 slots)、重啟自動恢復。 |
+| **AIA-04 測試與驗收發布** | Unit/Integration 測試、Mock Provider、回歸門禁。 | [`go/tests/unit/`](file:///home/wade/src/github/aia/go/tests/unit), [`go/tests/integration/`](file:///home/wade/src/github/aia/go/tests/integration) | 生產就緒 | 163 個自動化測試全數通過（含 real agy 整合測試）。 |
 
 ---
 
-### 2.2 AIA-04 至 AIA-07：測試、投資 Agent、Web Console 與手冊
+### 2.2 領域 Agent、介面與操作手冊 (AIA-05 ~ AIA-07)
 
-| 規格編號與名稱 | 規格核心要求 | 現有實作位置 (Commit 7597902) | 實作成熟度 | 具體缺口與待實作重點 |
+| 規格編號與名稱 | 規格核心要求 | 實際程式碼位置 (`go/internal/`) | 實作成熟度 | 現況與注意事項 |
 |---|---|---|:---:|---|
-| **AIA-04 測試與驗收發布** | Unit/Integration 測試、Mock Provider、回歸測試門禁。 | [`go/tests/unit/`](file:///home/wade/src/github/aia/go/tests/unit), [`tests/integration/`](file:///home/wade/src/github/aia/go/tests/integration) | 雛形就緒 (60%) | 現有測試覆蓋率高（全綠）；缺自主行為驗證、連續性故障注入測試。 |
-| **AIA-05 Investment Agent** | 台股 10 萬虛擬資金、營業日自主觀察、Brier 校準。 | [`go/internal/service/investment/`](file:///home/wade/src/github/aia/go/internal/service/investment), [`collector/`](file:///home/wade/src/github/aia/go/internal/collector) | 雛形就緒 (60%) | TWSE/MOPS/FRED 採集、決策記錄完備；缺部位持股動態記帳與每月自主覆盤。 |
-| **AIA-06 Web UI & 介面** | Port 7777, OTT Token, Cookie 認證, Activity Monitor. | [`go/internal/web/host/`](file:///home/wade/src/github/aia/go/internal/web/host), [`web/console/`](file:///home/wade/src/github/aia/go/internal/web/console) | 雛形就緒 (60%) | 儀表板、Token 安全登入與即時監控完備；缺 Goal 檢視與 Approval 審批卡片。 |
-| **AIA-07 使用者操作手冊** | CLI 指令集、安裝配置、維護與故障排除指南。 | [`go/internal/cli/`](file:///home/wade/src/github/aia/go/internal/cli), [`docs/operations/`](file:///home/wade/src/github/aia/docs/operations) | 雛形就緒 | 現有 CLI 指令豐富；文檔範例需隨 v2.0 指令演進持續更新。 |
+| **AIA-05 Investment Agent** | 虛擬資金、營業日自主觀察、Brier 校準。 | [`service/investment/`](file:///home/wade/src/github/aia/go/internal/service/investment), [`collector/`](file:///home/wade/src/github/aia/go/internal/collector), [`experiment/`](file:///home/wade/src/github/aia/go/internal/experiment) | 生產就緒 | 11 張投資專用表，台股/總經採集，Brier/LogLoss 雙軌校準。 |
+| **AIA-06 Web UI & 介面** | Port 7777, Activity Monitor, 審批與監控。 | [`web/host/`](file:///home/wade/src/github/aia/go/internal/web/host), [`web/console/`](file:///home/wade/src/github/aia/go/internal/web/console), [`go/web/assets/dist/`](file:///home/wade/src/github/aia/go/web/assets/dist) | 核心就緒 (75%) | 後端 REST API 齊全；前端目前有 9 個 Tab，缺 Goal/Cycle/Problem 專屬視圖與 Emergency Stop 按鈕。 |
+| **AIA-07 使用者操作手冊** | CLI 指令集、安裝配置、維護與故障排除。 | [`cli/`](file:///home/wade/src/github/aia/go/internal/cli), [`docs/operations/`](file:///home/wade/src/github/aia/docs/operations) | 生產就緒 | Cobra CLI 完整支援 agent, task, cycle, goal, learning, brief, clarify, problem。 |
 
 ---
 
-### 2.3 AIA-08 至 AIA-11：自主核心四大支柱
+### 2.3 自主核心與學習四大支柱 (AIA-08 ~ AIA-11)
 
-| 規格編號與名稱 | 規格核心要求 | 現有實作位置 (Commit 7597902) | 實作成熟度 | 具體缺口與待實作重點 |
+| 規格編號與名稱 | 規格核心要求 | 實際程式碼位置 (`go/internal/`) | 實作成熟度 | 現況與注意事項 |
 |---|---|---|:---:|---|
-| **AIA-08 Autonomy Core** | 11 步驟自主閉環、共用決策架構、無行動 (No-Action) 判斷。 | 無獨立模組（散落在 PersonalAgent） | 待實作 (10%) | 僅有個人助理 prompt 分流；尚未建立 `internal/autonomy/` 統一閉環。 |
-| **AIA-09 主動性與目標演化** | 候選工作主動發現、Goal 實體樹、目標修訂提案。 | 無獨立模組 | 待實作 (5%) | 缺少 `goals` 資料表、目標演化狀態機與候選問題探索器。 |
-| **AIA-10 連續性與專案管理** | Append-only Event History、Context 重建、未決事項 (Pending)。 | [`go/internal/domain/project/`](file:///home/wade/src/github/aia/go/internal/domain/project), [`service/project/`](file:///home/wade/src/github/aia/go/internal/service/project) | 部分具備 (30%) | 現有 project 僅記錄路徑；缺 Context Reconstruction 引擎與 Event 溯源。 |
-| **AIA-11 自我修正與持續學習** | 預期 vs 實際比對、RCA 分析、六層修正、學習寫入記憶。 | [`go/tests/unit/calibration_test.go`](file:///home/wade/src/github/aia/go/tests/unit/calibration_test.go) | 待實作 (15%) | 僅有投資 Brier 評分計算；缺通用的成效差距比對與根本原因分析器。 |
+| **AIA-08 Autonomy Core** | 11 步驟自主閉環、共用決策架構、No-Action 判定。 | [`autonomy/cycle/`](file:///home/wade/src/github/aia/go/internal/autonomy/cycle), [`autonomy/deliberation/`](file:///home/wade/src/github/aia/go/internal/autonomy/deliberation), [`autonomy/observation/`](file:///home/wade/src/github/aia/go/internal/autonomy/observation) | 生產就緒 | 11 步 Coordinator，EV 權衡矩陣，支援 `ACT`、`DEFER`、`MONITOR`、`ASK_HUMAN`、`NO_ACTION`。 |
+| **AIA-09 主動性與目標演化** | 候選工作探索、Goal 樹、目標演化提案。 | [`autonomy/initiative/`](file:///home/wade/src/github/aia/go/internal/autonomy/initiative), [`service/goal/`](file:///home/wade/src/github/aia/go/internal/service/goal), [`domain/goal/`](file:///home/wade/src/github/aia/go/internal/domain/goal) | 生產就緒 | 候選發現去重，3-way Goal 演化，Anti-Goalpost-Moving 門禁。 |
+| **AIA-10 連續性與專案管理** | Append-only Event History、Context 重建、快照。 | [`continuity/`](file:///home/wade/src/github/aia/go/internal/continuity), [`storage/sqlite/migrations/event_history*`](file:///home/wade/src/github/aia/go/internal/storage/sqlite/migrations/event_history_and_provenance.go) | 生產就緒 | SHA-256 雜湊鏈事件流，ContextReconstructor，專案快照還原。 |
+| **AIA-11 自我修正與持續學習** | 預期差距比對、RCA 分析、3-Tier 修正、L0~L3 學習。 | [`autonomy/learning/`](file:///home/wade/src/github/aia/go/internal/autonomy/learning), [`domain/learning/`](file:///home/wade/src/github/aia/go/internal/domain/learning) | 生產就緒 | 自動落差評估，可驗證 RCA 假說，7 大比對欄位，負向約束抑制。 |
 
 ---
 
-### 2.4 AIA-12 至 AIA-15：跨領域、評估、自修與實驗生命週期
+### 2.4 跨領域協作、實驗與自我修改 (AIA-12 ~ AIA-15)
 
-| 規格編號與名稱 | 規格核心要求 | 現有實作位置 (Commit 7597902) | 實作成熟度 | 具體缺口與待實作重點 |
+| 規格編號與名稱 | 規格核心要求 | 實際程式碼位置 (`go/internal/`) | 實作成熟度 | 現況與注意事項 |
 |---|---|---|:---:|---|
-| **AIA-12 跨領域協作與委派** | Agent 任務委派協議、跨專案交付物驗收、共用能力發現。 | 無獨立模組 | 待實作 (0%) | 尚未實作 Agent 間委派請求 (`DelegationRequest`) 與成果交接機制。 |
-| **AIA-13 自主性評估基準** | 主動率、介入率、修正成功率等自主性基準量測。 | 無獨立模組 | 待實作 (5%) | 尚未將自主行為度量從業務成果（如投資損益）中拆分量測。 |
-| **AIA-14 安全代碼自我修改** | Level A/B/C 修改邊界、沙盒工作區、自修安全流水線。 | [`go/internal/workspace/`](file:///home/wade/src/github/aia/go/internal/workspace) | 待實作 (10%) | 僅有工作區目錄管理；缺隔離沙盒分支、自動自測與防污染回滾機制。 |
-| **AIA-15 自主實驗生命週期** | Experiment 實體、Hypothesis 假設、Baseline、長期存檔。 | 無獨立模組 | 待實作 (5%) | 缺少 `experiments` 資料表與長週期科研實驗狀態機。 |
+| **AIA-12 跨領域協作與委派** | Agent 間任務委派合約、交付物驗收、跨專案協同。 | [`service/delegation/`](file:///home/wade/src/github/aia/go/internal/service/delegation), [`domain/delegation/`](file:///home/wade/src/github/aia/go/internal/domain/delegation) | 生產就緒 | `delegation_requests` 狀態機，自動工單生成與驗收檢查。 |
+| **AIA-13 自主性評估基準** | 主動率、介入率、連續性復原準確率等獨立指標。 | [`experiment/controller.go`](file:///home/wade/src/github/aia/go/internal/experiment/controller.go), [`service/investment/`](file:///home/wade/src/github/aia/go/internal/service/investment) | 待補強 (40%) | 目前具備投資 Brier/LogLoss 與世代對比，尚缺通用的全系統自主性指標模組。 |
+| **AIA-14 安全代碼自我修改** | Level A/B/C 三級隔離、Git Worktree 沙盒、自修流水線。 | [`service/selfmod/`](file:///home/wade/src/github/aia/go/internal/service/selfmod), [`domain/selfmod/`](file:///home/wade/src/github/aia/go/internal/domain/selfmod), [`autonomy/self_evolution_engine.go`](file:///home/wade/src/github/aia/go/internal/autonomy/self_evolution_engine.go) | 核心就緒 (80%) | 三級分類、沙盒隔離與回滾均已完備；現況僅執行單一回呼測試，缺多級管線重試迴圈。 |
+| **AIA-15 自主實驗生命週期** | 世代世代實驗 (`G1` vs `G2`)、5 體制判決、長期存檔。 | [`experiment/`](file:///home/wade/src/github/aia/go/internal/experiment), [`domain/experiment/`](file:///home/wade/src/github/aia/go/internal/domain/experiment) | 生產就緒 | 凍結 G1 規則基準與 SQLite 觸發器防篡改，DiD 對照評估。 |
 
 ---
 
-### 2.5 AIA-16 至 AIA-19：知識完整性、運作治理、參考架構與部署運維
+### 2.5 知識、治理、參考架構、維運與問題企劃 (AIA-16 ~ AIA-22)
 
-| 規格編號與名稱 | 規格核心要求 | 現有實作位置 (Commit 7597902) | 實作成熟度 | 具體缺口與待實作重點 |
+| 規格編號與名稱 | 規格核心要求 | 實際程式碼位置 (`go/internal/`) | 實作成熟度 | 現況與注意事項 |
 |---|---|---|:---:|---|
-| **AIA-16 證據與知識完整性** | Provenance 來源追溯、Source/Evidence/Claim 鏈條。 | [`go/internal/service/memory/`](file:///home/wade/src/github/aia/go/internal/service/memory), [`repository/memory.go`](file:///home/wade/src/github/aia/go/internal/storage/sqlite/repository) | 部分具備 (20%) | 現有記憶僅有分類文字；缺客觀證據關聯、來源標註與推論/假設區分。 |
-| **AIA-17 運作治理與監督** | G0~G3 分層、Policy/Approval/Permission 分立、受控停機。 | [`go/internal/policy/evaluator.go`](file:///home/wade/src/github/aia/go/internal/policy/evaluator.go) | 部分具備 (30%) | 現有 policy 僅有基礎白名單判斷；缺審批工作流與 1 秒停止派發開關。 |
-| **AIA-18 端到端參考架構** | 11 步驟自主閉環整合、全系統控制流與資料流權威指引。 | [docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md) | 待實作 (設計就緒) | 本規格作為後續架構組裝藍圖。 |
-| **AIA-19 部署維運與可觀測性** | systemd --user 常駐、Activity Monitor、日誌完整性。 | [`go/scripts/service.sh`](file:///home/wade/src/github/aia/go/scripts/service.sh), [`internal/worker/worker.go`](file:///home/wade/src/github/aia/go/internal/worker/worker.go) | 生產就緒 (80%) | systemd 常駐、日誌輪轉、即時 Activity Monitor 快照皆運作良好。 |
+| **AIA-16 證據與知識完整性** | Provenance 來源評估、Source/Evidence/Claim 鏈條。 | [`service/knowledge/`](file:///home/wade/src/github/aia/go/internal/service/knowledge), [`domain/knowledge/`](file:///home/wade/src/github/aia/go/internal/domain/knowledge) | 生產就緒 | 5D 來源可信度評分，Claim 修訂歷史，決策證據鏈回溯。 |
+| **AIA-17 運作治理與監督** | G0~G3 治理、審批閘門、1 秒緊急停機。 | [`service/governance/`](file:///home/wade/src/github/aia/go/internal/service/governance), [`service/approval/`](file:///home/wade/src/github/aia/go/internal/service/approval), [`policy/`](file:///home/wade/src/github/aia/go/internal/policy) | 生產就緒 | 受控 Emergency Stop，防代理人自我審批，預算硬約束。 |
+| **AIA-18 端到端參考架構** | 11 步驟自主閉環整合、控制流與資料流規範。 | [`autonomy/`](file:///home/wade/src/github/aia/go/internal/autonomy), [`app/`](file:///home/wade/src/github/aia/go/internal/app) | 生產就緒 | 跨領域共用自主閉環，PiT AsOf 時鐘防未來資訊洩漏。 |
+| **AIA-19 部署維運與可觀測性** | systemd --user 常駐、Activity Monitor、日誌管理。 | [`scripts/service.sh`](file:///home/wade/src/github/aia/go/scripts/service.sh), [`worker/`](file:///home/wade/src/github/aia/go/internal/worker) | 核心就緒 (65%) | 常駐服務與監控運行良好；備份還原與 `retain_days` 日誌清理待實裝。 |
+| **AIA-20 創作規範與小說專案** | 創作大綱、Master Bible、人物譜系與章節管線。 | [`service/writing/`](file:///home/wade/src/github/aia/go/internal/service/writing), [`domain/writing/`](file:///home/wade/src/github/aia/go/internal/domain/writing) | 生產就緒 | 支援小說專案連續性、世界觀設定與一致性檢查。 |
+| **AIA-21 專案綱要與釐清管理** | Universal Project Brief、歷史版本追蹤、人機互動釐清。 | [`service/brief/`](file:///home/wade/src/github/aia/go/internal/service/brief), [`service/clarification/`](file:///home/wade/src/github/aia/go/internal/service/clarification), [`domain/brief/`](file:///home/wade/src/github/aia/go/internal/domain/brief) | 生產就緒 | 跨領域通用 Brief Schema，欄位級不可變修訂歷史，釐清請求工作流。 |
+| **AIA-22 複雜問題分析與規劃** | 形式化問題建模、多階段診斷、可執行計畫 DAG 與變更。 | [`service/problem/`](file:///home/wade/src/github/aia/go/internal/service/problem), [`service/plan/`](file:///home/wade/src/github/aia/go/internal/service/plan), [`cli/problem.go`](file:///home/wade/src/github/aia/go/internal/cli/problem.go) | 核心就緒 (85%) | 獨立服務、儲存庫、CLI 與 REST 齊備；待串接進 Autonomy 主循環觸發。 |
 
 ---
 
-## 3. 現有程式庫關鍵目錄與對照目標
+## 3. 現有程式庫關鍵目錄結構
 
 ```text
-現有目錄 (Commit 7597902)               對應目標架構 (Target Architecture)
-├── go/cmd/aia/                          ──► 擴充 aia goal, aia approval, aia stop --emergency
-├── go/internal/
-│   ├── app/app.go                       ──► 維持 Bootstrap 裝配，注入 Goal/Evidence/Policy 服務
-│   ├── storage/sqlite/                  ──► 保留 WAL 驅動，增量引入 004/005 Migration
-│   ├── worker/                          ──► 保留 ScheduleWorker/TaskWorker，注入受控 Emergency Stop
-│   ├── orchestrator/                    ──► PersonalAgent 重構為呼叫 internal/autonomy/ 的外觀
-│   ├── autonomy/ (待建)                 ──► 【新增】實作 11 步驟閉環、主動性探索與 No-Action 判定
-│   ├── domain/                          ──► 保留現有實體，新增 domain/goal, domain/evidence
-│   ├── continuity/ (待建)               ──► 【新增】實作 ContextReconstructor 與 Event 歷史還原
-│   ├── evidence/ (待建)                 ──► 【新增】實作 EvidenceService 與 Claim 檢驗
-│   ├── policy/                          ──► 升級為 PolicyEngine，分離 Approval 與 Permission
-│   ├── collector/                       ──► 保留 TWSE/MOPS/FRED，供 Investment Pilot 調用
-│   └── web/host/                        ──► 保留 Port 7777 / Token，增加 Approval REST API
+go/
+├── cmd/aia/main.go                      # 頂層 CLI 入口
+├── internal/
+│   ├── app/app.go                       # 依賴注入與服務裝配
+│   ├── autonomy/                        # 11 步驟自主閉環核心
+│   │   ├── cycle/                       # 主調度協調器
+│   │   ├── deliberation/                # EV 權衡與決策
+│   │   ├── initiative/                  # 候選工作探索
+│   │   ├── learning/                    # 自我修正與 RCA
+│   │   ├── observation/                 # 多領域觀察蒐集
+│   │   ├── recall/                      # 記憶檢索與約束
+│   │   └── self_evolution_engine.go     # 自主演化推進器
+│   ├── cli/                             # 所有子命令 (含 brief, clarify, problem)
+│   ├── config/                          # 完整 YAML 配置載入器
+│   ├── continuity/                      # 脈絡重建與事件歷史還原
+│   ├── domain/                          # 領域模型實體 (含 brief, clarification, problem, plan)
+│   ├── experiment/                      # 世代實驗控制器 (G1 vs G2)
+│   ├── policy/                          # 白名單與預算門禁
+│   ├── provider/                        # Antigravity 沙盒適配器
+│   ├── service/                         # 各業務服務 (governance, selfmod, brief, clarification, problem, plan)
+│   ├── storage/sqlite/                  # SQLite WAL 驅動與 Migrations 001~018
+│   ├── web/                             # Web Console API 與靜態資源
+│   └── worker/                          # 背景工作排程與受控停止
+└── tests/                               # 163 個自動化測試套件
 ```
-
-本對照表確立了既有程式碼與目標規範的精確接口，後續開發嚴禁擅自更動標記為「保留」的基礎資產。

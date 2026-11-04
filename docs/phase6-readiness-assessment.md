@@ -27,7 +27,7 @@ Phase 6 的核心使命是**受治理的安全自我修改（Safe Self-Modificat
 | **Layer 2: Knowledge & Consistency Core** | `internal/domain/knowledge/`, `internal/domain/consistency/` | 通用 Entity、Assertion、Temporal、EpistemicStatus 與 ConsistencyEngine |
 | **Layer 3: Workspace Lifecycle** | `internal/workspace/` (ResolveRoot, Boundaries, ChangeTracking, Worktree) | 支援路徑防越界、變更追蹤與 Git Worktree 隔離 |
 | **Layer 4: Project & Manifest** | `internal/domain/project/` (ProjectManifest, DomainProfile, Service) | 支援通用 Profile (歷史、科幻、科研) 與 `book.yaml` 舊版向下相容 |
-| **Layer 5: Governance & Sandbox** | `internal/governance/`, `internal/worker/` | 硬性代幣預算閘門、Bwrap 命名空間隔離、差分審核與回滾 |
+| **Layer 5: Governance & Sandbox** | `internal/service/governance/`, `internal/domain/governance/`, `internal/worker/` | 硬性代幣預算閘門、Bwrap 命名空間隔離、差分審核與回滾 |
 
 ---
 

@@ -76,23 +76,96 @@ aia server start
 
 ---
 
-## 5. Budget Gate & Subprocess Sandbox Configuration (YAML)
+## 5. Full YAML Configuration Reference (`config.yaml`)
 
-In `config.yaml` (loaded by [`internal/config/config.go`](file:///home/wade/src/github/aia/go/internal/config/config.go)), AIA enforces pre-flight resource budgets and subprocess OS isolation:
+In addition to `service.env`, AIA supports a comprehensive configuration file (`config.yaml`) loaded from `~/.config/aia/config.yaml` (or custom path via `--config`). The schema is defined by [`internal/config/config.go`](file:///home/wade/src/github/aia/go/internal/config/config.go).
 
 ```yaml
-budget:
-  max_daily_tokens: 500000      # Hard daily token ceiling across executions (0 = unlimited)
-  max_tokens_per_task: 100000   # Per-task token ceiling
-  max_daily_cycles: 24          # Hard daily autonomy cycle ceiling (excess cycles DEFER safely)
+# ==============================================================================
+# AIA Master Configuration (config.yaml)
+# ==============================================================================
 
-sandbox:
-  enable_os_namespace: true     # Wrap agy in bwrap / systemd-run read-only mount namespace when available
-  require_os_namespace: false   # Set true in strict production to fail-closed if mount namespaces are unavailable
-  hidden_paths:                 # Masked with empty tmpfs / InaccessiblePaths inside subprocesses
-    - ~/.config/aia
-    - ~/.local/share/aia
-  allowed_env_vars: []          # Extra non-secret env vars permitted past ScrubEnvironment
+system:
+  name: "AIA"
+  version: "1.0"
+  timezone: "Asia/Taipei"
+
+runtime:
+  data_dir: "~/.local/share/aia"
+  workspace_dir: "~/.local/share/aia/workspaces"
+  max_concurrent_executions: 2      # Global worker slot limit
+  max_concurrent_per_agent: 1       # Per-agent concurrency ceiling
+  shutdown_timeout: 30s             # Graceful teardown timeout for active executions
+
+database:
+  driver: "sqlite"                  # WAL-mode SQLite
+  path: "~/.local/share/aia/aia.db"
+
+provider:
+  default: "antigravity"            # "antigravity" (production agy CLI) or "mock" (testing)
+  antigravity:
+    executable: "agy"               # Executable binary in PATH or absolute path
+    required_version: "1.4.12"
+    version_policy: "minimum"
+    output_format: "stream-json"
+    input_format: "stream-json"
+    default_timeout: 30m            # Hard timeout per agent execution
+    sandbox_required: true          # Refuse to run without sandbox protection
+    sandbox_mode: "auto"            # "auto" | "bwrap" | "systemd" | "strict" | "env_only"
+    require_os_namespace: false     # Set true in high-security environments to fail-closed
+    hidden_paths:                   # Masked with empty tmpfs / InaccessiblePaths
+      - "~/.config/aia"
+      - "~/.local/share/aia"
+    read_only_paths: []
+    allowed_env_vars: []            # Non-secret environment variables permitted past scrub
+    skip_permissions: false
+
+budget:
+  max_daily_tokens: 500000          # Hard daily token ceiling across all executions (0 = unlimited)
+  max_daily_cycles: 48              # Hard daily autonomy cycle ceiling (excess cycles DEFER safely)
+  max_single_execution_tokens: 120000 # Hard limit on tokens consumed by a single execution
+  max_daily_spend: 100000           # Budget ceiling in local micro-units / tracking
+
+orchestrator:
+  max_plan_retries: 1               # Retries on plan decomposition failure
+  max_task_retries: 2               # Retries on individual task execution failure
+  max_subtasks_per_plan: 20         # Maximum task DAG size allowed per plan
+  max_dependency_depth: 8           # Maximum depth of task dependency chain
+
+memory:
+  max_context_items: 20             # Maximum working memory items injected into prompt
+  max_context_bytes: 24000          # Maximum working memory byte budget in prompt
+  auto_create_candidates: true      # Automatically store high-value execution insights as candidates
+  auto_approve_low_risk: false      # Require governance approval even for low-risk candidates
+
+logging:
+  level: "info"                     # "debug" | "info" | "warn" | "error"
+  format: "json"                    # "json" | "text"
+  retain_days: 30                   # Log retention period in days (log maintenance policy)
+
+data_sources:
+  fred_api_key: ""                  # Alternatively set via FRED_API_KEY environment variable
+  finmind_token: ""                 # Alternatively set via FINMIND_TOKEN environment variable
+  alpha_vantage_key: ""             # AlphaVantage API key for global equity data
+  telegram_bot_token: ""            # Telegram bot token for alert notifications
+  telegram_chat_id: ""              # Telegram chat ID for operator alerts
+
+domains:
+  writing:
+    projects:
+      - id: "yuan"
+        name: "元朝系列小說"
+        path: "~/src/github/novel/yuan"
+  coding:
+    projects:
+      - id: "aia"
+        name: "AIA Core Project"
+        path: "~/src/github/aia"
+
+policy:
+  allowed_paths:                    # File-write whitelist (supports ~/ expansion)
+    - "/tmp"
+    - "/var/tmp"
 ```
 
 > **Secret Scrubbing Guarantee**: Regardless of OS namespace availability, [`ScrubEnvironment`](file:///home/wade/src/github/aia/go/internal/provider/antigravity/sandbox.go) strips `AIA_*`, `FRED_API_KEY`, `FINMIND_TOKEN`, and all `*_KEY` / `*_SECRET` / `*_TOKEN` / `*_PASSWORD` variables from child `agy` processes so `service.env` credentials never leak into agent shell sessions.

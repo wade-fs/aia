@@ -1,11 +1,11 @@
 # AIA Development: Implementation Status
 
 **Project:** Autonomous Intelligence Architecture (AIA)  
-**Active Implementation Status:** **Phase 0 ～ Phase 6 Completed + AIA-21 Stage 1** (Phase 6 Safe Self-Modification, Multi-Domain MVA & Writing Dual-Loop Workflow, Universal Project Brief & Field History, Migrations `001` ～ `016` active)  
-**Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Baseline [`0e189d9`](file:///home/wade/src/github/aia) ➔ Phase 5A Baseline [`29d1cb3`](file:///home/wade/src/github/aia) ➔ Phase 5B Baseline ➔ Phase 6 Active Baseline  
-**Specification Baseline:** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-19) v2.0  
+**Active Implementation Status:** **Phase 0 ～ Phase 6 Completed + AIA-21 & AIA-22 Implemented** (Phase 6 Safe Self-Modification, Multi-Domain MVA & Writing Dual-Loop Workflow, Universal Project Brief & Field History, Generic Clarification Management, Complex Problem Analysis & Versioned Planning Engine; Migrations `001` ～ `018` active)  
+**Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Baseline [`0e189d9`](file:///home/wade/src/github/aia) ➔ Phase 5A Baseline [`29d1cb3`](file:///home/wade/src/github/aia) ➔ Phase 5B Baseline ➔ Phase 6 Active Baseline ➔ AIA-21/22 Active  
+**Specification Baseline:** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-22) v2.0  
 **Audit Report:** [docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)  
-**Last Updated:** 2026-11-02  
+**Last Updated:** 2026-11-04  
 
 ---
 
@@ -30,13 +30,13 @@ go/
 │   │   ├── recall/           # L1~L5 working memory + Point-in-Time L2/L3 & negative learnings
 │   │   └── self_evolution_engine.go # Autonomous system evolution coordinator (Phase 6)
 │   ├── cli/                  # CLI commands (agent, task, exec, decision, approval, stop/resume,
-│   │                         #               cycle [--as-of --replay], goal [evolve], learning)
+│   │                         #               cycle [--as-of --replay], goal [evolve], learning, brief, clarify, problem)
 │   ├── collector/            # TWSE, TPEx, SEC, FRED, RSS collectors
-│   ├── config/               # YAML configuration loader (incl. Budget & Sandbox configs)
+│   ├── config/               # YAML configuration loader (incl. Budget, Domains & Sandbox configs)
 │   ├── continuity/           # ContextReconstructor & sanitized snapshot manager
 │   ├── domain/               # Core domain entities (continuity, knowledge, consistency, governance,
-│   │                         #                       goal, decision, autonomy, learning, experiment,
-│   │                         #                       selfmod, investment, coding, writing, project)
+│   │                         #                       goal, decision, autonomy, learning, experiment, selfmod,
+│   │                         #                       investment, coding, writing, project, brief, clarification, problem, plan)
 │   ├── eventbus/             # In-memory pub/sub event bus
 │   ├── experiment/           # Generational Experiment Controller (G1 frozen rules vs G2/G2.x LLM)
 │   ├── orchestrator/         # Scheduler & PersonalAgent Strangler-Fig coordinator
@@ -46,8 +46,8 @@ go/
 │   ├── recovery/             # Process restart recovery manager
 │   ├── service/              # Application services (agent, task, exec, inv, mem, knowledge,
 │   │                         #                       approval, governance, goal + evolution, delegation,
-│   │                         #                       selfmod pipeline)
-│   ├── storage/sqlite/       # SQLite WAL driver, migrations 001~014, repositories
+│   │                         #                       selfmod pipeline, brief, clarification, problem, plan)
+│   ├── storage/sqlite/       # SQLite WAL driver, migrations 001~018, repositories
 │   ├── validation/           # Hardened execution validator (output/artifact/fatal-marker checks)
 │   ├── web/                  # Port 7777 host, OTT/session auth, Console REST API (/api/v1/*)
 │   ├── worker/               # Background ScheduleWorker (15s), TaskWorker (5s, 3 slots)
@@ -56,8 +56,8 @@ go/
 │   └── service.sh            # systemd --user service management utility
 ├── Makefile                  # Root and go/ build automation
 └── tests/
-    ├── integration/          # End-to-end integration suites (incl. real agy CLI, Phase 4 & Phase 6)
-    └── unit/                 # Unit suites (incl. Migrations 001~014 & Phase 6 selfmod)
+    ├── integration/          # End-to-end integration suites (incl. real agy CLI, Phase 4, Phase 6, problem_stage1~5)
+    └── unit/                 # Unit suites (incl. Migrations 001~018, Phase 6 selfmod, brief, clarification, problem, plan)
 ```
 
 ---
@@ -94,14 +94,18 @@ go/
 | **`internal/domain/writing`** | **Production Ready (Phase 5B)** | Writing Agent MVA (AIA-15 §23) | 3-tier knowledge (`FACT_HISTORY`, `PLAUSIBLE_INFERENCE`, `FICTION`), manuscript consistency observer referencing `~/src/github/novel/yuan/`, intentional fiction license (`NO_ACTION`) vs chronological contradiction (`L2_VERIFIED`). |
 | **`internal/service/writing` & `domain/writing`** | **Production Ready (Phase 6+)** | Writing Dual-Loop Workflow & Brief Alignment | `CreativeBrief`, deterministic `BriefValidator`, `GapAnalyzer`, `ClarificationRequest` (`ASK_HUMAN` Q&A loop), automatic `BookManifest` / `outline.md` / `master_bible.md` / `characters.md` generation, and `ConsistencyEngine` integration. |
 | **`internal/domain/knowledge` & `consistency`** | **Production Ready (Phase 6)** | Universal Knowledge & Consistency Core | Universal `Entity`, `Relation`, `TemporalReference`, `SpatialReference`, `EpistemicStatus`, `Assertion`, and cross-domain `ConsistencyEngine`. |
-| **`internal/domain/selfmod` & `service/selfmod`** | **Production Ready (Phase 6)** | Safe Self-Modification Pipeline (AIA-14) | Tri-level `ScopeClassifier` (Level A domain, Level B core with human approval gate, Level C fail-closed immutable governance), sandbox worktree execution, multi-level verification (V1 compile, V2 unit, V3 integration), and zero-residual rollback. |
+| **`internal/domain/selfmod` & `service/selfmod`** | **Production Ready (Phase 6)** | Safe Self-Modification Pipeline (AIA-14) | Tri-level `ScopeClassifier` (Level A domain, Level B core with human approval gate, Level C fail-closed immutable governance), sandbox worktree execution, multi-level verification callback, zero-residual rollback, and lifecycle state machine (`DRAFT` ➔ `IN_SANDBOX` ➔ `PENDING_APPROVAL` ➔ `APPROVED` ➔ `VERIFIED` ➔ `MERGED` / `ROLLED_BACK` / `REJECTED`). |
 | **`internal/autonomy (SelfEvolutionEngine)`** | **Production Ready (Phase 6)** | Autonomous Evolution Coordinator (AIA-14) | Periodic autonomous inspection, hypothesis generation, modification proposal creation, sandbox verification, and end-to-end evolution cycles. |
+| **`internal/domain/brief` & `service/brief`** | **Production Ready (AIA-21)** | Universal Project Brief & Field History | Domain-agnostic project brief requirements schema, readiness stage evaluation, and immutable field-level revision history tracking (`brief_field_history`). |
+| **`internal/domain/clarification` & `service/clarification`** | **Production Ready (AIA-21)** | Generic Clarification Management | Interactive human-in-the-loop Q&A (`clarification_requests`), priority/blocking evaluation, option selection, and brief field binding. |
+| **`internal/domain/problem` & `service/problem`** | **Production Ready (AIA-22)** | Complex Problem Analysis & Diagnostic Engine | Formal problem definition, multi-version problem models (`problem_models`), structured analysis records (`analysis_records`), causal graph analysis, and diagnostic CLI/REST interface. |
+| **`internal/domain/plan` & `service/plan`** | **Production Ready (AIA-22)** | Complex Problem Planning & Change Management | Executable plan generation (`plans`), versioned plan modifications, formal change proposals (`plan_changes`), evidence references, and impact analysis. |
 
 ---
 
 ## 3. Database Schema Status
 
-### Active Tables (Migrations 001 ~ 016)
+### Active Tables (Migrations 001 ~ 018)
 - `agents`: Registered agents, capabilities, configurations.
 - `tasks`: Work units, status machine (`READY`, `RUNNING`, `COMPLETED`, `WAITING_APPROVAL`).
 - `task_dependencies`: Inter-task DAG dependencies.
@@ -136,13 +140,20 @@ go/
 - `experiment_generations`: Generational cohorts (`G1` frozen rule baseline vs `G2` / `G2.1` / `G2.2` LLM cohorts) with isolated portfolio profile bindings and SQLite triggers (`trg_exp_gen_freeze_update`, `trg_exp_gen_freeze_delete`) blocking mutation/deletion of frozen `G1` (Migration 012).
 - `experiment_comparisons`: Point-in-time Track A (performance + Brier/LogLoss & decision confidence calibration) and Track B (autonomy + 5-regime verdict) comparison snapshots (Migration 012).
 - `delegation_requests`: Cross-agent delegation contract records with acceptance gates (Migration 012).
-- `self_modification_proposals`: Self-modification proposal tracking with scope levels (`LEVEL_A`, `LEVEL_B`, `LEVEL_C`), patch diff, status machine (`PROPOSED`, `VERIFYING`, `VERIFIED`, `PENDING_APPROVAL`, `APPLIED`, `MERGED`, `FAILED`, `REJECTED`, `ROLLED_BACK`), verification test logs, and approval binding (Migration 014).
+- `self_modification_proposals`: Self-modification proposal tracking with scope levels (`LEVEL_A_DOMAIN`, `LEVEL_B_CORE`, `LEVEL_C_GOVERNANCE`), patch diff, status machine (`DRAFT`, `IN_SANDBOX`, `PENDING_APPROVAL`, `APPROVED`, `VERIFIED`, `MERGED`, `ROLLED_BACK`, `REJECTED`), verification test logs, and approval binding (Migration 014).
 - `writing_briefs`: Creative brief tracking with genre, era, scale, protagonists, worldview, status, and pending questions (Migration 015).
-- `writing_clarifications`: Human clarification requests (`ASK_HUMAN` / `WAITING_FOR_INPUT`) with category, options, user answer, and status (Migration 015).
+- `writing_clarifications`: Domain-specific human clarification requests (`ASK_HUMAN` / `WAITING_FOR_INPUT`) with category, options, user answer, and status (Migration 015).
 - `project_briefs`: Universal project requirements model across all domains with brief version, readiness stage, and YAML payload (Migration 016).
 - `brief_field_history`: Immutable field revision tracking preserving version, old/new value, old/new status, source, rationale, task ID, and clarification ID (Migration 016).
+- `clarification_requests`: Generic human-in-the-loop clarification requests supporting domain type, scope, options, answers, and brief field binding (Migration 017).
+- `problems`, `problem_models`, `analysis_records`: Universal complex problem tracking, multi-version formal problem models, and multi-stage analysis records (Migration 018).
+- `plans`, `plan_changes`: Multi-version executable planning records, work items, acceptance criteria, and formal plan change proposals with impact analysis (Migration 018).
 
 ---
 
-## 4. Phase Completion Status (Phases 0 ～ 6 Complete)
-All 7 master development phases (Phase 0 Baseline, Phase 1 Continuity & Provenance, Phase 2 Governance & Emergency Stop, Phase 3 & 3.5 Autonomy Core & Hardening, Phase 4 Verifiable Self-Correction & Learning, Phase 5 Multi-Domain Experiments & Delegation, Phase 6 Governed Safe Self-Modification & Evolution) are 100% completed and verified via automated test suites.
+## 4. Phase Completion Status & Specification Coverage
+
+All 7 master development phases (Phase 0 Baseline, Phase 1 Continuity & Provenance, Phase 2 Governance & Emergency Stop, Phase 3 & 3.5 Autonomy Core & Hardening, Phase 4 Verifiable Self-Correction & Learning, Phase 5 Multi-Domain Experiments & Delegation, Phase 6 Governed Safe Self-Modification & Evolution) as well as **AIA-21 (Universal Brief & Clarification)** and **AIA-22 (Complex Problem Analysis & Planning)** are implemented in Go and verified via automated test suites.
+
+> [!NOTE]
+> **Evidence Directory Note (`.aia/`)**: The Phase 6 readiness verification evidence artifacts are located at `.aia/evidence/phase6_readiness/` (`scenario_a.yaml` ~ `scenario_e.yaml`) and are tracked in Git. When creating release tarballs or archives, ensure hidden dot-directories are not excluded by standard tar/zip filters.

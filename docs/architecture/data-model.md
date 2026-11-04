@@ -3,9 +3,9 @@
 **文件代號：** AIA-ARCH-DATA-01  
 **適用架構：** AIA v2.0 系列規範 (以 [AIA-SPEC-AUDIT-01](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md) 為基準)  
 **底層儲存：** SQLite (WAL 模式)  
-**現有代碼基準：** Git commit `7597902` (已內建 Migration Version 1 ～ 6)  
+**現有代碼基準：** Git baseline `main` (已內建 Migration Version 1 ～ 18)  
 **文件狀態：** Normative Architectural Baseline  
-**最後更新：** 2026-11-01  
+**最後更新：** 2026-11-04  
 
 ---
 
@@ -656,23 +656,300 @@ CREATE TABLE delegation_requests (
 
 ---
 
+### 3.10 專案領域類別擴充 (Project Domain Type — Migration 013)
+
+依據 [AIA-15 §23/§24](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md)，專案需要宣告對應的主責領域 Agent（如 `investment`、`coding`、`writing`、`general`），以支援開機動態載入相應之 Domain Observer 與 Harness。
+
+```sql
+ALTER TABLE projects ADD COLUMN domain_type TEXT NOT NULL DEFAULT 'general';
+CREATE INDEX IF NOT EXISTS idx_projects_domain_type ON projects(domain_type);
+```
+
+---
+
+### 3.11 自主系統演化與安全自我修改 (Safe Self-Modification Proposals — Migration 014)
+
+依據 [AIA-14](file:///home/wade/src/github/aia/docs/specifications/AIA-14-System-Safe-Self-Modification-and-Evolution-Specification.md) §2 與 §3，系統演化提案在獨立工作區沙盒驗證，並依三級治理範圍審核：
+
+- **Scope Level (`scope_level`)**:
+  - `LEVEL_A_DOMAIN`: 領域腳本、Prompt、設定檔（沙盒測試通過後允許自主合併）
+  - `LEVEL_B_CORE`: AIA 核心非治理服務與 Worker（沙盒測試通過後強制要求人類審批 `PENDING_APPROVAL`）
+  - `LEVEL_C_GOVERNANCE`: 治理、政策、遷移腳本與安全核心（嚴格鎖定不可自我修改，嘗試即中斷並記高危審計日誌）
+- **Lifecycle Status (`status`)**:
+  - `DRAFT` ➔ `IN_SANDBOX` ➔ `PENDING_APPROVAL` (僅限 Level B) ➔ `APPROVED` ➔ `VERIFIED` ➔ `MERGED`
+  - 驗證失敗或拒絕時轉為：`ROLLED_BACK` / `REJECTED`
+
+```sql
+CREATE TABLE IF NOT EXISTS self_modification_proposals (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    target_files_json TEXT NOT NULL DEFAULT '[]',
+    patches_json TEXT NOT NULL DEFAULT '{}',
+    scope_level TEXT NOT NULL,
+    requires_approval BOOLEAN NOT NULL DEFAULT 0,
+    approval_id TEXT,
+    status TEXT NOT NULL,
+    branch_name TEXT NOT NULL DEFAULT '',
+    pre_commit_sha TEXT NOT NULL DEFAULT '',
+    post_commit_sha TEXT NOT NULL DEFAULT '',
+    verification_output TEXT NOT NULL DEFAULT '',
+    rca_log TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL,
+    completed_at DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_selfmod_status ON self_modification_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_selfmod_scope ON self_modification_proposals(scope_level);
+```
+
+---
+
+### 3.12 創作領域簡報與澄清問題 (Writing Domain Brief & Clarifications — Migration 015)
+
+專為小說創作領域建立結構化 CreativeBrief 與澄清提問記錄（依據 [AIA-20](file:///home/wade/src/github/aia/docs/specifications/AIA-20-Book-Manifest-and-Novel-Project-Specification.md)）。
+
+```sql
+CREATE TABLE IF NOT EXISTS writing_briefs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    title TEXT NOT NULL,
+    raw_intent TEXT NOT NULL,
+    genre TEXT NOT NULL,
+    era TEXT NOT NULL DEFAULT '',
+    theme_and_philosophy_json TEXT NOT NULL DEFAULT '[]',
+    scale_json TEXT NOT NULL DEFAULT '{}',
+    core_protagonists_json TEXT NOT NULL DEFAULT '[]',
+    worldview_settings_json TEXT NOT NULL DEFAULT '{}',
+    writing_rules_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL,
+    pending_questions INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_writing_briefs_project ON writing_briefs(project_id);
+CREATE INDEX IF NOT EXISTS idx_writing_briefs_status ON writing_briefs(status);
+
+CREATE TABLE IF NOT EXISTS writing_clarifications (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id),
+    brief_id TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL,
+    question TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    options_json TEXT NOT NULL DEFAULT '[]',
+    user_answer TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    answered_at DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_writing_clarifications_project ON writing_clarifications(project_id);
+CREATE INDEX IF NOT EXISTS idx_writing_clarifications_status ON writing_clarifications(status);
+```
+
+---
+
+### 3.13 通用專案簡報與欄位變更歷程 (Generic Project Brief & Field History — Migration 016)
+
+依據 [AIA-21](file:///home/wade/src/github/aia/docs/specifications/AIA-21-Project-Brief-and-Clarification-Management-Specification.md) §4 與 §12，將創作領域的 Brief 機制提煉為全領域適用的通用專案簡報，並記錄不可竄改的欄位版本演化歷史。
+
+```sql
+CREATE TABLE IF NOT EXISTS project_briefs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    domain TEXT NOT NULL,
+    brief_version INTEGER NOT NULL DEFAULT 1,
+    readiness_status TEXT NOT NULL DEFAULT 'NOT_READY',
+    raw_intent TEXT NOT NULL DEFAULT '',
+    brief_yaml TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(project_id)
+);
+
+CREATE TABLE IF NOT EXISTS brief_field_history (
+    id TEXT PRIMARY KEY,
+    brief_id TEXT NOT NULL REFERENCES project_briefs(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    field_key TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    old_value_json TEXT,
+    new_value_json TEXT,
+    old_status TEXT NOT NULL,
+    new_status TEXT NOT NULL,
+    source TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    related_task_id TEXT,
+    related_clarification_id TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_brief_proj ON project_briefs(project_id);
+CREATE INDEX IF NOT EXISTS idx_brief_hist_key ON brief_field_history(project_id, field_key);
+```
+
+---
+
+### 3.14 通用澄清請求與阻擋機制 (Generic Clarification Request Management — Migration 017)
+
+依據 [AIA-21](file:///home/wade/src/github/aia/docs/specifications/AIA-21-Project-Brief-and-Clarification-Management-Specification.md) §5 與 §12，跨專案通用澄清管理模組，提供多選題選項結構、阻擋性標記（`blocking = 1`）與過期時效。
+
+```sql
+CREATE TABLE IF NOT EXISTS clarification_requests (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    task_id TEXT,
+    field_key TEXT NOT NULL,
+    question TEXT NOT NULL,
+    options_json TEXT NOT NULL DEFAULT '[]',
+    reason TEXT NOT NULL,
+    impact TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 1,
+    blocking INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'OPEN',
+    answer TEXT,
+    answered_at TEXT,
+    expires_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_clarify_proj_status ON clarification_requests(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_clarify_proj_field ON clarification_requests(project_id, field_key);
+```
+
+---
+
+### 3.15 複雜問題建模、分析記錄與版本化計畫 (Complex Problem Modeling, Analysis & Versioned Plans — Migration 018)
+
+依據 [AIA-22](file:///home/wade/src/github/aia/docs/specifications/AIA-22-Complex-Problem-Analysis-and-Planning-Specification.md) §6 與 §12，針對開放式複雜問題建立多維度模型（目標、限制、事實、假設、未知、風險、驗收標準），保存推演分析紀錄，並維護具版本控制與演化審批的執行計畫。
+
+```sql
+CREATE TABLE IF NOT EXISTS problems (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    parent_id TEXT NOT NULL DEFAULT '',
+    goal_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    objective TEXT NOT NULL DEFAULT '',
+    scope TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'OPEN',
+    priority TEXT NOT NULL DEFAULT 'MEDIUM',
+    current_model_version INTEGER NOT NULL DEFAULT 0,
+    current_plan_version INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_problems_project_id ON problems(project_id);
+CREATE INDEX IF NOT EXISTS idx_problems_parent_id ON problems(parent_id);
+CREATE INDEX IF NOT EXISTS idx_problems_status ON problems(status);
+
+CREATE TABLE IF NOT EXISTS problem_models (
+    id TEXT PRIMARY KEY,
+    problem_id TEXT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    objectives_json TEXT NOT NULL DEFAULT '[]',
+    constraints_json TEXT NOT NULL DEFAULT '[]',
+    known_facts_json TEXT NOT NULL DEFAULT '[]',
+    assumptions_json TEXT NOT NULL DEFAULT '[]',
+    unknowns_json TEXT NOT NULL DEFAULT '[]',
+    dependencies_json TEXT NOT NULL DEFAULT '[]',
+    risks_json TEXT NOT NULL DEFAULT '[]',
+    success_criteria_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    UNIQUE(problem_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_problem_models_problem ON problem_models(problem_id);
+
+CREATE TABLE IF NOT EXISTS analysis_records (
+    id TEXT PRIMARY KEY,
+    problem_id TEXT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+    model_version INTEGER NOT NULL,
+    analysis_type TEXT NOT NULL,
+    input_refs_json TEXT NOT NULL DEFAULT '[]',
+    findings_json TEXT NOT NULL DEFAULT '[]',
+    conclusions_json TEXT NOT NULL DEFAULT '[]',
+    open_questions_json TEXT NOT NULL DEFAULT '[]',
+    agent_id TEXT NOT NULL DEFAULT '',
+    execution_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_analysis_records_problem ON analysis_records(problem_id);
+CREATE INDEX IF NOT EXISTS idx_analysis_records_type ON analysis_records(analysis_type);
+
+CREATE TABLE IF NOT EXISTS plans (
+    id TEXT PRIMARY KEY,
+    problem_id TEXT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    objective TEXT NOT NULL,
+    strategy TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'DRAFT',
+    work_items_json TEXT NOT NULL DEFAULT '[]',
+    dependencies_json TEXT NOT NULL DEFAULT '[]',
+    acceptance_criteria_json TEXT NOT NULL DEFAULT '[]',
+    supersedes_plan_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(problem_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_plans_problem ON plans(problem_id);
+CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);
+
+CREATE TABLE IF NOT EXISTS plan_changes (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    from_version INTEGER NOT NULL,
+    to_version INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    affected_work_items_json TEXT NOT NULL DEFAULT '[]',
+    cost_risk_impact TEXT NOT NULL DEFAULT '',
+    requires_human_approval INTEGER NOT NULL DEFAULT 0,
+    approved_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_plan_changes_plan ON plan_changes(plan_id);
+```
+
+---
+
 ## 4. 既有 Schema 向下相容矩陣 (Backward Compatibility)
 
-現行資料表（已內建於 Commit `7597902`，包含 Migration Version 1 ～ 6）保留率達 **100%**：
+現行資料庫包含 Migration Version 1 ～ 18，保留率達 **100%**，所有變更皆遵循向前向後相容原則：
 
 | 現有資料表 / 模組 | 所屬 Migration | 處理策略 | 相容性保證 |
 |---|---|---|---|
-| `projects` | 001 | 擴充 `primary_goal_id`、`latest_snapshot_id` 與 `status`；M:N 關聯由 `goal_project_links` 表承載 | 預設值保證相容 |
+| `projects` | 001, 013 | Migration 001 擴充 `primary_goal_id`、`latest_snapshot_id`；Migration 013 擴充 `domain_type` | 預設值保證相容 |
 | `agents` | 001 | 沿用並擴充 capabilities | 完全向下相容 |
-| `tasks` | 001 | 沿用現有狀態機；於 Migration 012 新增 `experiment_id` 欄位 | 完全向下相容 |
+| `tasks` | 001, 012 | 沿用現有狀態機；於 Migration 012 新增 `experiment_id` 欄位 | 完全向下相容 |
 | `task_dependencies` | 001 | 沿用 | 完全向下相容 |
 | `executions` | 001 | 沿用 | 完全向下相容 |
 | `execution_events` | 001 | 專責單次工單微觀執行日誌，與全域 `event_history` 分流 | 完全向下相容 |
 | `memories` | 001 | 擴充 `provenance_type`、`provenance_ref_type`、`provenance_ref_id` 與 `provenance_status` | 預設值保證相容 |
 | `memory_candidates` | 001 | 沿用，作為短期記憶候選審核載體 | 完全向下相容 |
 | `artifacts` | 001 | 沿用 | 完全向下相容 |
-| `audit_logs` | 001, 002 | 擴充治理專屬欄位（`policy_id`, `decision_id`, `approval_id`, `risk_tier`） | 預設值保證相容，不重複建表 |
-| `investment_*` 表 (全 16 張表)| 003, 004, 005 | 原樣保留，作為 Phase 3 Pilot 記帳、管線與預測基石 | 業務邏輯 100% 沿用，通用 Evidence 垂直鏈結 |
+| `audit_logs` | 001, 002 | 擴充治理專屬欄位（`request_id`, `source`, `metadata_json`, `policy_id`, `decision_id`, `approval_id`, `risk_tier`） | 預設值保證相容，不重複建表 |
+| `investment_*` (全 16 張表) | 003, 004, 005 | 原樣保留，作為 Phase 3 Pilot 記帳、管線與預測基石 | 業務邏輯 100% 沿用，通用 Evidence 垂直鏈結 |
 | `schedules` | 006 | 沿用，支援 Cron 與自動化週期任務排程 | 完全向下相容 |
+| `event_history`, `sources`, `evidence`, `claims`, `claim_evidence_links` | 007 | 新增不可竄改歷史事件與知識真實性鏈結 | 全新獨立表，完全向下相容 |
+| `goals`, `goal_revisions`, `goal_project_links`, `goal_milestones`, `context_snapshots` | 008 | 新增長遠目標治理與連續性狀態快照 | 全新獨立表，完全向下相容 |
+| `policies`, `policy_rules`, `approvals`, `approval_actions` | 009 | 新增三權分立之政策引擎與人類審批流水線 | 全新獨立表，完全向下相容 |
+| `initiatives`, `deliberation_threads`, `decisions`, `decision_evidence_links` | 010 | 新增自主性主動提案與權衡決策鏈結 | 全新獨立表，完全向下相容 |
+| `outcome_evaluations`, `root_cause_analyses`, `correction_actions`, `learning_records`, `goal_evolution_proposals` | 011 | 新增四級學習閉環與防移目標柱機制 | 全新獨立表，完全向下相容 |
+| `experiments`, `experiment_generations`, `experiment_comparisons`, `delegation_requests` | 012 | 新增跨世代對照實驗與跨領域代理委派 | 全新獨立表，完全向下相容 |
+| `self_modification_proposals` | 014 | 新增安全自我修改提案與沙盒驗證生命週期 | 全新獨立表，完全向下相容 |
+| `writing_briefs`, `writing_clarifications` | 015 | 新增小說創作領域需求與澄清提問 | 全新獨立表，完全向下相容 |
+| `project_briefs`, `brief_field_history` | 016 | 新增通用專案簡報與不可竄改欄位演化歷程 (AIA-21) | 全新獨立表，完全向下相容 |
+| `clarification_requests` | 017 | 新增跨專案通用澄清管理與阻擋提問 (AIA-21) | 全新獨立表，完全向下相容 |
+| `problems`, `problem_models`, `analysis_records`, `plans`, `plan_changes` | 018 | 新增開放式複雜問題建模、分析紀錄與版本化執行計畫 (AIA-22) | 全新獨立表，完全向下相容 |
 
-本統一資料模型已徹底消除跨規格歧異，並為後續 Migration (007 ～ 012) 提供了精確欄位規範。
+本統一資料模型已徹底消除跨規格歧異，並為 Migration 001 ～ 018 提供了精確欄位規範與完整向下相容保證。

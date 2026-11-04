@@ -336,6 +336,73 @@ func (d *Discoverer) Discover(ctx context.Context, in DiscoverInput) ([]*domainA
 				UpdatedAt:           now,
 			})
 		}
+
+		// 6. Proactive Problem Escalation from Repeated Failures & High Uncertainty (AIA-22 §10.2, §10.4)
+		if len(in.Recalled.RecentFailedTasks) >= 2 {
+			alreadyHandled := false
+			for _, p := range in.Recalled.ActiveProblems {
+				if p != nil && (strings.Contains(strings.ToLower(p.Title), "failures") || strings.Contains(strings.ToLower(p.Title), "failure")) {
+					alreadyHandled = true
+					break
+				}
+			}
+			if !alreadyHandled {
+				failCount := len(in.Recalled.RecentFailedTasks)
+				var failedTitles []string
+				var failedIDs []string
+				agentVotes := make(map[string]int)
+				for i, ft := range in.Recalled.RecentFailedTasks {
+					if i < 3 {
+						failedTitles = append(failedTitles, ft.Title)
+					}
+					failedIDs = append(failedIDs, string(ft.ID))
+					if string(ft.AgentID) != "" {
+						agentVotes[string(ft.AgentID)]++
+					}
+				}
+				targetAgent := "coding-agent"
+				maxVotes := 0
+				for ag, v := range agentVotes {
+					if v > maxVotes {
+						maxVotes = v
+						targetAgent = ag
+					}
+				}
+
+				summary := fmt.Sprintf("Autonomous Escalation: Repeated task failures (%d tasks failed) in project %s", failCount, in.ProjectID)
+				if !isDuplicateOfActiveTask(summary) && !seenFingerprints[strings.ToLower(summary)] {
+					seenFingerprints[strings.ToLower(summary)] = true
+					metaBytes, _ := json.Marshal(map[string]any{
+						"auto_create_problem": true,
+						"problem_title":       fmt.Sprintf("Resolve Repeated Task Failures: %s", strings.Join(failedTitles, ", ")),
+						"problem_objective":   fmt.Sprintf("Systematically analyze root causes of %d failed tasks and execute verified remediation plan", failCount),
+						"failed_task_ids":     failedIDs,
+						"fail_count":          failCount,
+					})
+
+					candidates = append(candidates, &domainAutonomy.CandidateInitiative{
+						ID:                  uuid.New().String(),
+						CycleID:             in.CycleID,
+						ProjectID:           projPtr,
+						GoalID:              in.GoalID,
+						DiscoveryType:       domainAutonomy.DiscoveryProblem,
+						ConfidenceLevel:     domainAutonomy.ConfidenceConfirmed,
+						TargetAgentID:       targetAgent,
+						TriggerSource:       "AUTONOMOUS_PROBLEM_ESCALATOR",
+						DetectedOpportunity: summary,
+						Rationale:           fmt.Sprintf("Multiple consecutive task failures detected (%d failed tasks); autonomy core escalates to complex problem modeling and versioned plan (AIA-22 §10.2).", failCount),
+						ExpectedOutcome:     "Establish Problem entity, formulate ProblemModel with epistemic verification, and generate versioned Plan work items",
+						PriorityScore:       8,
+						EstimatedCost:       2.0,
+						EstimatedRisk:       governance.RiskTierLow,
+						Status:              domainAutonomy.InitiativeCandidate,
+						MetadataJSON:        string(metaBytes),
+						CreatedAt:           now,
+						UpdatedAt:           now,
+					})
+				}
+			}
+		}
 	}
 
 	sort.SliceStable(candidates, func(i, j int) bool {

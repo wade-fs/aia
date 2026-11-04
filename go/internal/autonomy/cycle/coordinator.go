@@ -19,10 +19,13 @@ import (
 	"github.com/wade/aia/internal/domain/continuity"
 	"github.com/wade/aia/internal/domain/decision"
 	"github.com/wade/aia/internal/domain/governance"
+	domainPlan "github.com/wade/aia/internal/domain/plan"
+	domainProblem "github.com/wade/aia/internal/domain/problem"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/eventbus"
 	"github.com/wade/aia/internal/policy"
 	approvalService "github.com/wade/aia/internal/service/approval"
+	problemService "github.com/wade/aia/internal/service/problem"
 	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 )
@@ -70,6 +73,7 @@ type CoordinatorDeps struct {
 	Bus              eventbus.Publisher
 	ProblemRepo      *repository.ProblemRepository
 	PlanRepo         *repository.PlanRepository
+	ProblemSvc       *problemService.Service
 }
 
 // Coordinator orchestrates the 11-step closed-loop Autonomy Cycle (AIA-08, AIA-18, Plan §2):
@@ -82,6 +86,10 @@ type Coordinator struct {
 
 func NewCoordinator(deps CoordinatorDeps) *Coordinator {
 	return &Coordinator{deps: deps}
+}
+
+func (c *Coordinator) SetProblemService(svc *problemService.Service) {
+	c.deps.ProblemSvc = svc
 }
 
 func (c *Coordinator) RegisterPilot(p DomainPilotExecutor) {
@@ -490,36 +498,61 @@ func (c *Coordinator) RunCycle(ctx context.Context, in RunInput) (*domainAutonom
 			}
 			c.persistDecisionAndDeliberationLink(ctx, dec, eviLinks, delibRecord)
 			execSummary = "Execution blocked by independent governance policy; zero tasks dispatched"
-		} else if chosenInitiative != nil && c.deps.TaskSvc != nil {
-			agentID := chosenInitiative.TargetAgentID
-			if agentID == "" {
-				agentID = "coding-agent"
+		} else if chosenInitiative != nil {
+			meta := parseMetaMap(chosenInitiative.MetadataJSON)
+			isAutoProblem := false
+			if v, ok := meta["auto_create_problem"].(bool); ok && v {
+				isAutoProblem = true
 			}
-			createdTask, err := c.deps.TaskSvc.Create(ctx, taskService.CreateTaskRequest{
-				ProjectID:   projectID,
-				AgentID:     agentID,
-				Title:       "Autonomous Task: " + chosenInitiative.DetectedOpportunity,
-				Description: chosenInitiative.Rationale,
-				Priority:    chosenInitiative.PriorityScore * 10,
-				Risk:        mapRiskTierToDomainRisk(effectiveRiskTier),
-			})
-			if err == nil && createdTask != nil {
-				tID := string(createdTask.ID)
-				spawnedTaskID = &tID
-				dec.ActionTaskID = &tID
 
-				if c.deps.AutonomyRepo != nil {
-					_ = c.deps.AutonomyRepo.MarkInitiativeAdopted(ctx, chosenInitiative.ID, tID)
-					chosenInitiative.Status = domainAutonomy.InitiativeAdopted
-					chosenInitiative.SpawnedTaskID = &tID
+			// Proactive AIA-22 Problem Escalation & Plan Decomposition (§10.2)
+			if (isAutoProblem || chosenInitiative.ProblemID != nil) && c.deps.ProblemSvc != nil {
+				pTaskID, pSummary, pErr := c.executeAutonomousProblemOrPlan(ctx, projectID, cycleID, chosenInitiative, effectiveRiskTier, govResult == decision.GovernanceRequiredApproval)
+				if pErr == nil && pTaskID != nil {
+					spawnedTaskID = pTaskID
+					dec.ActionTaskID = pTaskID
+					chosenInitiative.SpawnedTaskID = pTaskID
+					if c.deps.AutonomyRepo != nil {
+						_ = c.deps.AutonomyRepo.MarkInitiativeAdopted(ctx, chosenInitiative.ID, *pTaskID)
+						chosenInitiative.Status = domainAutonomy.InitiativeAdopted
+					}
+					execSummary = pSummary
+				} else if pErr != nil {
+					execSummary = fmt.Sprintf("Problem escalation error: %v (fallback to direct task)", pErr)
+				}
+			}
 
-					if chosenInitiative.GoalID != nil && *chosenInitiative.GoalID != "" {
-						_ = c.deps.AutonomyRepo.LinkGoalTask(ctx, &domainAutonomy.GoalTaskLink{
-							GoalID:                 *chosenInitiative.GoalID,
-							TaskID:                 tID,
-							CycleID:                &cycleID,
-							DecompositionRationale: chosenInitiative.Rationale,
-						})
+			if spawnedTaskID == nil && c.deps.TaskSvc != nil {
+				agentID := chosenInitiative.TargetAgentID
+				if agentID == "" {
+					agentID = "coding-agent"
+				}
+				createdTask, err := c.deps.TaskSvc.Create(ctx, taskService.CreateTaskRequest{
+					ProjectID:   projectID,
+					AgentID:     agentID,
+					Title:       "Autonomous Task: " + chosenInitiative.DetectedOpportunity,
+					Description: chosenInitiative.Rationale,
+					Priority:    chosenInitiative.PriorityScore * 10,
+					Risk:        mapRiskTierToDomainRisk(effectiveRiskTier),
+				})
+				if err == nil && createdTask != nil {
+					tID := string(createdTask.ID)
+					spawnedTaskID = &tID
+					dec.ActionTaskID = &tID
+
+					if c.deps.AutonomyRepo != nil {
+						_ = c.deps.AutonomyRepo.MarkInitiativeAdopted(ctx, chosenInitiative.ID, tID)
+						chosenInitiative.Status = domainAutonomy.InitiativeAdopted
+						chosenInitiative.SpawnedTaskID = &tID
+
+						if chosenInitiative.GoalID != nil && *chosenInitiative.GoalID != "" {
+							_ = c.deps.AutonomyRepo.LinkGoalTask(ctx, &domainAutonomy.GoalTaskLink{
+								GoalID:                 *chosenInitiative.GoalID,
+								TaskID:                 tID,
+								CycleID:                &cycleID,
+								DecompositionRationale: chosenInitiative.Rationale,
+							})
+						}
 					}
 				}
 			}
@@ -1005,4 +1038,181 @@ func ptrVal(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+func (c *Coordinator) executeAutonomousProblemOrPlan(
+	ctx context.Context,
+	projectID string,
+	cycleID string,
+	chosenInitiative *domainAutonomy.CandidateInitiative,
+	effectiveRiskTier governance.RiskTier,
+	requiresHumanApproval bool,
+) (*string, string, error) {
+	if c.deps.ProblemSvc == nil {
+		return nil, "", errors.New("problem service not available")
+	}
+
+	meta := parseMetaMap(chosenInitiative.MetadataJSON)
+	var prob *domainProblem.Problem
+	var err error
+	now := clock.Now(ctx)
+
+	if chosenInitiative.ProblemID != nil && *chosenInitiative.ProblemID != "" {
+		prob, err = c.deps.ProblemSvc.GetProblem(ctx, *chosenInitiative.ProblemID)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to load existing problem: %w", err)
+		}
+	} else {
+		// Auto-create new Problem entity from initiative metadata
+		probTitle := chosenInitiative.DetectedOpportunity
+		if t, ok := meta["problem_title"].(string); ok && t != "" {
+			probTitle = t
+		}
+		probObj := chosenInitiative.Rationale
+		if o, ok := meta["problem_objective"].(string); ok && o != "" {
+			probObj = o
+		}
+		goalIDStr := ""
+		if chosenInitiative.GoalID != nil {
+			goalIDStr = *chosenInitiative.GoalID
+		}
+
+		prob, err = c.deps.ProblemSvc.CreateProblem(ctx, problemService.CreateProblemInput{
+			ProjectID: projectID,
+			GoalID:    goalIDStr,
+			Title:     probTitle,
+			Objective: probObj,
+			Scope:     "AUTONOMY_CORE",
+			Priority:  domainProblem.PriorityHigh,
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to create problem: %w", err)
+		}
+		chosenInitiative.ProblemID = &prob.ID
+	}
+
+	// 1. Initial Epistemic Analysis (if not already modeled)
+	if prob.CurrentModelVersion == 0 {
+		analysis := &domainProblem.AgentProblemAnalysis{
+			Intent: domainProblem.IntentSummary{
+				UserGoal:        prob.Objective,
+				SuccessCriteria: []string{"Restore operational stability", "Remediate failure root causes"},
+			},
+			Context: domainProblem.ContextSummary{
+				FoundResources: []string{fmt.Sprintf("Project:%s", projectID)},
+				TrustedData:    []string{"Execution audit logs", "Continuity snapshot"},
+			},
+			ModelItems: []domainProblem.ModelItem{
+				{
+					ID:         fmt.Sprintf("fact-%s-1", prob.ID),
+					Category:   domainProblem.CategoryKnownFact,
+					Statement:  fmt.Sprintf("Problem %s triggered autonomously under project %s", prob.Title, projectID),
+					Source:     "AUTONOMY_CYCLE_COORDINATOR",
+					Confidence: 1.0,
+					Status:     domainProblem.ItemStatusConfirmed,
+					CreatedBy:  "autonomy_core",
+					CreatedAt:  now,
+				},
+				{
+					ID:         fmt.Sprintf("unknown-%s-1", prob.ID),
+					Category:   domainProblem.CategoryUnknown,
+					Statement:  "Exact environmental or logic edge case leading to failure",
+					Confidence: 0.0,
+					Status:     domainProblem.ItemStatusConfirmed,
+					CreatedBy:  "autonomy_core",
+					CreatedAt:  now,
+				},
+				{
+					ID:         fmt.Sprintf("assumption-%s-1", prob.ID),
+					Category:   domainProblem.CategoryAssumption,
+					Statement:  "Decomposing remediation into root cause isolation and verified fix will restore project health",
+					Confidence: 0.80,
+					Status:     domainProblem.ItemStatusConfirmed,
+					CreatedBy:  "autonomy_core",
+					CreatedAt:  now,
+				},
+			},
+		}
+		if _, aErr := c.deps.ProblemSvc.ApplyAnalysis(ctx, prob.ID, analysis, "autonomy_core", ""); aErr != nil {
+			return nil, "", fmt.Errorf("failed to apply problem analysis: %w", aErr)
+		}
+	}
+
+	// 2. Generate Plan (if not already planned)
+	wiAgent := chosenInitiative.TargetAgentID
+	if wiAgent == "" {
+		wiAgent = "coding-agent"
+	}
+
+	var activePlan *domainPlan.Plan
+	if prob.CurrentPlanVersion == 0 {
+		wi1ID := fmt.Sprintf("wi-%s-1", prob.ID)
+		wi2ID := fmt.Sprintf("wi-%s-2", prob.ID)
+		planIn := problemService.GeneratePlanInput{
+			ProblemID: prob.ID,
+			Objective: prob.Objective,
+			Strategy:  "Two-stage remediation: 1. Diagnosis and Root-Cause Isolation -> 2. Verified Implementation",
+			WorkItems: []domainPlan.WorkItemDef{
+				{
+					ID:            wi1ID,
+					Title:         fmt.Sprintf("Diagnosis: %s", prob.Title),
+					Description:   "Extract error logs, reproduce failure, and document isolated root cause",
+					Stage:         "DIAGNOSIS",
+					AssignedAgent: wiAgent,
+					AcceptanceCriteria: []string{
+						"Root cause identified and documented",
+					},
+					Status: domainPlan.WorkItemPending,
+				},
+				{
+					ID:            wi2ID,
+					Title:         fmt.Sprintf("Remediate: %s", prob.Title),
+					Description:   "Implement fix, verify unit/integration tests, and ensure zero regression",
+					Stage:         "REMEDIATION",
+					AssignedAgent: wiAgent,
+					Dependencies:  []string{wi1ID},
+					AcceptanceCriteria: []string{
+						"Regression validation passes cleanly",
+					},
+					Status: domainPlan.WorkItemPending,
+				},
+			},
+			RequiresHumanApproval: requiresHumanApproval,
+		}
+		p, pErr := c.deps.ProblemSvc.GeneratePlan(ctx, planIn)
+		if pErr != nil {
+			return nil, "", fmt.Errorf("failed to generate plan: %w", pErr)
+		}
+		activePlan = p
+	} else {
+		p, pErr := c.deps.ProblemSvc.GetLatestPlan(ctx, prob.ID)
+		if pErr != nil {
+			return nil, "", fmt.Errorf("failed to get latest plan: %w", pErr)
+		}
+		activePlan = p
+	}
+
+	// 3. Approve and Materialize Work Items into Tasks
+	if activePlan.Status == domainPlan.StatusProposed && !requiresHumanApproval {
+		if _, appErr := c.deps.ProblemSvc.ApprovePlan(ctx, activePlan.ID, "AGENT:autonomy_core"); appErr == nil {
+			activePlan.Status = domainPlan.StatusApproved
+		}
+	}
+
+	if activePlan.Status == domainPlan.StatusApproved || activePlan.Status == domainPlan.StatusActive {
+		tasks, mErr := c.deps.ProblemSvc.MaterializeAllWorkItems(ctx, activePlan.ID)
+		if mErr != nil {
+			return nil, "", fmt.Errorf("failed to materialize plan work items: %w", mErr)
+		}
+		if len(tasks) > 0 {
+			firstTaskID := string(tasks[0].ID)
+			summary := fmt.Sprintf("Autonomous Problem Escalation: Problem %s (%s) planned (v%d) and materialized %d task(s), dispatching %s",
+				prob.ID, prob.Title, activePlan.Version, len(tasks), firstTaskID)
+			return &firstTaskID, summary, nil
+		}
+	}
+
+	// If waiting human approval
+	summary := fmt.Sprintf("Autonomous Problem Escalation: Problem %s planned (v%d) awaiting approval", prob.ID, activePlan.Version)
+	return nil, summary, nil
 }

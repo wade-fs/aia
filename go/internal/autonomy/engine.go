@@ -17,6 +17,7 @@ import (
 	"github.com/wade/aia/internal/policy"
 	approvalService "github.com/wade/aia/internal/service/approval"
 	"github.com/wade/aia/internal/service/investment"
+	problemService "github.com/wade/aia/internal/service/problem"
 	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 )
@@ -52,6 +53,7 @@ type Dependencies struct {
 	Bus              eventbus.Publisher
 	ProblemRepo      *repository.ProblemRepository
 	PlanRepo         *repository.PlanRepository
+	ProblemSvc       *problemService.Service
 	Config           EngineConfig
 }
 
@@ -163,6 +165,7 @@ func NewEngineWithDeps(deps Dependencies) *Engine {
 		Bus:              deps.Bus,
 		ProblemRepo:      deps.ProblemRepo,
 		PlanRepo:         deps.PlanRepo,
+		ProblemSvc:       deps.ProblemSvc,
 	})
 
 	if deps.InvSvc != nil {
@@ -195,6 +198,12 @@ func (e *Engine) UnregisterObserver(name string) {
 func (e *Engine) RegisterPilot(p cycle.DomainPilotExecutor) {
 	if e.coordinator != nil {
 		e.coordinator.RegisterPilot(p)
+	}
+}
+
+func (e *Engine) SetProblemService(svc *problemService.Service) {
+	if e.coordinator != nil {
+		e.coordinator.SetProblemService(svc)
 	}
 }
 

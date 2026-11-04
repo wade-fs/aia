@@ -57,6 +57,11 @@ func (r *AutonomyRepository) CreateInitiative(ctx context.Context, init *domainA
 		init.MetadataJSON = "{}"
 	}
 
+	discTypeStr := string(init.DiscoveryType)
+	if discTypeStr == "PROBLEM" {
+		discTypeStr = "ISSUE"
+	}
+
 	query := `
 		INSERT INTO candidate_initiatives (
 			id, cycle_id, project_id, goal_id, discovery_type, confidence_level, target_agent_id,
@@ -67,7 +72,7 @@ func (r *AutonomyRepository) CreateInitiative(ctx context.Context, init *domainA
 	`
 	_, err := r.db.RawDB().ExecContext(ctx, query,
 		init.ID, init.CycleID, init.ProjectID, init.GoalID,
-		string(init.DiscoveryType), string(init.ConfidenceLevel), init.TargetAgentID,
+		discTypeStr, string(init.ConfidenceLevel), init.TargetAgentID,
 		init.TriggerSource, init.DetectedOpportunity, init.Rationale, init.ExpectedOutcome,
 		init.PriorityScore, init.EstimatedCost, string(init.EstimatedRisk),
 		string(init.Status), init.DiscardReason, init.SpawnedTaskID, init.MetadataJSON,

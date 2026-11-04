@@ -54,8 +54,9 @@ type RecalledBundle struct {
 	ActiveGoals     []*goal.Goal                `json:"active_goals,omitempty"`
 	RecentDecisions []*decision.Decision        `json:"recent_decisions,omitempty"`
 	PendingIssues   []string                    `json:"pending_issues,omitempty"`
-	ActiveTasks     []task.Task                 `json:"active_tasks,omitempty"`
-	ActiveProblems  []*domainProblem.Problem    `json:"active_problems,omitempty"`
+	ActiveTasks       []task.Task                 `json:"active_tasks,omitempty"`
+	RecentFailedTasks []task.Task                 `json:"recent_failed_tasks,omitempty"`
+	ActiveProblems    []*domainProblem.Problem    `json:"active_problems,omitempty"`
 	ActivePlans     []*domainPlan.Plan          `json:"active_plans,omitempty"`
 	// Phase 4 L0–L3 Epistemic Learning Partitions (AIA-11 §21.2)
 	VerifiedLearnings   []*domainLearning.LearningRecord `json:"verified_learnings,omitempty"`   // L2/L3 EFFECTIVE
@@ -197,6 +198,8 @@ func (e *Engine) Recall(ctx context.Context, in RecallInput) (*RecalledBundle, e
 				}
 				if !tk.IsTerminal() {
 					bundle.ActiveTasks = append(bundle.ActiveTasks, tk)
+				} else if tk.Status == task.StatusFailed {
+					bundle.RecentFailedTasks = append(bundle.RecentFailedTasks, tk)
 				}
 			}
 		}
@@ -554,6 +557,12 @@ func buildActiveDigest(b *RecalledBundle) string {
 	}
 	if len(b.PendingIssues) > 0 {
 		sb.WriteString(fmt.Sprintf(", PendingIssues=%d", len(b.PendingIssues)))
+	}
+	if len(b.RecentFailedTasks) > 0 {
+		sb.WriteString(fmt.Sprintf(", FailedTasks=%d", len(b.RecentFailedTasks)))
+	}
+	if len(b.ActiveProblems) > 0 {
+		sb.WriteString(fmt.Sprintf(", ActiveProblems=%d", len(b.ActiveProblems)))
 	}
 	return sb.String()
 }

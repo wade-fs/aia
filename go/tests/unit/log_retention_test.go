@@ -13,6 +13,7 @@ import (
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/storage/sqlite"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
+	"github.com/wade/aia/internal/worker"
 )
 
 func TestLogRetention_PurgeAuditAndExecutionEvents(t *testing.T) {
@@ -159,5 +160,91 @@ func TestLogRetention_PurgeAuditAndExecutionEvents(t *testing.T) {
 	}
 	if len(remainingEvents) != 1 || remainingEvents[0].Sequence != 2 {
 		t.Errorf("expected only event sequence 2 remaining, got %v", remainingEvents)
+	}
+}
+
+func TestWorker_PeriodicLogRetentionPurger(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "test_worker_retention.db")
+	db, err := sqlite.NewDB(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	defer db.Close()
+
+	auditRepo := repository.NewAuditRepository(db)
+	agRepo := repository.NewAgentRepository(db)
+	taskRepo := repository.NewTaskRepository(db)
+	execRepo := repository.NewExecutionRepository(db)
+
+	now := time.Now().UTC()
+	oldTime := now.AddDate(0, 0, -40)
+	recentTime := now.AddDate(0, 0, -5)
+
+	_ = auditRepo.Append(ctx, &repository.AuditLogEntry{
+		ID:        uuid.New().String(),
+		ActorType: "SYSTEM",
+		ActorID:   "system",
+		Action:    "OLD_LOG",
+		CreatedAt: oldTime,
+	})
+	_ = auditRepo.Append(ctx, &repository.AuditLogEntry{
+		ID:        uuid.New().String(),
+		ActorType: "SYSTEM",
+		ActorID:   "system",
+		Action:    "RECENT_LOG",
+		CreatedAt: recentTime,
+	})
+
+	_ = agRepo.Upsert(ctx, &agent.Agent{ID: "worker-agent", Name: "Worker", Enabled: true, CreatedAt: now, UpdatedAt: now})
+	taskID := "task-worker-ret"
+	_ = taskRepo.Create(ctx, &task.Task{ID: taskID, AgentID: "worker-agent", Title: "Task", Status: task.StatusCompleted, CreatedAt: now, UpdatedAt: now}, nil)
+	execID := "exec-worker-ret"
+	_ = execRepo.Create(ctx, &execution.Execution{ID: execID, TaskID: taskID, AgentID: "worker-agent", Status: execution.StatusCompleted, CreatedAt: now})
+
+	_ = execRepo.AppendEvent(ctx, &execution.ExecutionEvent{
+		ID:          uuid.New().String(),
+		ExecutionID: execID,
+		EventType:   "OLD_EVENT",
+		Sequence:    1,
+		Payload:     json.RawMessage(`{}`),
+		CreatedAt:   oldTime,
+	})
+	_ = execRepo.AppendEvent(ctx, &execution.ExecutionEvent{
+		ID:          uuid.New().String(),
+		ExecutionID: execID,
+		EventType:   "RECENT_EVENT",
+		Sequence:    2,
+		Payload:     json.RawMessage(`{}`),
+		CreatedAt:   recentTime,
+	})
+
+	mgr := worker.NewManager(worker.DefaultWorkerConfig(), db, nil, nil, nil, nil, nil, nil, nil, auditRepo)
+	mgr.SetLogRetention(30, execRepo)
+
+	// Start worker manager which launches periodic purger and runs initial purge
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("failed to start worker manager: %v", err)
+	}
+	defer mgr.Stop()
+
+	// Wait briefly for initial purge pass to complete
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify old logs are purged
+	audits, err := auditRepo.List(ctx, 10)
+	if err != nil {
+		t.Fatalf("failed to list audits: %v", err)
+	}
+	if len(audits) != 1 || audits[0].Action != "RECENT_LOG" {
+		t.Errorf("expected 1 recent audit log, got %d", len(audits))
+	}
+
+	events, err := execRepo.ListEvents(ctx, execID, 0)
+	if err != nil {
+		t.Fatalf("failed to list events: %v", err)
+	}
+	if len(events) != 1 || events[0].EventType != "RECENT_EVENT" {
+		t.Errorf("expected 1 recent event, got %d", len(events))
 	}
 }

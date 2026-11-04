@@ -133,6 +133,19 @@ func (m *Manager) SeedDefaultSchedules(ctx context.Context) error {
 				Priority:    50,
 			},
 		},
+		// 6. Maintenance: Daily Log Retention and Rotation Purge (02:00 daily, AIA-19)
+		{
+			Name:          "Daily Log Retention Purge",
+			CronExpr:      "0 2 * * *",
+			AgentID:       "system-operator",
+			MisfirePolicy: schedule.MisfireSkip,
+			Template: taskdomain.CreateTaskRequest{
+				Title:       "Daily Log Retention and Expired Log Purge",
+				Description: "Enforce logging.retain_days policy by purging obsolete audit logs and execution event history.",
+				Acceptance:  []string{"log_retention", "maintenance"},
+				Priority:    10,
+			},
+		},
 	}
 
 	for _, ds := range defaultSchedules {

@@ -376,6 +376,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		auditRepo,
 	)
 	workerMgr.SetGovernanceService(govSvc)
+	workerMgr.SetLogRetention(cfg.Logging.RetainDays, execRepo)
 
 	tracer := tracing.DefaultTracer()
 	metricsReg := metrics.DefaultRegistry()

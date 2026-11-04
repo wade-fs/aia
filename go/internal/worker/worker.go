@@ -109,6 +109,9 @@ type Manager struct {
 	// activeTaskCancels tracks cancel funcs for currently running tasks
 	activeTaskCancelsMu sync.Mutex
 	activeTaskCancels   map[string]context.CancelFunc
+
+	retainDays int
+	execRepo   *repository.ExecutionRepository
 }
 
 // NewManager creates a new background worker runtime manager.
@@ -162,6 +165,14 @@ func (m *Manager) SetGovernanceService(govSvc *govService.Service) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.govSvc = govSvc
+}
+
+// SetLogRetention configures periodic log retention purging (AIA-19 logging.retain_days).
+func (m *Manager) SetLogRetention(retainDays int, execRepo *repository.ExecutionRepository) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.retainDays = retainDays
+	m.execRepo = execRepo
 }
 
 // IsEmergencyStopped checks whether dispatch is frozen.
@@ -319,6 +330,15 @@ func (m *Manager) Start(ctx context.Context) error {
 		defer m.wg.Done()
 		m.taskWorker.Run(workerCtx)
 	}()
+
+	// 3. Start Periodic Log Retention Purger (AIA-19 logging.retain_days)
+	if m.retainDays > 0 && (m.auditRepo != nil || m.execRepo != nil) {
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			m.runLogRetentionPurger(workerCtx)
+		}()
+	}
 
 	return nil
 }
@@ -504,4 +524,45 @@ func (m *Manager) GetActivityMonitor(ctx context.Context) (*ActivityMonitorSnaps
 	}
 
 	return snap, nil
+}
+
+func (m *Manager) runLogRetentionPurger(ctx context.Context) {
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+
+	// Initial purge on startup
+	m.purgeExpiredLogs(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.purgeExpiredLogs(ctx)
+		}
+	}
+}
+
+func (m *Manager) purgeExpiredLogs(ctx context.Context) {
+	m.mu.RLock()
+	days := m.retainDays
+	auditRepo := m.auditRepo
+	execRepo := m.execRepo
+	m.mu.RUnlock()
+
+	if days <= 0 {
+		return
+	}
+
+	cutoff := time.Now().UTC().AddDate(0, 0, -days)
+	if auditRepo != nil {
+		if purged, err := auditRepo.PurgeOlderThan(ctx, cutoff); err == nil && purged > 0 {
+			slog.Info("periodic log retention purger removed expired audit logs", "count", purged, "retain_days", days)
+		}
+	}
+	if execRepo != nil {
+		if purged, err := execRepo.PurgeEventsOlderThan(ctx, cutoff); err == nil && purged > 0 {
+			slog.Info("periodic log retention purger removed expired execution events", "count", purged, "retain_days", days)
+		}
+	}
 }

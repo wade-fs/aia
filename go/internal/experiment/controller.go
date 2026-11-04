@@ -93,6 +93,9 @@ func (c *Controller) CreateDualExperiment(ctx context.Context, in CreateDualInpu
 	if strings.TrimSpace(in.Hypothesis) == "" {
 		in.Hypothesis = "LLM-based Generation 2 achieves superior total portfolio assets and calibrated forecasts over frozen Rule-based Generation 1 under identical Taiwan market conditions."
 	}
+	if err := ValidateHypothesis(in.Hypothesis); err != nil {
+		return nil, fmt.Errorf("invalid hypothesis: %w", err)
+	}
 	if in.G2HarnessVersion == "" {
 		in.G2HarnessVersion = "agy-1.4.12"
 	}
@@ -145,13 +148,14 @@ func (c *Controller) CreateDualExperiment(ctx context.Context, in CreateDualInpu
 	}
 
 	g1ProfID := fmt.Sprintf("prof-%s-G1", expID[:8])
-	if _, _, err := c.deps.InvSvc.CreateIsolatedProfile(ctx, g1ProfID, "G1 Rule-Based Control Portfolio", in.InitialCapital, in.MaxPositionPct); err != nil {
-		return nil, fmt.Errorf("create G1 isolated profile: %w", err)
-	}
-
 	g2ProfID := fmt.Sprintf("prof-%s-G2", expID[:8])
-	if _, _, err := c.deps.InvSvc.CreateIsolatedProfile(ctx, g2ProfID, "G2 LLM Experimental Portfolio", in.InitialCapital, in.MaxPositionPct); err != nil {
-		return nil, fmt.Errorf("create G2 isolated profile: %w", err)
+	if c.deps.InvSvc != nil {
+		if _, _, err := c.deps.InvSvc.CreateIsolatedProfile(ctx, g1ProfID, "G1 Rule-Based Control Portfolio", in.InitialCapital, in.MaxPositionPct); err != nil {
+			return nil, fmt.Errorf("create G1 isolated profile: %w", err)
+		}
+		if _, _, err := c.deps.InvSvc.CreateIsolatedProfile(ctx, g2ProfID, "G2 LLM Experimental Portfolio", in.InitialCapital, in.MaxPositionPct); err != nil {
+			return nil, fmt.Errorf("create G2 isolated profile: %w", err)
+		}
 	}
 
 	g1 := &domainExp.ExperimentGeneration{
@@ -1100,4 +1104,156 @@ func (c *Controller) appendEvent(ctx context.Context, aggregateID string, eventT
 		ActorID:       "experiment-controller",
 		PayloadJSON:   string(b),
 	})
+}
+
+// ValidateHypothesis checks that the research hypothesis is non-empty and scientifically falsifiable (AIA-15 §3.4).
+func ValidateHypothesis(hypothesis string) error {
+	trimmed := strings.TrimSpace(hypothesis)
+	if trimmed == "" {
+		return fmt.Errorf("experiment hypothesis cannot be empty")
+	}
+	lower := strings.ToLower(trimmed)
+	falsifiableSignals := []string{
+		"achieve", "superior", "improves", "reduces", "than", "over", "increase", "decrease", "better", "vs", "outperform", "lower", "higher",
+	}
+	hasSignal := false
+	for _, sig := range falsifiableSignals {
+		if strings.Contains(lower, sig) {
+			hasSignal = true
+			break
+		}
+	}
+	if !hasSignal {
+		return fmt.Errorf("hypothesis lacks falsifiable comparative condition (must state expected advantage, direction, or performance target)")
+	}
+	return nil
+}
+
+// ProposeExperiment creates an experiment in PROPOSED state (AIA-15 §4.2).
+func (c *Controller) ProposeExperiment(ctx context.Context, in CreateDualInput) (*DualExperimentBundle, error) {
+	bundle, err := c.CreateDualExperiment(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.deps.ExpRepo.UpdateExperimentStatus(ctx, bundle.Experiment.ID, domainExp.StatusProposed); err != nil {
+		return nil, err
+	}
+	bundle.Experiment.Status = domainExp.StatusProposed
+	c.appendEvent(ctx, bundle.Experiment.ID, "EXPERIMENT_PROPOSED", map[string]any{"name": bundle.Experiment.Name}, clock.Now(ctx))
+	return bundle, nil
+}
+
+// SubmitForApproval moves an experiment from PROPOSED to PENDING_APPROVAL.
+func (c *Controller) SubmitForApproval(ctx context.Context, id string) error {
+	if err := c.deps.ExpRepo.UpdateExperimentStatus(ctx, id, domainExp.StatusPendingApproval); err != nil {
+		return err
+	}
+	c.appendEvent(ctx, id, "EXPERIMENT_SUBMITTED_FOR_APPROVAL", nil, clock.Now(ctx))
+	return nil
+}
+
+// ApproveAndReady marks an experiment READY for execution.
+func (c *Controller) ApproveAndReady(ctx context.Context, id string) error {
+	if err := c.deps.ExpRepo.UpdateExperimentStatus(ctx, id, domainExp.StatusReady); err != nil {
+		return err
+	}
+	c.appendEvent(ctx, id, "EXPERIMENT_READY", nil, clock.Now(ctx))
+	return nil
+}
+
+// StartExperiment begins or activates a READY experiment into RUNNING.
+func (c *Controller) StartExperiment(ctx context.Context, id string) error {
+	if err := c.deps.ExpRepo.UpdateExperimentStatus(ctx, id, domainExp.StatusRunning); err != nil {
+		return err
+	}
+	c.appendEvent(ctx, id, "EXPERIMENT_STARTED", nil, clock.Now(ctx))
+	return nil
+}
+
+// PauseExperiment temporarily pauses a RUNNING experiment (AIA-15 §4.3).
+func (c *Controller) PauseExperiment(ctx context.Context, id string, reason string) error {
+	exp, err := c.deps.ExpRepo.GetExperiment(ctx, id)
+	if err != nil {
+		return err
+	}
+	if exp.Status != domainExp.StatusRunning {
+		return fmt.Errorf("cannot pause experiment in status %s (must be RUNNING)", exp.Status)
+	}
+	if err := c.deps.ExpRepo.UpdateExperimentStatus(ctx, id, domainExp.StatusPaused); err != nil {
+		return err
+	}
+	c.appendEvent(ctx, id, "EXPERIMENT_PAUSED", map[string]any{"reason": reason}, clock.Now(ctx))
+	return nil
+}
+
+// ResumeExperiment restores a PAUSED experiment to RUNNING (AIA-15 §4.3).
+func (c *Controller) ResumeExperiment(ctx context.Context, id string) error {
+	exp, err := c.deps.ExpRepo.GetExperiment(ctx, id)
+	if err != nil {
+		return err
+	}
+	if exp.Status != domainExp.StatusPaused {
+		return fmt.Errorf("cannot resume experiment in status %s (must be PAUSED)", exp.Status)
+	}
+	if err := c.deps.ExpRepo.UpdateExperimentStatus(ctx, id, domainExp.StatusRunning); err != nil {
+		return err
+	}
+	c.appendEvent(ctx, id, "EXPERIMENT_RESUMED", nil, clock.Now(ctx))
+	return nil
+}
+
+// EvaluateExperiment sets the experiment status to EVALUATING.
+func (c *Controller) EvaluateExperiment(ctx context.Context, id string) error {
+	if err := c.deps.ExpRepo.UpdateExperimentStatus(ctx, id, domainExp.StatusEvaluating); err != nil {
+		return err
+	}
+	c.appendEvent(ctx, id, "EXPERIMENT_EVALUATING", nil, clock.Now(ctx))
+	return nil
+}
+
+// CompleteExperiment marks an experiment COMPLETED.
+func (c *Controller) CompleteExperiment(ctx context.Context, id string, outcomeNotes string) error {
+	if err := c.deps.ExpRepo.UpdateExperimentStatus(ctx, id, domainExp.StatusCompleted); err != nil {
+		return err
+	}
+	c.appendEvent(ctx, id, "EXPERIMENT_COMPLETED", map[string]any{"notes": outcomeNotes}, clock.Now(ctx))
+	return nil
+}
+
+// StopExperiment halts an active or running experiment (AIA-15 §4.2).
+func (c *Controller) StopExperiment(ctx context.Context, id string, reason string) error {
+	if err := c.deps.ExpRepo.UpdateExperimentStatus(ctx, id, domainExp.StatusStopped); err != nil {
+		return err
+	}
+	c.appendEvent(ctx, id, "EXPERIMENT_STOPPED", map[string]any{"reason": reason}, clock.Now(ctx))
+	return nil
+}
+
+// FailExperiment marks an experiment FAILED due to critical errors.
+func (c *Controller) FailExperiment(ctx context.Context, id string, errMsg string) error {
+	if err := c.deps.ExpRepo.UpdateExperimentStatus(ctx, id, domainExp.StatusFailed); err != nil {
+		return err
+	}
+	c.appendEvent(ctx, id, "EXPERIMENT_FAILED", map[string]any{"error": errMsg}, clock.Now(ctx))
+	return nil
+}
+
+// EvaluateNextStepDecision computes the recommended post-comparison action (AIA-15 §3.9).
+func EvaluateNextStepDecision(verdict domainExp.RegimeVerdict, trackA domainExp.TrackAPerformance, trackB domainExp.TrackBAutonomy) (domainExp.NextStepDecision, string) {
+	switch verdict {
+	case domainExp.RegimeG2ClearAdvantage:
+		return domainExp.DecisionContinue, "Experimental cohort demonstrates sustained statistical advantage; continue longitudinal execution"
+	case domainExp.RegimeG2LearningInProgress:
+		return domainExp.DecisionModify, "Cohort is adapting but requires parameter or prompt refinement (trigger G2.x mutation)"
+	case domainExp.RegimeG2UnreliableRiskTaking:
+		return domainExp.DecisionModify, "Cohort shows excessive risk penalty or miscalibrated confidence; modify risk constraints"
+	case domainExp.RegimeG1RulesSuperior:
+		return domainExp.DecisionStop, "Control baseline outperformed experimental model; hypothesis falsified, stop experiment"
+	case domainExp.RegimeParityAdaptive:
+		return domainExp.DecisionContinue, "Parity with baseline; continue execution to collect larger statistical sample"
+	case domainExp.RegimeInconclusiveLowSample:
+		return domainExp.DecisionDefer, "Sample size insufficient for statistical significance; defer decision until more observations accumulate"
+	default:
+		return domainExp.DecisionContinue, "Proceed with default observation step"
+	}
 }

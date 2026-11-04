@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -37,6 +38,32 @@ func (r *ApprovalRepository) Create(ctx context.Context, a *governance.Approval)
 		a.TimeoutPolicy = governance.TimeoutPolicyReject
 	}
 
+	// Pack structured metadata if present
+	if a.ExpectedBenefit != "" || a.ResourceImpact != "" || a.Reversibility != "" || len(a.Alternatives) > 0 {
+		var m map[string]any
+		if a.OperationDetailJSON != "" {
+			_ = json.Unmarshal([]byte(a.OperationDetailJSON), &m)
+		}
+		if m == nil {
+			m = make(map[string]any)
+		}
+		if a.ExpectedBenefit != "" {
+			m["expected_benefit"] = a.ExpectedBenefit
+		}
+		if a.ResourceImpact != "" {
+			m["resource_impact"] = a.ResourceImpact
+		}
+		if a.Reversibility != "" {
+			m["reversibility"] = a.Reversibility
+		}
+		if len(a.Alternatives) > 0 {
+			m["alternatives"] = a.Alternatives
+		}
+		if b, err := json.Marshal(m); err == nil {
+			a.OperationDetailJSON = string(b)
+		}
+	}
+
 	var timeoutAtStr, reviewedAtStr, expiresAtStr *string
 	if a.TimeoutAt != nil {
 		s := a.TimeoutAt.Format(time.RFC3339)
@@ -51,6 +78,24 @@ func (r *ApprovalRepository) Create(ctx context.Context, a *governance.Approval)
 		expiresAtStr = &s
 	}
 
+	dbStatus := string(a.Status)
+	dbNote := a.ReviewerNote
+	if a.Status == governance.ApprovalNeedsRevision {
+		dbStatus = "REJECTED"
+		noteVal := "[NEEDS_REVISION]"
+		if a.ReviewerNote != nil && *a.ReviewerNote != "" {
+			noteVal = "[NEEDS_REVISION] " + *a.ReviewerNote
+		}
+		dbNote = &noteVal
+	} else if a.Status == governance.ApprovalRevoked {
+		dbStatus = "CANCELLED"
+		noteVal := "[REVOKED]"
+		if a.ReviewerNote != nil && *a.ReviewerNote != "" {
+			noteVal = "[REVOKED] " + *a.ReviewerNote
+		}
+		dbNote = &noteVal
+	}
+
 	query := `
 		INSERT INTO approvals (
 			id, requester_entity, operation_type, operation_detail_json, status, risk_tier,
@@ -63,9 +108,9 @@ func (r *ApprovalRepository) Create(ctx context.Context, a *governance.Approval)
 		_, err := tx.ExecContext(
 			ctx, query,
 			a.ID, a.RequesterEntity, a.OperationType, a.OperationDetailJSON,
-			string(a.Status), string(a.RiskTier),
+			dbStatus, string(a.RiskTier),
 			timeoutAtStr, string(a.TimeoutPolicy), a.TaskID, a.DecisionID,
-			a.ReviewerID, a.ReviewerNote,
+			a.ReviewerID, dbNote,
 			a.CreatedAt.Format(time.RFC3339), reviewedAtStr, expiresAtStr,
 		)
 		if err != nil {
@@ -73,6 +118,73 @@ func (r *ApprovalRepository) Create(ctx context.Context, a *governance.Approval)
 		}
 		return nil
 	})
+}
+
+func populateApproval(
+	a *governance.Approval,
+	statusStr, riskStr, timeoutPolStr, createdAtStr string,
+	timeoutAtStr, reviewedAtStr, expiresAtStr, taskID, decisionID, reviewerID, reviewerNote sql.NullString,
+) {
+	a.Status = governance.ApprovalStatus(statusStr)
+	if reviewerNote.Valid {
+		note := reviewerNote.String
+		if a.Status == governance.ApprovalRejected && strings.HasPrefix(note, "[NEEDS_REVISION]") {
+			a.Status = governance.ApprovalNeedsRevision
+			note = strings.TrimSpace(strings.TrimPrefix(note, "[NEEDS_REVISION]"))
+		} else if a.Status == governance.ApprovalCancelled && strings.HasPrefix(note, "[REVOKED]") {
+			a.Status = governance.ApprovalRevoked
+			note = strings.TrimSpace(strings.TrimPrefix(note, "[REVOKED]"))
+		}
+		a.ReviewerNote = &note
+	}
+	a.RiskTier = governance.RiskTier(riskStr)
+	a.TimeoutPolicy = governance.TimeoutPolicy(timeoutPolStr)
+	a.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
+
+	if timeoutAtStr.Valid {
+		t, _ := time.Parse(time.RFC3339, timeoutAtStr.String)
+		a.TimeoutAt = &t
+	}
+	if reviewedAtStr.Valid {
+		t, _ := time.Parse(time.RFC3339, reviewedAtStr.String)
+		a.ReviewedAt = &t
+	}
+	if expiresAtStr.Valid {
+		t, _ := time.Parse(time.RFC3339, expiresAtStr.String)
+		a.ExpiresAt = &t
+	}
+	if taskID.Valid {
+		a.TaskID = &taskID.String
+	}
+	if decisionID.Valid {
+		a.DecisionID = &decisionID.String
+	}
+	if reviewerID.Valid {
+		a.ReviewerID = &reviewerID.String
+	}
+
+	if a.OperationDetailJSON != "" {
+		var meta struct {
+			ExpectedBenefit string   `json:"expected_benefit"`
+			ResourceImpact  string   `json:"resource_impact"`
+			Reversibility   string   `json:"reversibility"`
+			Alternatives    []string `json:"alternatives"`
+		}
+		if err := json.Unmarshal([]byte(a.OperationDetailJSON), &meta); err == nil {
+			if a.ExpectedBenefit == "" {
+				a.ExpectedBenefit = meta.ExpectedBenefit
+			}
+			if a.ResourceImpact == "" {
+				a.ResourceImpact = meta.ResourceImpact
+			}
+			if a.Reversibility == "" {
+				a.Reversibility = meta.Reversibility
+			}
+			if len(a.Alternatives) == 0 {
+				a.Alternatives = meta.Alternatives
+			}
+		}
+	}
 }
 
 func (r *ApprovalRepository) Get(ctx context.Context, id string) (*governance.Approval, error) {
@@ -100,48 +212,38 @@ func (r *ApprovalRepository) Get(ctx context.Context, id string) (*governance.Ap
 		return nil, fmt.Errorf("failed to get approval %s: %w", id, err)
 	}
 
-	a.Status = governance.ApprovalStatus(statusStr)
-	a.RiskTier = governance.RiskTier(riskStr)
-	a.TimeoutPolicy = governance.TimeoutPolicy(timeoutPolStr)
-	a.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
-
-	if timeoutAtStr.Valid {
-		t, _ := time.Parse(time.RFC3339, timeoutAtStr.String)
-		a.TimeoutAt = &t
-	}
-	if reviewedAtStr.Valid {
-		t, _ := time.Parse(time.RFC3339, reviewedAtStr.String)
-		a.ReviewedAt = &t
-	}
-	if expiresAtStr.Valid {
-		t, _ := time.Parse(time.RFC3339, expiresAtStr.String)
-		a.ExpiresAt = &t
-	}
-	if taskID.Valid {
-		a.TaskID = &taskID.String
-	}
-	if decisionID.Valid {
-		a.DecisionID = &decisionID.String
-	}
-	if reviewerID.Valid {
-		a.ReviewerID = &reviewerID.String
-	}
-	if reviewerNote.Valid {
-		a.ReviewerNote = &reviewerNote.String
-	}
-
+	populateApproval(&a, statusStr, riskStr, timeoutPolStr, createdAtStr, timeoutAtStr, reviewedAtStr, expiresAtStr, taskID, decisionID, reviewerID, reviewerNote)
 	return &a, nil
 }
 
 func (r *ApprovalRepository) UpdateStatus(ctx context.Context, id string, status governance.ApprovalStatus, reviewerID, reviewerNote *string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
+	dbStatus := string(status)
+	dbNote := reviewerNote
+
+	if status == governance.ApprovalNeedsRevision {
+		dbStatus = "REJECTED"
+		noteVal := "[NEEDS_REVISION]"
+		if reviewerNote != nil && *reviewerNote != "" {
+			noteVal = "[NEEDS_REVISION] " + *reviewerNote
+		}
+		dbNote = &noteVal
+	} else if status == governance.ApprovalRevoked {
+		dbStatus = "CANCELLED"
+		noteVal := "[REVOKED]"
+		if reviewerNote != nil && *reviewerNote != "" {
+			noteVal = "[REVOKED] " + *reviewerNote
+		}
+		dbNote = &noteVal
+	}
+
 	query := `
 		UPDATE approvals
 		SET status = ?, reviewer_id = COALESCE(?, reviewer_id), reviewer_note = COALESCE(?, reviewer_note), reviewed_at = ?
 		WHERE id = ?
 	`
 	return r.db.WithTx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, query, string(status), reviewerID, reviewerNote, now, id)
+		res, err := tx.ExecContext(ctx, query, dbStatus, reviewerID, dbNote, now, id)
 		if err != nil {
 			return fmt.Errorf("failed to update approval status: %w", err)
 		}
@@ -165,8 +267,14 @@ func (r *ApprovalRepository) List(ctx context.Context, filter ApprovalFilter) ([
 	var args []any
 
 	if filter.Status != "" {
-		where = append(where, "status = ?")
-		args = append(args, string(filter.Status))
+		if filter.Status == governance.ApprovalNeedsRevision {
+			where = append(where, "status = 'REJECTED' AND reviewer_note LIKE '[NEEDS_REVISION]%'")
+		} else if filter.Status == governance.ApprovalRevoked {
+			where = append(where, "status = 'CANCELLED' AND reviewer_note LIKE '[REVOKED]%'")
+		} else {
+			where = append(where, "status = ?")
+			args = append(args, string(filter.Status))
+		}
 	}
 	if filter.RiskTier != "" {
 		where = append(where, "risk_tier = ?")
@@ -218,36 +326,7 @@ func (r *ApprovalRepository) List(ctx context.Context, filter ApprovalFilter) ([
 			return nil, err
 		}
 
-		a.Status = governance.ApprovalStatus(statusStr)
-		a.RiskTier = governance.RiskTier(riskStr)
-		a.TimeoutPolicy = governance.TimeoutPolicy(timeoutPolStr)
-		a.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
-
-		if timeoutAtStr.Valid {
-			t, _ := time.Parse(time.RFC3339, timeoutAtStr.String)
-			a.TimeoutAt = &t
-		}
-		if reviewedAtStr.Valid {
-			t, _ := time.Parse(time.RFC3339, reviewedAtStr.String)
-			a.ReviewedAt = &t
-		}
-		if expiresAtStr.Valid {
-			t, _ := time.Parse(time.RFC3339, expiresAtStr.String)
-			a.ExpiresAt = &t
-		}
-		if taskID.Valid {
-			a.TaskID = &taskID.String
-		}
-		if decisionID.Valid {
-			a.DecisionID = &decisionID.String
-		}
-		if reviewerID.Valid {
-			a.ReviewerID = &reviewerID.String
-		}
-		if reviewerNote.Valid {
-			a.ReviewerNote = &reviewerNote.String
-		}
-
+		populateApproval(&a, statusStr, riskStr, timeoutPolStr, createdAtStr, timeoutAtStr, reviewedAtStr, expiresAtStr, taskID, decisionID, reviewerID, reviewerNote)
 		list = append(list, &a)
 	}
 

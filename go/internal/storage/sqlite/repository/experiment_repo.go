@@ -72,6 +72,22 @@ func (r *ExperimentRepository) GetExperiment(ctx context.Context, id string) (*d
 	return scanExperiment(row)
 }
 
+// UpdateExperimentStatus transitions an experiment's lifecycle state (AIA-15 §4.2).
+func (r *ExperimentRepository) UpdateExperimentStatus(ctx context.Context, experimentID string, status domainExp.Status) error {
+	now := clock.Now(ctx).UTC().Format(time.RFC3339)
+	res, err := r.db.RawDB().ExecContext(ctx, `
+		UPDATE experiments SET status = ?, updated_at = ? WHERE id = ?
+	`, string(status), now, experimentID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("experiment not found: %s", experimentID)
+	}
+	return nil
+}
+
 func (r *ExperimentRepository) ListExperiments(ctx context.Context, domainFilter string, limit int) ([]domainExp.Experiment, error) {
 	if limit <= 0 {
 		limit = 50

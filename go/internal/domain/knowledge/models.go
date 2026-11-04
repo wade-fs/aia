@@ -40,19 +40,52 @@ const (
 	CaptureToolStdout CaptureMethod = "TOOL_STDOUT"
 )
 
+// EvidenceStatus defines the lifecycle status of evidence (AIA-16 §4.2).
+type EvidenceStatus string
+
+const (
+	EvidenceCollected  EvidenceStatus = "COLLECTED"
+	EvidenceParsed     EvidenceStatus = "PARSED"
+	EvidenceNormalized EvidenceStatus = "NORMALIZED"
+	EvidenceValidated  EvidenceStatus = "VALIDATED"
+	EvidenceReviewed   EvidenceStatus = "REVIEWED"
+	EvidenceVerified   EvidenceStatus = "VERIFIED"
+	EvidenceRejected   EvidenceStatus = "REJECTED"
+	EvidenceUncertain  EvidenceStatus = "UNCERTAIN"
+	EvidenceConflicted EvidenceStatus = "CONFLICTED"
+	EvidenceDeprecated EvidenceStatus = "DEPRECATED"
+)
+
 // Evidence represents an excerpt or observation grounded in a specific Source.
 type Evidence struct {
-	ID             string        `json:"id"`
-	SourceID       string        `json:"source_id"`
-	ContentSnippet string        `json:"content_snippet"`
-	ContentHash    string        `json:"content_hash"`
-	CaptureMethod  CaptureMethod `json:"capture_method"`
-	DataVersion    string        `json:"data_version"`
-	PublishedAt    *time.Time    `json:"published_at,omitempty"`
-	CapturedAt     time.Time     `json:"captured_at"`
-	ValidUntil     *time.Time    `json:"valid_until,omitempty"`
-	CreatedAt      time.Time     `json:"created_at"`
+	ID             string         `json:"id"`
+	SourceID       string         `json:"source_id"`
+	ContentSnippet string         `json:"content_snippet"`
+	ContentHash    string         `json:"content_hash"`
+	CaptureMethod  CaptureMethod  `json:"capture_method"`
+	DataVersion    string         `json:"data_version"`
+	Status         EvidenceStatus `json:"status,omitempty"`
+	PublishedAt    *time.Time     `json:"published_at,omitempty"`
+	CapturedAt     time.Time      `json:"captured_at"`
+	ValidUntil     *time.Time     `json:"valid_until,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
 }
+
+// ClaimType defines the epistemic categorization of a proposition (AIA-16 §7.1 & §12.3.2).
+type ClaimType string
+
+const (
+	ClaimFact                ClaimType = "FACT"
+	ClaimInference           ClaimType = "INFERENCE"
+	ClaimHypothesis          ClaimType = "HYPOTHESIS"
+	ClaimOpinion             ClaimType = "OPINION"
+	ClaimModelOutput         ClaimType = "MODEL_OUTPUT"
+	ClaimUserAssertion       ClaimType = "USER_ASSERTION"
+	ClaimHistoricalSkeleton  ClaimType = "HISTORICAL_SKELETON"
+	ClaimReasonableInference ClaimType = "REASONABLE_INFERENCE"
+	ClaimFictionalConstruct  ClaimType = "FICTIONAL_CONSTRUCT"
+	ClaimUnknown             ClaimType = "UNKNOWN"
+)
 
 type AssertionStatus string
 
@@ -68,6 +101,7 @@ const (
 type Claim struct {
 	ID              string          `json:"id"`
 	Statement       string          `json:"statement"`
+	ClaimType       ClaimType       `json:"claim_type,omitempty"`
 	AssertionStatus AssertionStatus `json:"assertion_status"`
 	IsKnowledge     bool            `json:"is_knowledge"`
 	CurrentVersion  int             `json:"current_version"`
@@ -90,9 +124,13 @@ type ClaimRevision struct {
 type SupportType string
 
 const (
-	SupportTypeSupports  SupportType = "SUPPORTS"
-	SupportTypeRefutes   SupportType = "REFUTES"
-	SupportTypeQualifies SupportType = "QUALIFIES"
+	SupportTypeSupports       SupportType = "SUPPORTS"
+	SupportTypeRefutes        SupportType = "REFUTES"
+	SupportTypeContradicts    SupportType = "CONTRADICTS"
+	SupportTypeQualifies      SupportType = "QUALIFIES"
+	SupportTypeContextualizes SupportType = "CONTEXTUALIZES"
+	SupportTypeDerivedFrom    SupportType = "DERIVED_FROM"
+	SupportTypeDoesNotAddress SupportType = "DOES_NOT_ADDRESS"
 )
 
 // ClaimEvidenceLink associates a Claim with supporting or refuting Evidence.

@@ -3,6 +3,7 @@ package knowledge
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/wade/aia/internal/domain/continuity"
@@ -212,4 +213,84 @@ func (s *Service) TraceDecisionProvenance(ctx context.Context, decisionID string
 	}
 
 	return trace, nil
+}
+
+// PropagationReport summarizes the impact of invalidating or deprecating an evidence item (AIA-18 §8.4).
+type PropagationReport struct {
+	EvidenceID        string                   `json:"evidence_id"`
+	Reason            string                   `json:"reason"`
+	PreviousStatus    knowledge.EvidenceStatus `json:"previous_status"`
+	NewStatus         knowledge.EvidenceStatus `json:"new_status"`
+	AffectedClaimIDs  []string                 `json:"affected_claim_ids"`
+	RevisedClaims     []*knowledge.Claim       `json:"revised_claims"`
+	AffectedDecisions []string                 `json:"affected_decisions"`
+	NotifiedAt        time.Time                `json:"notified_at"`
+}
+
+// PropagateEvidenceInvalidation handles the invalidation, deprecation, or refutation of evidence.
+// It marks the evidence as DEPRECATED (or CONFLICTED), traces all dependent claims and decisions,
+// demotes claims relying on this evidence, and logs historical revisions (AIA-16 §6.5 & AIA-18 §8.4).
+func (s *Service) PropagateEvidenceInvalidation(ctx context.Context, evidenceID string, reason string) (*PropagationReport, error) {
+	evi, err := s.knowledgeRepo.GetEvidence(ctx, evidenceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve evidence %s: %w", evidenceID, err)
+	}
+
+	prevStatus := evi.Status
+	newStatus := knowledge.EvidenceDeprecated
+	if strings.Contains(strings.ToUpper(reason), "CONFLICT") {
+		newStatus = knowledge.EvidenceConflicted
+	}
+
+	if err := s.knowledgeRepo.UpdateEvidenceStatus(ctx, evidenceID, newStatus); err != nil {
+		return nil, fmt.Errorf("failed to update evidence status: %w", err)
+	}
+
+	report := &PropagationReport{
+		EvidenceID:        evidenceID,
+		Reason:            reason,
+		PreviousStatus:    prevStatus,
+		NewStatus:         newStatus,
+		AffectedClaimIDs:  make([]string, 0),
+		RevisedClaims:     make([]*knowledge.Claim, 0),
+		AffectedDecisions: make([]string, 0),
+		NotifiedAt:        time.Now().UTC(),
+	}
+
+	// 1. Trace and update affected claims
+	links, err := s.knowledgeRepo.GetClaimLinksForEvidence(ctx, evidenceID)
+	if err == nil {
+		for _, l := range links {
+			report.AffectedClaimIDs = append(report.AffectedClaimIDs, l.ClaimID)
+			claim, err := s.knowledgeRepo.GetClaim(ctx, l.ClaimID)
+			if err != nil {
+				continue
+			}
+
+			// If the invalidated evidence was supporting the claim, degrade its status
+			if l.SupportType == knowledge.SupportTypeSupports || l.SupportType == knowledge.SupportTypeDerivedFrom {
+				newClaimStatus := knowledge.AssertionUncertain
+				if newStatus == knowledge.EvidenceConflicted {
+					newClaimStatus = knowledge.AssertionConflicted
+				}
+				// Demote knowledge status
+				_ = s.knowledgeRepo.UpdateClaimStatus(ctx, claim.ID, newClaimStatus, false)
+				revReason := fmt.Sprintf("Underlying evidence %s invalidated: %s", evidenceID, reason)
+				_ = s.knowledgeRepo.ReviseClaim(ctx, claim.ID, claim.Statement, revReason, "")
+				claim.AssertionStatus = newClaimStatus
+				claim.IsKnowledge = false
+				report.RevisedClaims = append(report.RevisedClaims, claim)
+			}
+		}
+	}
+
+	// 2. Trace affected decisions relying on this evidence
+	if s.decisionRepo != nil {
+		decisions, err := s.decisionRepo.GetDecisionsForEvidence(ctx, evidenceID)
+		if err == nil {
+			report.AffectedDecisions = decisions
+		}
+	}
+
+	return report, nil
 }

@@ -9,11 +9,23 @@ import (
 type ApprovalStatus string
 
 const (
-	ApprovalPending   ApprovalStatus = "PENDING"
-	ApprovalApproved  ApprovalStatus = "APPROVED"
-	ApprovalRejected  ApprovalStatus = "REJECTED"
-	ApprovalExpired   ApprovalStatus = "EXPIRED"
-	ApprovalCancelled ApprovalStatus = "CANCELLED"
+	ApprovalPending       ApprovalStatus = "PENDING"
+	ApprovalApproved      ApprovalStatus = "APPROVED"
+	ApprovalRejected      ApprovalStatus = "REJECTED"
+	ApprovalNeedsRevision ApprovalStatus = "NEEDS_REVISION"
+	ApprovalRevoked       ApprovalStatus = "REVOKED"
+	ApprovalExpired       ApprovalStatus = "EXPIRED"
+	ApprovalCancelled     ApprovalStatus = "CANCELLED"
+)
+
+// OversightMode defines the operational oversight model for humans (AIA-17 §6.1).
+type OversightMode string
+
+const (
+	OversightH0Observe       OversightMode = "H0_OBSERVE"        // Observe only, agent operates autonomously
+	OversightH1Notify        OversightMode = "H1_NOTIFY"         // Autonomous operation with async notifications
+	OversightH2Approve       OversightMode = "H2_APPROVE"        // Synchronous approval gate required
+	OversightH3DirectControl OversightMode = "H3_DIRECT_CONTROL" // Direct human manual control
 )
 
 type RiskTier string
@@ -59,6 +71,12 @@ type Approval struct {
 	CreatedAt           time.Time       `json:"created_at"`
 	ReviewedAt          *time.Time      `json:"reviewed_at,omitempty"`
 	ExpiresAt           *time.Time      `json:"expires_at,omitempty"`
+
+	// Structured metadata fields (AIA-17 §7.2)
+	ExpectedBenefit     string          `json:"expected_benefit,omitempty"`
+	ResourceImpact      string          `json:"resource_impact,omitempty"`
+	Reversibility       string          `json:"reversibility,omitempty"`
+	Alternatives        []string        `json:"alternatives,omitempty"`
 }
 
 // Operation types evaluated by the Policy Engine and bound to approvals.

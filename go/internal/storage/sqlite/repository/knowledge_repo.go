@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/wade/aia/internal/domain/knowledge"
@@ -78,6 +79,14 @@ func (r *KnowledgeRepository) CreateEvidence(ctx context.Context, e *knowledge.E
 	if e.DataVersion == "" {
 		e.DataVersion = "1.0"
 	}
+	if e.Status == "" {
+		e.Status = knowledge.EvidenceValidated
+	}
+
+	dataVersionToStore := e.DataVersion
+	if !strings.Contains(dataVersionToStore, ";status=") {
+		dataVersionToStore = fmt.Sprintf("%s;status=%s", e.DataVersion, e.Status)
+	}
 
 	query := `
 	INSERT INTO evidence (
@@ -98,7 +107,7 @@ func (r *KnowledgeRepository) CreateEvidence(ctx context.Context, e *knowledge.E
 	createdStr := e.CreatedAt.UTC().Format(time.RFC3339)
 
 	_, err := r.db.RawDB().ExecContext(ctx, query,
-		e.ID, e.SourceID, e.ContentSnippet, e.ContentHash, e.CaptureMethod, e.DataVersion,
+		e.ID, e.SourceID, e.ContentSnippet, e.ContentHash, e.CaptureMethod, dataVersionToStore,
 		pubStr, capStr, validStr, createdStr,
 	)
 	return err
@@ -133,7 +142,25 @@ func (r *KnowledgeRepository) GetEvidence(ctx context.Context, id string) (*know
 	e.CapturedAt, _ = time.Parse(time.RFC3339, capStr)
 	e.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 
+	if idx := strings.Index(e.DataVersion, ";status="); idx >= 0 {
+		e.Status = knowledge.EvidenceStatus(e.DataVersion[idx+len(";status="):])
+		e.DataVersion = e.DataVersion[:idx]
+	} else {
+		e.Status = knowledge.EvidenceValidated
+	}
+
 	return e, nil
+}
+
+// UpdateEvidenceStatus updates the lifecycle status of an evidence record (AIA-16 §4.2).
+func (r *KnowledgeRepository) UpdateEvidenceStatus(ctx context.Context, evidenceID string, status knowledge.EvidenceStatus) error {
+	evi, err := r.GetEvidence(ctx, evidenceID)
+	if err != nil {
+		return err
+	}
+	encodedVersion := fmt.Sprintf("%s;status=%s", evi.DataVersion, status)
+	_, err = r.db.RawDB().ExecContext(ctx, "UPDATE evidence SET data_version = ? WHERE id = ?", encodedVersion, evidenceID)
+	return err
 }
 
 // CreateClaim creates a new verifiable claim.
@@ -146,6 +173,14 @@ func (r *KnowledgeRepository) CreateClaim(ctx context.Context, c *knowledge.Clai
 	}
 	if c.CurrentVersion == 0 {
 		c.CurrentVersion = 1
+	}
+	if c.ClaimType == "" {
+		c.ClaimType = knowledge.ClaimFact
+	}
+
+	stmtToStore := c.Statement
+	if !strings.HasPrefix(stmtToStore, "["+string(c.ClaimType)+"] ") {
+		stmtToStore = fmt.Sprintf("[%s] %s", c.ClaimType, c.Statement)
 	}
 
 	query := `
@@ -160,9 +195,22 @@ func (r *KnowledgeRepository) CreateClaim(ctx context.Context, c *knowledge.Clai
 	}
 
 	_, err := r.db.RawDB().ExecContext(ctx, query,
-		c.ID, c.Statement, c.AssertionStatus, isKnowledgeInt, c.CurrentVersion, createdStr, updatedStr,
+		c.ID, stmtToStore, c.AssertionStatus, isKnowledgeInt, c.CurrentVersion, createdStr, updatedStr,
 	)
 	return err
+}
+
+func parseClaimStatement(c *knowledge.Claim) {
+	if strings.HasPrefix(c.Statement, "[") {
+		if endIdx := strings.Index(c.Statement, "] "); endIdx > 0 {
+			c.ClaimType = knowledge.ClaimType(c.Statement[1:endIdx])
+			c.Statement = c.Statement[endIdx+2:]
+			return
+		}
+	}
+	if c.ClaimType == "" {
+		c.ClaimType = knowledge.ClaimFact
+	}
 }
 
 // GetClaim retrieves a claim by ID.
@@ -181,6 +229,7 @@ func (r *KnowledgeRepository) GetClaim(ctx context.Context, claimID string) (*kn
 	c.IsKnowledge = isKnow == 1
 	c.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 	c.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
+	parseClaimStatement(c)
 	return c, nil
 }
 
@@ -267,9 +316,34 @@ func (r *KnowledgeRepository) ListClaims(ctx context.Context, status knowledge.A
 		c.IsKnowledge = isKnow == 1
 		c.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
 		c.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
+		parseClaimStatement(c)
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// GetClaimLinksForEvidence returns all claim-evidence associations for a given evidence ID (AIA-16 §6.2 & AIA-18 §8.4).
+func (r *KnowledgeRepository) GetClaimLinksForEvidence(ctx context.Context, evidenceID string) ([]*knowledge.ClaimEvidenceLink, error) {
+	rows, err := r.db.RawDB().QueryContext(ctx, `
+		SELECT claim_id, evidence_id, support_type, confidence_weight
+		FROM claim_evidence_links WHERE evidence_id = ?
+	`, evidenceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []*knowledge.ClaimEvidenceLink
+	for rows.Next() {
+		var l knowledge.ClaimEvidenceLink
+		var supStr string
+		if err := rows.Scan(&l.ClaimID, &l.EvidenceID, &supStr, &l.ConfidenceWeight); err != nil {
+			return nil, err
+		}
+		l.SupportType = knowledge.SupportType(supStr)
+		links = append(links, &l)
+	}
+	return links, rows.Err()
 }
 
 // UpdateClaimStatus updates a claim's assertion_status and is_knowledge flag (e.g. after human reconciliation).

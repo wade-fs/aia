@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -93,9 +94,25 @@ func (s *Service) TriggerEmergencyStop(ctx context.Context, actor governance.Act
 
 // ResumeDispatch resumes dispatching. AIA-17 Rule: Agent CANNOT resume itself.
 // The actor MUST be a verified human operator (HUMAN / OWNER / USER / ADMIN).
+// If an emergency stop was triggered by a critical safety condition, force=true is required to override.
 func (s *Service) ResumeDispatch(ctx context.Context, actor governance.Actor, force bool) error {
 	if !actor.IsHuman() {
 		return fmt.Errorf("%w: actor %s:%s is not a verified human owner", ErrUnauthorizedActor, actor.Type, actor.ID)
+	}
+
+	ctrl, err := s.govRepo.GetControl(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve runtime control state: %w", err)
+	}
+
+	if ctrl != nil && ctrl.IsEmergencyStopped() && !force {
+		upperReason := strings.ToUpper(ctrl.Reason)
+		if strings.Contains(upperReason, "CRITICAL") ||
+			strings.Contains(upperReason, "SECURITY") ||
+			strings.Contains(upperReason, "BREACH") ||
+			strings.Contains(upperReason, "SAFETY_TRIP") {
+			return fmt.Errorf("cannot resume dispatch without force flag: active emergency stop was triggered with critical reason (%s)", ctrl.Reason)
+		}
 	}
 
 	actorStr := fmt.Sprintf("%s:%s", actor.Type, actor.ID)

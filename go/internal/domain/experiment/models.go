@@ -22,6 +22,16 @@ const (
 	StatusArchived        Status = "ARCHIVED"
 )
 
+// NextStepDecision defines the 4-way post-experiment decision outcomes (AIA-15 §3.9).
+type NextStepDecision string
+
+const (
+	DecisionContinue NextStepDecision = "CONTINUE" // Continue running generation cohorts
+	DecisionModify   NextStepDecision = "MODIFY"   // Trigger generation evolution (G2.x)
+	DecisionDefer    NextStepDecision = "DEFER"    // Defer pending more data
+	DecisionStop     NextStepDecision = "STOP"     // Stop experiment (baseline superior or hypothesis falsified)
+)
+
 type GenerationRole string
 
 const (

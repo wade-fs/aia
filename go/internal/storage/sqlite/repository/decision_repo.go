@@ -185,6 +185,26 @@ func (r *DecisionRepository) GetEvidenceLinks(ctx context.Context, decisionID st
 	return links, rows.Err()
 }
 
+// GetDecisionsForEvidence returns all decision IDs that reference a given evidence ID (AIA-18 §8.4).
+func (r *DecisionRepository) GetDecisionsForEvidence(ctx context.Context, evidenceID string) ([]string, error) {
+	query := `SELECT decision_id FROM decision_evidence_links WHERE evidence_id = ?`
+	rows, err := r.db.RawDB().QueryContext(ctx, query, evidenceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var decisionIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		decisionIDs = append(decisionIDs, id)
+	}
+	return decisionIDs, rows.Err()
+}
+
 func normalizeActionTypeForDB(action decision.ActionType) decision.ActionType {
 	switch action {
 	case decision.ActionAct, decision.ActionDefer, decision.ActionMonitor, decision.ActionAskHuman, decision.ActionNoAction:

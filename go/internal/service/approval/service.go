@@ -31,6 +31,12 @@ type RequestApprovalInput struct {
 	TimeoutDuration     time.Duration            `json:"timeout_duration"`
 	TaskID              *string                  `json:"task_id,omitempty"`
 	DecisionID          *string                  `json:"decision_id,omitempty"`
+
+	// Structured metadata fields (AIA-17 §7.2)
+	ExpectedBenefit     string                   `json:"expected_benefit,omitempty"`
+	ResourceImpact      string                   `json:"resource_impact,omitempty"`
+	Reversibility       string                   `json:"reversibility,omitempty"`
+	Alternatives        []string                 `json:"alternatives,omitempty"`
 }
 
 type Service struct {
@@ -89,6 +95,10 @@ func (s *Service) RequestApproval(ctx context.Context, input RequestApprovalInpu
 		TimeoutPolicy:       input.TimeoutPolicy,
 		TaskID:              input.TaskID,
 		DecisionID:          input.DecisionID,
+		ExpectedBenefit:     input.ExpectedBenefit,
+		ResourceImpact:      input.ResourceImpact,
+		Reversibility:       input.Reversibility,
+		Alternatives:        input.Alternatives,
 		CreatedAt:           now,
 		ExpiresAt:           expiresAt,
 	}
@@ -241,6 +251,117 @@ func (s *Service) Reject(ctx context.Context, approvalID string, reviewerID, rev
 			RiskTier:         &riskStr,
 			GovernanceAction: &govActionStr,
 			CreatedAt:        now,
+		})
+	}
+
+	return nil
+}
+
+// RequestRevision sends an approval request back with reviewer feedback requiring changes (AIA-17 §7.3).
+func (s *Service) RequestRevision(ctx context.Context, approvalID string, reviewerID, feedback string, actorType string) error {
+	appr, err := s.repo.Get(ctx, approvalID)
+	if err != nil {
+		return err
+	}
+
+	if appr.Status != governance.ApprovalPending {
+		return fmt.Errorf("%w: current status is %s", ErrApprovalNotPending, appr.Status)
+	}
+
+	normActor := strings.ToUpper(strings.TrimSpace(actorType))
+	if normActor == "AGENT" || strings.HasPrefix(strings.ToUpper(reviewerID), "AGENT:") || reviewerID == appr.RequesterEntity {
+		return ErrAgentSelfApprovalForbidden
+	}
+	if normActor != "HUMAN" && normActor != "OWNER" && normActor != "USER" && normActor != "ADMIN" {
+		return ErrAgentSelfApprovalForbidden
+	}
+
+	if err := s.repo.UpdateStatus(ctx, approvalID, governance.ApprovalNeedsRevision, &reviewerID, &feedback); err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	if s.auditRepo != nil {
+		riskStr := string(appr.RiskTier)
+		govActionStr := string(governance.GovernanceActionRequiredApproval)
+		apprID := appr.ID
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:               uuid.New().String(),
+			ActorType:        normActor,
+			ActorID:          reviewerID,
+			Action:           "APPROVAL_REVISION_REQUESTED",
+			ResourceType:     "APPROVAL",
+			ResourceID:       approvalID,
+			Outcome:          "NEEDS_REVISION",
+			Details:          json.RawMessage(fmt.Sprintf(`{"feedback": %q}`, feedback)),
+			ApprovalID:       &apprID,
+			DecisionID:       appr.DecisionID,
+			RiskTier:         &riskStr,
+			GovernanceAction: &govActionStr,
+			CreatedAt:        now,
+		})
+	}
+
+	if s.bus != nil {
+		s.bus.Publish("approval.needs_revision", map[string]any{
+			"approval_id": approvalID,
+			"feedback":    feedback,
+		})
+	}
+
+	return nil
+}
+
+// RevokeApproval cancels or revokes a previously granted or pending approval (AIA-17 §7.3).
+func (s *Service) RevokeApproval(ctx context.Context, approvalID string, reviewerID, reason string, actorType string) error {
+	appr, err := s.repo.Get(ctx, approvalID)
+	if err != nil {
+		return err
+	}
+
+	normActor := strings.ToUpper(strings.TrimSpace(actorType))
+	if normActor == "AGENT" || strings.HasPrefix(strings.ToUpper(reviewerID), "AGENT:") {
+		return ErrAgentSelfApprovalForbidden
+	}
+	if normActor != "HUMAN" && normActor != "OWNER" && normActor != "USER" && normActor != "ADMIN" {
+		return ErrAgentSelfApprovalForbidden
+	}
+
+	if err := s.repo.UpdateStatus(ctx, approvalID, governance.ApprovalRevoked, &reviewerID, &reason); err != nil {
+		return err
+	}
+
+	// If linked task was active or waiting, cancel it immediately
+	if appr.TaskID != nil && *appr.TaskID != "" && s.taskSvc != nil {
+		_ = s.taskSvc.UpdateStatus(ctx, *appr.TaskID, task.StatusCancelled)
+	}
+
+	now := time.Now().UTC()
+	if s.auditRepo != nil {
+		riskStr := string(appr.RiskTier)
+		govActionStr := string(governance.GovernanceActionBlocked)
+		apprID := appr.ID
+		_ = s.auditRepo.Append(ctx, &repository.AuditLogEntry{
+			ID:               uuid.New().String(),
+			ActorType:        normActor,
+			ActorID:          reviewerID,
+			Action:           "APPROVAL_REVOKED",
+			ResourceType:     "APPROVAL",
+			ResourceID:       approvalID,
+			Outcome:          "REVOKED",
+			Details:          json.RawMessage(fmt.Sprintf(`{"reason": %q}`, reason)),
+			ApprovalID:       &apprID,
+			DecisionID:       appr.DecisionID,
+			RiskTier:         &riskStr,
+			GovernanceAction: &govActionStr,
+			CreatedAt:        now,
+		})
+	}
+
+	if s.bus != nil {
+		s.bus.Publish("approval.revoked", map[string]any{
+			"approval_id": approvalID,
+			"reason":      reason,
 		})
 	}
 

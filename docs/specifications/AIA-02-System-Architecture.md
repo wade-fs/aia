@@ -8,7 +8,7 @@
 - 文件性質：系統總體架構規格
 - 適用系統：AIA (Autonomous Intelligence Architecture)
 - 主要實作語言：Go
-- Agent Harness：Antigravity CLI（agy）1.4.12
+- Agent Harness：Antigravity CLI（agy）
 - 架構模式：Modular Monolith + Domain Agent Architecture
 - 部署模式：Single User / Local First
 - 狀態：目標架構規格；Phase 0 ～ Phase 6 核心元件與 Phase 7 整合已於 Go 代碼庫落地（註：部分外部 API 數據源仍處於隔離模擬中）

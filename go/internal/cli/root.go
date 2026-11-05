@@ -18,7 +18,7 @@ var RootCmd = &cobra.Command{
 	Short: "AIA is a Personal AI Agent Platform running on your desktop",
 	Long: `AIA (Autonomous Intelligence Architecture) is a Personal AI Agent Platform.
 It coordinates domain agents, persists long-term memories, manages task execution,
-and integrates with Antigravity CLI 1.4.12.`,
+and integrates with Antigravity CLI.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Doctor or version commands can run without full app if desired, but we can init app
 		if cmd.Name() == "version" {
@@ -78,6 +78,6 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print AIA version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("AIA Personal Agent v1.0 (Go 1.24+ / Antigravity 1.4.12)")
+		fmt.Println("AIA Personal Agent v1.0 (Go 1.23+ / Antigravity CLI)")
 	},
 }

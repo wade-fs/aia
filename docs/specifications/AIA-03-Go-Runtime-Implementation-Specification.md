@@ -1027,7 +1027,7 @@ type Harness interface {
 }
 ```
 
-實際介面應依目前 Antigravity CLI 1.4.12 的可用能力設計。
+實際介面應依目前 Antigravity CLI 的可用能力設計。
 
 ## 13.3 Execution Request
 

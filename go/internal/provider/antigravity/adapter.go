@@ -28,7 +28,11 @@ func (a *Adapter) Version(ctx context.Context) (string, error) {
 }
 
 func (a *Adapter) HealthCheck(ctx context.Context) error {
-	return HealthCheck(ctx, a.cfg.Executable, a.cfg.RequiredVersion)
+	policy := a.cfg.VersionPolicy
+	if policy == "" {
+		policy = "minimum"
+	}
+	return HealthCheckWithPolicy(ctx, a.cfg.Executable, a.cfg.RequiredVersion, policy)
 }
 
 func (a *Adapter) Start(ctx context.Context, req provider.StartRequest) (provider.ProviderSession, error) {

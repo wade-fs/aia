@@ -8,7 +8,7 @@
 | 文件狀態 | Revised Baseline |
 | 系統名稱 | AIA — Autonomous Intelligence Architecture |
 | Implementation Language | Go |
-| Runtime Harness | Antigravity CLI 1.4.12 |
+| Runtime Harness | Antigravity CLI |
 | Database | SQLite |
 | Primary Domain | Investment |
 | 依據文件 | AIA-01 v2.0 至 AIA-06 v2.1 |
@@ -152,7 +152,7 @@ NOT READY 表示已有部分架構，但目前不適合當作正式功能使用�
 - Linux。
 - Go 開發環境。
 - SQLite。
-- Antigravity CLI 1.4.12。
+- Antigravity CLI。
 - 可連接網際網路的環境。
 - 足夠的本機儲存空間。
 

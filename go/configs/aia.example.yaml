@@ -19,7 +19,7 @@ provider:
 
   antigravity:
     executable: agy
-    required_version: "1.4.12"
+    required_version: ""  # Optional version constraint (leave empty to accept any installed agy)
     version_policy: minimum
     output_format: stream-json
     input_format: stream-json

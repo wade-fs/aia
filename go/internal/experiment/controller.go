@@ -97,7 +97,7 @@ func (c *Controller) CreateDualExperiment(ctx context.Context, in CreateDualInpu
 		return nil, fmt.Errorf("invalid hypothesis: %w", err)
 	}
 	if in.G2HarnessVersion == "" {
-		in.G2HarnessVersion = "agy-1.4.12"
+		in.G2HarnessVersion = "agy"
 	}
 	if in.G2ModelID == "" {
 		in.G2ModelID = "gemini-default"

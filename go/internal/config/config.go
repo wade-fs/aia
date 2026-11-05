@@ -167,7 +167,7 @@ func DefaultConfig() *Config {
 			Default: "antigravity",
 			Antigravity: AntigravityConfig{
 				Executable:      "agy",
-				RequiredVersion: "1.4.12",
+				RequiredVersion: "",
 				VersionPolicy:   "minimum",
 				OutputFormat:    "stream-json",
 				InputFormat:     "stream-json",

@@ -105,7 +105,7 @@ provider:
   default: "antigravity"            # "antigravity" (production agy CLI) or "mock" (testing)
   antigravity:
     executable: "agy"               # Executable binary in PATH or absolute path
-    required_version: "1.4.12"
+    required_version: ""            # Optional version constraint (leave empty to accept any installed agy)
     version_policy: "minimum"
     output_format: "stream-json"
     input_format: "stream-json"

@@ -16,6 +16,9 @@ test:
 test-race:
 	@$(MAKE) -C go test-race
 
+test-7day test-7days 7day 7days:
+	@$(MAKE) -C go test-7days
+
 run:
 	@$(MAKE) -C go run
 

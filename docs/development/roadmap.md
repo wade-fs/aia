@@ -3,7 +3,7 @@
 **Project:** Autonomous Intelligence Architecture (AIA)  
 **Version:** v2.0 (Official Baseline)  
 **Baseline Roadmap:** Master Implementation Plan fulfilled across Phases 0–7  
-**Last Updated:** 2026-11-04  
+**Last Updated:** 2026-11-05  
 
 ---
 
@@ -128,10 +128,10 @@ Progress is evaluated by verifiable, computable autonomous behavior rather than 
 - **Complex Problem Analysis & Versioned Planning (AIA-22)**:
   - **Migration `018` (`problems`, `problem_models`, `analysis_records`, `plans`, `plan_changes`)**: Relational problem modeling (objectives, constraints, facts, assumptions, unknowns, risks, success criteria), deduction analysis records, and versioned plan trees.
   - **Problem Analysis Service (`internal/service/problem/`)**: Multi-stage problem decomposition and validation (verified by `tests/integration/problem_stage1_to_5_test.go`).
-  - **Versioned Plan Service (`internal/service/plan/`)**: Versioned work item graphs, supersede chains, and plan alteration governance.
+  - **Versioned Plan Support (`internal/domain/plan/` + `service/problem/`)**: Versioned work item graphs, supersede chains, and plan alteration governance (models in domain/plan; orchestration via problem service).
   - **Autonomous Escalation from Repeated Failures (AIA-22 §10)**: Coordinator automatically detects repeated task failures and escalates them into formal problem models and versioned plans.
   - **Autonomy Core Integration**: Complete wiring of problem modeling, recall, and plan work item materialization into the 11-step Autonomy Loop (`internal/autonomy/cycle/coordinator.go`), Initiative proactive discovery, and context assembly.
-  - **CLI & REST API**: CLI commands (`aia problem`, `aia plan`) and HTTP endpoints (`/api/v1/problems`, `/api/v1/plans`).
+  - **CLI & REST API**: CLI commands (`aia problem` 含 plan 子功能) and HTTP endpoints (`/api/v1/problems`, `/api/v1/plans`).
 - **Systemic Operations, Evaluation & Web Console Hardening**:
   - **AIA-13 Autonomy Evaluation & Benchmarking**: `internal/autonomy/evaluation/` (evaluator.go, metrics.go) providing general autonomy indicators (Proactive Rate, Override Frequency, Calibration, Recovery Accuracy, Self-Correction Score).
   - **AIA-19 Operations & Observability**: SQLite Backup & Restore (`BackupService`, CLI `aia backup`), Distributed Tracing (`internal/telemetry/tracing`, CLI `aia trace`), Operational Metrics (`internal/telemetry/metrics`), and background periodic log retention purger (`LogRetentionPurger`).

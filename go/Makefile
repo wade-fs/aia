@@ -14,6 +14,9 @@ test:
 test-race:
 	$(GO) test -race ./...
 
+test-7day test-7days 7day 7days:
+	$(GO) test -v -run TestSevenDayAutonomyScenario ./tests/integration/
+
 run:
 	$(GO) run ./cmd/aia
 

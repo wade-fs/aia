@@ -184,7 +184,9 @@ aia clarification answer <clarification-id> --answer "Selected option"
 # 複雜問題診斷與版本化計畫 (AIA-22)
 aia problem list --project <project-id>
 aia problem analyze <problem-id>
-aia plan list --problem <problem-id>
+aia problem plan <problem-id>
+aia problem plan-approve <plan-id>
+aia problem materialize <plan-id>
 
 # 維運、備份與分散式追蹤 (AIA-19)
 aia backup create

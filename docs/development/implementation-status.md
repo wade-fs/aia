@@ -5,7 +5,7 @@
 **Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Baseline [`0e189d9`](file:///home/wade/src/github/aia) ➔ Phase 5A Baseline [`29d1cb3`](file:///home/wade/src/github/aia) ➔ Phase 5B Baseline ➔ Phase 6 Active Baseline ➔ AIA-21/22/19/13 Active  
 **Specification Baseline:** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-22) v2.0  
 **Audit Report:** [docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)  
-**Last Updated:** 2026-11-04  
+**Last Updated:** 2026-11-05  
 
 ---
 
@@ -106,7 +106,7 @@ go/
 | **`internal/domain/brief` & `service/brief`** | **Production Ready (AIA-21)** | Universal Project Brief & Field History | Domain-agnostic project brief requirements schema, readiness stage evaluation, Brief Observer integration, and immutable field-level revision history tracking (`brief_field_history`, Migration `016`). |
 | **`internal/domain/clarification` & `service/clarification`** | **Production Ready (AIA-21)** | Generic Clarification Management | Interactive human-in-the-loop Q&A (`clarification_requests`), priority/blocking evaluation, option selection, and brief field binding (Migration `017`). |
 | **`internal/domain/problem` & `service/problem`** | **Production Ready (AIA-22)** | Complex Problem Analysis & Diagnostic Engine | Formal problem definition, multi-version problem models (`problem_models`), structured analysis records (`analysis_records`), causal graph analysis, autonomous repeated task failure escalation (AIA-22 §10), 11-step Autonomy Loop integration, and diagnostic CLI/REST interface (Migration `018`). |
-| **`internal/domain/plan` & `service/plan`** | **Production Ready (AIA-22)** | Complex Problem Planning & Change Management | Executable plan generation (`plans`), versioned plan modifications, formal change proposals (`plan_changes`), evidence references, impact analysis, work item task materialization, and Autonomy Cycle execution. |
+| **`internal/domain/plan` & `service/problem`** | **Production Ready (AIA-22)** | Complex Problem Planning & Change Management | Executable plan generation (`plans`), versioned plan modifications, formal change proposals (`plan_changes`), evidence references, impact analysis, work item task materialization, and Autonomy Cycle execution. Plan models live in `domain/plan`; coordination via `service/problem`. |
 | **`internal/service/backup` & `internal/telemetry`** | **Production Ready (AIA-19)** | Backup, Tracing & Operational Metrics | Online SQLite hot backup & restore via SQLite Backup API (`BackupService`), SHA-256 integrity verification, distributed tracing with span hierarchies (`telemetry/tracing`), process & system operational metrics (`telemetry/metrics`), and background expired log retention purger. |
 
 ---

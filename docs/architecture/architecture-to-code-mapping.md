@@ -4,7 +4,7 @@
 **當前實作基準：** Phase 0 ～ Phase 6 完整落地 + Phase 7 硬化整合 (Migrations `001` ～ `019`)  
 **對照規格：** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-22)  
 **文件狀態：** Active Production Architecture Mapping  
-**最後更新：** 2026-11-04  
+**最後更新：** 2026-11-05  
 
 ---
 
@@ -59,7 +59,7 @@
 |---|---|---|:---:|---|
 | **AIA-05 Investment Agent** | 虛擬資金、營業日自主觀察、Brier 校準。 | [`service/investment/`](file:///home/wade/src/github/aia/go/internal/service/investment), [`collector/`](file:///home/wade/src/github/aia/go/internal/collector), [`experiment/`](file:///home/wade/src/github/aia/go/internal/experiment) | 生產就緒 | 11 張投資專用表，台股/總經採集，Brier/LogLoss 雙軌校準。 |
 | **AIA-06 Web UI & 介面** | Port 7777, Activity Monitor, 審批與監控。 | [`web/host/`](file:///home/wade/src/github/aia/go/internal/web/host), [`web/console/`](file:///home/wade/src/github/aia/go/internal/web/console), [`go/web/assets/dist/`](file:///home/wade/src/github/aia/go/web/assets/dist) | 生產就緒 | 後端 REST API 齊全；前端 16 個導覽分頁（Overview, Tasks, Pending, Goals, Cycles, Learnings, Experiments, Delegations, Clarifications, Problems, Investment, Coding, Writing, Memory, Agents, Audit）與導覽列 Emergency Stop 按鈕。 |
-| **AIA-07 使用者操作手冊** | CLI 指令集、安裝配置、維護與故障排除。 | [`cli/`](file:///home/wade/src/github/aia/go/internal/cli), [`docs/operations/`](file:///home/wade/src/github/aia/docs/operations) | 生產就緒 | Cobra CLI 完整支援 agent, task, cycle, goal, learning, brief, clarify, problem, plan, backup, trace, worker。 |
+| **AIA-07 使用者操作手冊** | CLI 指令集、安裝配置、維護與故障排除。 | [`cli/`](file:///home/wade/src/github/aia/go/internal/cli), [`docs/operations/`](file:///home/wade/src/github/aia/docs/operations) | 生產就緒 | Cobra CLI 完整支援 agent, task, cycle, goal, learning, brief, clarify, problem (含 plan 功能), backup, trace, worker。 |
 
 ---
 
@@ -78,7 +78,7 @@
 
 | 規格編號與名稱 | 規格核心要求 | 實際程式碼位置 (`go/internal/`) | 實作成熟度 | 現況與注意事項 |
 |---|---|---|:---:|---|
-| **AIA-12 跨領域協作與委派** | Agent 間任務委派合約、交付物驗收、跨專案協同。 | [`service/delegation/`](file:///home/wade/src/github/aia/go/internal/service/delegation), [`domain/delegation/`](file:///home/wade/src/github/aia/go/internal/domain/delegation) | 生產就緒 | `delegation_requests` 狀態機，自動工單生成與驗收檢查。 |
+| **AIA-12 跨領域協作與委派** | Agent 間任務委派合約、交付物驗收、跨專案協同。 | [`service/delegation/`](file:///home/wade/src/github/aia/go/internal/service/delegation), [`domain/experiment/`](file:///home/wade/src/github/aia/go/internal/domain/experiment) (DelegationRequest 等) | 生產就緒 | `delegation_requests` 狀態機，自動工單生成與驗收檢查；委派模型位於 experiment 領域。 |
 | **AIA-13 自主性評估基準** | 主動率、介入率、連續性復原準確率等獨立指標。 | [`autonomy/evaluation/`](file:///home/wade/src/github/aia/go/internal/autonomy/evaluation), [`experiment/`](file:///home/wade/src/github/aia/go/internal/experiment) | 生產就緒 | 通用全系統自主性評估指標模組 (`evaluator.go`, `metrics.go`)，涵蓋主動率、人工介入率、校準度與回歸率。 |
 | **AIA-14 安全代碼自我修改** | Level A/B/C 三級隔離、Git Worktree 沙盒、自修流水線。 | [`service/selfmod/`](file:///home/wade/src/github/aia/go/internal/service/selfmod), [`domain/selfmod/`](file:///home/wade/src/github/aia/go/internal/domain/selfmod), [`autonomy/self_evolution_engine.go`](file:///home/wade/src/github/aia/go/internal/autonomy/self_evolution_engine.go) | 生產就緒 | 三級分類、沙盒 Worktree 隔離、V1~V6 驗證管線、診斷重試、審核分流與部署後監控 (Migration 014/019)。 |
 | **AIA-15 自主實驗生命週期** | 世代世代實驗 (`G1` vs `G2`)、5 體制判決、長期存檔。 | [`experiment/`](file:///home/wade/src/github/aia/go/internal/experiment), [`domain/experiment/`](file:///home/wade/src/github/aia/go/internal/domain/experiment) | 生產就緒 | 凍結 G1 規則基準與 SQLite 觸發器防篡改，完整 11-狀態轉換控制，DiD 對照評估。 |
@@ -95,7 +95,7 @@
 | **AIA-19 部署維運與可觀測性** | systemd --user 常駐、Activity Monitor、日誌管理。 | [`service/backup/`](file:///home/wade/src/github/aia/go/internal/service/backup), [`telemetry/`](file:///home/wade/src/github/aia/go/internal/telemetry), [`worker/`](file:///home/wade/src/github/aia/go/internal/worker) | 生產就緒 | 線上 SQLite 備份/還原/校驗 (`BackupService`)、分散式追蹤 (`Tracing`)、維運度量 (`Metrics`) 與背景日誌過期清理器 (`LogRetentionPurger`)。 |
 | **AIA-20 創作規範與小說專案** | 創作大綱、Master Bible、人物譜系與章節管線。 | [`service/writing/`](file:///home/wade/src/github/aia/go/internal/service/writing), [`domain/writing/`](file:///home/wade/src/github/aia/go/internal/domain/writing) | 生產就緒 | 支援小說專案連續性、世界觀設定與一致性檢查。 |
 | **AIA-21 專案綱要與釐清管理** | Universal Project Brief、歷史版本追蹤、人機互動釐清。 | [`service/brief/`](file:///home/wade/src/github/aia/go/internal/service/brief), [`service/clarification/`](file:///home/wade/src/github/aia/go/internal/service/clarification), [`domain/brief/`](file:///home/wade/src/github/aia/go/internal/domain/brief) | 生產就緒 | 跨領域通用 Brief Schema，欄位級不可變修訂歷史，釐清請求工作流，Brief Observer 自主感知。 |
-| **AIA-22 複雜問題分析與規劃** | 形式化問題建模、多階段診斷、可執行計畫 DAG 與變更。 | [`service/problem/`](file:///home/wade/src/github/aia/go/internal/service/problem), [`service/plan/`](file:///home/wade/src/github/aia/go/internal/service/plan), [`autonomy/cycle/`](file:///home/wade/src/github/aia/go/internal/autonomy/cycle) | 生產就緒 | 獨立服務、儲存庫、CLI、REST、反覆任務失敗自主升級 (§10) 與 11 步 Autonomy Loop 完整整合。 |
+| **AIA-22 複雜問題分析與規劃** | 形式化問題建模、多階段診斷、可執行計畫 DAG 與變更。 | [`service/problem/`](file:///home/wade/src/github/aia/go/internal/service/problem), [`domain/plan/`](file:///home/wade/src/github/aia/go/internal/domain/plan), [`autonomy/cycle/`](file:///home/wade/src/github/aia/go/internal/autonomy/cycle) | 生產就緒 | 獨立服務、儲存庫、CLI、REST、反覆任務失敗自主升級 (§10) 與 11 步 Autonomy Loop 完整整合；Plan 模型位於 domain/plan，由 problem 服務協調。 |
 
 ---
 
@@ -119,11 +119,11 @@ go/
 │   ├── cli/                             # 所有子命令 (含 backup, trace, worker, brief, clarify, problem)
 │   ├── config/                          # 完整 YAML 配置載入器
 │   ├── continuity/                      # 脈絡重建與事件歷史還原
-│   ├── domain/                          # 領域模型實體 (brief, clarification, problem, plan, selfmod)
+│   ├── domain/                          # 領域模型實體 (brief, clarification, problem, plan, selfmod, experiment 含 DelegationRequest 等)
 │   ├── experiment/                      # 世代實驗控制器 (G1 vs G2)
 │   ├── policy/                          # 白名單與預算門禁
 │   ├── provider/                        # Antigravity 沙盒適配器
-│   ├── service/                         # 各業務服務 (backup, brief, clarification, problem, plan, selfmod)
+│   ├── service/                         # 各業務服務 (backup, brief, clarification, problem, delegation, selfmod)
 │   ├── storage/sqlite/                  # SQLite WAL 驅動與 Migrations 001~019
 │   ├── telemetry/                       # 分散式追蹤與維運度量指標 (AIA-19)
 │   ├── web/                             # Web Console API 與靜態資源 (16 tabs & Emergency Stop)

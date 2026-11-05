@@ -2,13 +2,16 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/wade/aia/internal/domain/investment"
+	"github.com/wade/aia/internal/domain/schedule"
 	"github.com/wade/aia/internal/domain/task"
 	taskService "github.com/wade/aia/internal/service/task"
+	taskdomain "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 )
 
@@ -18,37 +21,35 @@ func TestRuntimeBackgroundWorker_LifecycleAndDispatch(t *testing.T) {
 
 	ctx := context.Background()
 
-	// 1. Verify default recurring schedules are seeded on startup
+	// 1. Verify default schedules are empty (preset default tasks/schedules deleted)
 	schedules, err := application.ScheduleSvc.ListSchedules(ctx, false)
 	if err != nil {
 		t.Fatalf("failed to list schedules: %v", err)
 	}
-	if len(schedules) < 5 {
-		t.Fatalf("expected at least 5 seeded default schedules for the 3 frequencies, got %d", len(schedules))
+	if len(schedules) != 0 {
+		t.Fatalf("expected 0 default schedules (deleted per requirement), got %d", len(schedules))
 	}
 
-	// Verify standard schedule names exist
-	schedNames := make(map[string]bool)
-	for _, s := range schedules {
-		schedNames[s.Name] = true
-	}
-	expectedSchedules := []string{
-		"TWSE Daily Market Close Sync",
-		"MOPS Announcements Check",
-		"FRED Macro Indicators Sync",
-		"Prediction Verification and Calibration",
-		"Investment Research Gated Evaluation",
-	}
-	for _, expected := range expectedSchedules {
-		if !schedNames[expected] {
-			t.Errorf("missing expected default schedule: %s", expected)
-		}
-	}
-
-	// 2. Test Step 2: Schedule Worker auto-dispatch
-	// Make a schedule due immediately
+	// 2. Test Step 2: Create a schedule and test Schedule Worker auto-dispatch
 	now := time.Now().UTC()
-	targetSched := &schedules[0]
+	tplJSON, _ := json.Marshal(taskdomain.CreateTaskRequest{
+		Title:       "Test Worker Dispatch",
+		Description: "Verification of runtime worker auto-dispatch",
+		Priority:    40,
+	})
+	targetSched, err := application.ScheduleSvc.CreateSchedule(
+		ctx,
+		"Test Worker Dispatch",
+		"0 * * * *",
+		"system-collector",
+		string(tplJSON),
+		schedule.MisfireSkip,
+	)
+	if err != nil {
+		t.Fatalf("failed to create test schedule: %v", err)
+	}
+
+	// Make schedule due immediately
 	targetSched.NextRunAt = now.Add(-1 * time.Minute)
 	if err := application.ScheduleRepo.Save(ctx, targetSched); err != nil {
 		t.Fatalf("failed to update schedule: %v", err)
@@ -322,7 +323,17 @@ func TestActivityMonitor_EndpointAndSnapshot(t *testing.T) {
 	if snap.TaskWorker != "IDLE" {
 		t.Errorf("expected TaskWorker IDLE, got %s", snap.TaskWorker)
 	}
-	if snap.NextScheduledRun == "none" || snap.NextScheduledRun == "" {
-		t.Errorf("expected valid NextScheduledRun from seeded schedules, got %s", snap.NextScheduledRun)
+	if snap.NextScheduledRun != "none" {
+		t.Errorf("expected NextScheduledRun 'none' when no schedules exist, got %s", snap.NextScheduledRun)
+	}
+
+	// Add a schedule and verify it reflects in NextScheduledRun
+	_, err = application.ScheduleSvc.CreateSchedule(ctx, "Monitor Check", "0 12 * * *", "system-collector", "{}", schedule.MisfireSkip)
+	if err != nil {
+		t.Fatalf("failed to create schedule: %v", err)
+	}
+	snap2, err := application.WorkerMgr.GetActivityMonitor(ctx)
+	if err != nil || snap2.NextScheduledRun == "none" {
+		t.Errorf("expected valid NextScheduledRun after creating schedule, got %v (err=%v)", snap2.NextScheduledRun, err)
 	}
 }

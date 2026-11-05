@@ -1,16 +1,21 @@
-.PHONY: build test test-race run clean install_service uninstall_service status_service restart_service logs_service token
+GOROOT := /usr/local/go-1.23.2
+GO := $(GOROOT)/bin/go
+export GOROOT
+export PATH := $(GOROOT)/bin:$(PATH)
+
+.PHONY: build test test-race run clean install_service uninstall_service stop_service status_service restart_service logs_service token
 
 build:
-	go build -o bin/aia ./cmd/aia
+	$(GO) build -o bin/aia ./cmd/aia
 
 test:
-	go test ./...
+	$(GO) test ./...
 
 test-race:
-	go test -race ./...
+	$(GO) test -race ./...
 
 run:
-	go run ./cmd/aia
+	$(GO) run ./cmd/aia
 
 clean:
 	rm -rf bin
@@ -21,6 +26,9 @@ install_service:
 
 uninstall_service:
 	@./scripts/service.sh uninstall
+
+stop_service:
+	@./scripts/service.sh stop
 
 status_service:
 	@./scripts/service.sh status

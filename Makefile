@@ -1,4 +1,9 @@
-.PHONY: all build test test-race run clean install_service uninstall_service status_service restart_service logs_service token
+GOROOT := /usr/local/go-1.23.2
+GO := $(GOROOT)/bin/go
+export GOROOT
+export PATH := $(GOROOT)/bin:$(PATH)
+
+.PHONY: all build test test-race run clean install_service uninstall_service stop_service status_service restart_service logs_service token
 
 all: build
 
@@ -28,6 +33,9 @@ install_service:
 
 uninstall_service:
 	@./go/scripts/service.sh uninstall
+
+stop_service:
+	@./go/scripts/service.sh stop
 
 status_service:
 	@./go/scripts/service.sh status

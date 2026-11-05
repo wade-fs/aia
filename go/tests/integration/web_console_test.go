@@ -203,7 +203,7 @@ func TestWeb_Tasks_StatusIsReadyNotQueued(t *testing.T) {
 func TestWeb_PendingReview_Integration(t *testing.T) {
 	appInst, handler, token := setupTestWeb(t)
 	defer appInst.Close()
-	ctx := t.Context()
+	ctx := context.Background()
 
 	// Login
 	loginBody, _ := json.Marshal(map[string]string{"token": token})

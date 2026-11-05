@@ -16,6 +16,7 @@ import (
 	domainAutonomy "github.com/wade/aia/internal/domain/autonomy"
 	"github.com/wade/aia/internal/domain/continuity"
 	"github.com/wade/aia/internal/domain/governance"
+	domainProject "github.com/wade/aia/internal/domain/project"
 	"github.com/wade/aia/internal/domain/task"
 	"github.com/wade/aia/internal/eventbus"
 	"github.com/wade/aia/internal/orchestrator"
@@ -182,12 +183,13 @@ func (m *Manager) SetLogRetention(retainDays int, execRepo *repository.Execution
 }
 
 // SetAutonomyEngine attaches the autonomy closed-loop engine and configures auto-wake interval (AIA-08 §12.2).
+// Passing interval <= 0 activates the standard Taiwan Time schedule (08:30, 13:00, 17:30, 21:00).
 func (m *Manager) SetAutonomyEngine(eng *autonomy.Engine, interval time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.autonomyEng = eng
-	if interval <= 0 {
-		interval = 15 * time.Minute
+	if interval < 0 {
+		interval = 0
 	}
 	m.autonomyInterval = interval
 }
@@ -614,6 +616,46 @@ func (m *Manager) purgeExpiredLogs(ctx context.Context) {
 	}
 }
 
+// AutoWakeSlot represents a specific hour and minute in a day.
+type AutoWakeSlot struct {
+	Hour   int
+	Minute int
+}
+
+// DefaultTaiwanAutoWakeSlots defines the 4 daily auto-wake target times in Taiwan Time (UTC+8): 08:30, 13:00, 17:30, 21:00.
+var DefaultTaiwanAutoWakeSlots = []AutoWakeSlot{
+	{8, 30},
+	{13, 0},
+	{17, 30},
+	{21, 0},
+}
+
+// NextAutoWakeTime calculates the next scheduled wake-up time and wait duration relative to now in the specified location.
+func NextAutoWakeTime(now time.Time, loc *time.Location) (time.Time, time.Duration) {
+	if loc == nil {
+		taiwanLoc, err := time.LoadLocation("Asia/Taipei")
+		if err != nil {
+			taiwanLoc = time.FixedZone("CST", 8*3600)
+		}
+		loc = taiwanLoc
+	}
+	nowInLoc := now.In(loc)
+	year, month, day := nowInLoc.Date()
+
+	// Check today's remaining slots
+	for _, slot := range DefaultTaiwanAutoWakeSlots {
+		cand := time.Date(year, month, day, slot.Hour, slot.Minute, 0, 0, loc)
+		if cand.After(nowInLoc) {
+			return cand, cand.Sub(nowInLoc)
+		}
+	}
+
+	// First slot tomorrow
+	firstSlot := DefaultTaiwanAutoWakeSlots[0]
+	tomorrowCand := time.Date(year, month, day+1, firstSlot.Hour, firstSlot.Minute, 0, 0, loc)
+	return tomorrowCand, tomorrowCand.Sub(nowInLoc)
+}
+
 func (m *Manager) runAutonomyWorker(ctx context.Context) {
 	m.mu.RLock()
 	interval := m.autonomyInterval
@@ -623,32 +665,87 @@ func (m *Manager) runAutonomyWorker(ctx context.Context) {
 	if eng == nil {
 		return
 	}
-	if interval <= 0 {
-		interval = 15 * time.Minute
+
+	// If a custom interval was configured (e.g. in test suites > 0), use ticker mode
+	if interval > 0 {
+		slog.Info("autonomy worker periodic loop started", "interval", interval.String())
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				m.executeAutonomyWorkerCycle(ctx, eng)
+			}
+		}
 	}
 
-	slog.Info("autonomy worker periodic loop started", "interval", interval.String())
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	// Standard Production Schedule Mode: Taiwan Time 08:30, 13:00, 17:30, 21:00
+	taiwanLoc, err := time.LoadLocation("Asia/Taipei")
+	if err != nil {
+		taiwanLoc = time.FixedZone("CST", 8*3600)
+	}
 
+	slog.Info("autonomy worker scheduled loop started (Taiwan Time: 08:30, 13:00, 17:30, 21:00)")
 	for {
+		nextWake, waitDur := NextAutoWakeTime(time.Now(), taiwanLoc)
+		slog.Info("autonomy worker scheduled next auto-wake",
+			"next_wake_time", nextWake.Format("2006-01-02 15:04:05 MST"),
+			"wait_duration", waitDur.Round(time.Second).String())
+
+		timer := time.NewTimer(waitDur)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
-			if m.IsEmergencyStopped() {
-				slog.Debug("autonomy worker cycle skipped: emergency stop active")
-				continue
+		case <-timer.C:
+			m.executeAutonomyWorkerCycle(ctx, eng)
+		}
+	}
+}
+
+func (m *Manager) executeAutonomyWorkerCycle(ctx context.Context, eng *autonomy.Engine) {
+	if m.IsEmergencyStopped() {
+		slog.Debug("autonomy worker cycle skipped: emergency stop active")
+		return
+	}
+	slog.Info("autonomy worker auto-waking to execute scheduled closed-loop cycle (AIA-08 §12.2)")
+
+	// Enumerate active projects so all active projects are cycled without hardcoding "default"
+	var activeProjectIDs []string
+	if m.db != nil {
+		projRepo := repository.NewProjectRepository(m.db)
+		if projs, err := projRepo.List(ctx); err == nil {
+			for _, p := range projs {
+				if p.Status == domainProject.StatusActive {
+					activeProjectIDs = append(activeProjectIDs, string(p.ID))
+				}
 			}
-			slog.Info("autonomy worker auto-waking to execute scheduled closed-loop cycle (AIA-08 §12.2)")
-			_, err := eng.RunCycle(ctx, autonomy.RunCycleInput{
-				ProjectID:   "default",
-				TriggerType: continuity.TriggerScheduled,
-				Summary:     "Periodic autonomous closed loop executed by background autonomy worker (AIA-08 §12.2)",
-			})
-			if err != nil {
-				slog.Warn("periodic autonomy cycle encountered non-fatal notice", "err", err)
-			}
+		}
+	}
+
+	// If no projects found, fallback to "default"
+	if len(activeProjectIDs) == 0 {
+		activeProjectIDs = []string{"default"}
+	}
+
+	for _, pid := range activeProjectIDs {
+		if ctx.Err() != nil {
+			return
+		}
+		if m.IsEmergencyStopped() {
+			slog.Debug("autonomy worker remaining project cycles skipped: emergency stop active")
+			return
+		}
+		_, err := eng.RunCycle(ctx, autonomy.RunCycleInput{
+			ProjectID:   pid,
+			TriggerType: continuity.TriggerScheduled,
+			Summary:     fmt.Sprintf("Scheduled autonomous closed loop executed by background autonomy worker for project %s", pid),
+		})
+		if err != nil {
+			slog.Warn("scheduled autonomy cycle encountered non-fatal notice", "project_id", pid, "err", err)
 		}
 	}
 }

@@ -111,6 +111,11 @@ func (r *ScheduleRepository) ListDue(ctx context.Context, now time.Time) ([]sche
 	return list, rows.Err()
 }
 
+func (r *ScheduleRepository) Delete(ctx context.Context, id domain.ID) error {
+	_, err := r.db.RawDB().ExecContext(ctx, `DELETE FROM schedules WHERE id = ?`, id)
+	return err
+}
+
 type scheduleScanner interface {
 	Scan(dest ...any) error
 }

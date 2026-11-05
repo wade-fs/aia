@@ -201,3 +201,76 @@ func TestLearning_ExtendedCorrectionTypes_And_GoalEvolutionModes(t *testing.T) {
 		t.Fatalf("CreateGoalEvolutionProposal failed: %v", err)
 	}
 }
+
+func TestAutoWakeTimes_TaiwanSchedule(t *testing.T) {
+	loc := time.FixedZone("Asia/Taipei", 8*3600)
+
+	tests := []struct {
+		name         string
+		now          time.Time
+		wantHour     int
+		wantMinute   int
+		wantNextDay  bool
+	}{
+		{
+			name:        "Before 08:30 -> Wakes at 08:30 today",
+			now:         time.Date(2026, 11, 5, 8, 0, 0, 0, loc),
+			wantHour:    8,
+			wantMinute:  30,
+			wantNextDay: false,
+		},
+		{
+			name:        "At 08:30 -> Wakes at 13:00 today",
+			now:         time.Date(2026, 11, 5, 8, 30, 0, 0, loc),
+			wantHour:    13,
+			wantMinute:  0,
+			wantNextDay: false,
+		},
+		{
+			name:        "Between 08:30 and 13:00 -> Wakes at 13:00 today",
+			now:         time.Date(2026, 11, 5, 10, 15, 0, 0, loc),
+			wantHour:    13,
+			wantMinute:  0,
+			wantNextDay: false,
+		},
+		{
+			name:        "Between 13:00 and 17:30 -> Wakes at 17:30 today",
+			now:         time.Date(2026, 11, 5, 14, 0, 0, 0, loc),
+			wantHour:    17,
+			wantMinute:  30,
+			wantNextDay: false,
+		},
+		{
+			name:        "Between 17:30 and 21:00 -> Wakes at 21:00 today",
+			now:         time.Date(2026, 11, 5, 18, 0, 0, 0, loc),
+			wantHour:    21,
+			wantMinute:  0,
+			wantNextDay: false,
+		},
+		{
+			name:        "After 21:00 -> Wakes at 08:30 tomorrow",
+			now:         time.Date(2026, 11, 5, 21, 30, 0, 0, loc),
+			wantHour:    8,
+			wantMinute:  30,
+			wantNextDay: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			nextTime, dur := worker.NextAutoWakeTime(tc.now, loc)
+			if dur <= 0 {
+				t.Fatalf("expected positive duration, got %v", dur)
+			}
+			if nextTime.Hour() != tc.wantHour || nextTime.Minute() != tc.wantMinute {
+				t.Errorf("expected %02d:%02d, got %02d:%02d", tc.wantHour, tc.wantMinute, nextTime.Hour(), nextTime.Minute())
+			}
+			if tc.wantNextDay && nextTime.Day() != tc.now.Day()+1 {
+				t.Errorf("expected next day (%d), got %d", tc.now.Day()+1, nextTime.Day())
+			}
+			if !tc.wantNextDay && nextTime.Day() != tc.now.Day() {
+				t.Errorf("expected same day (%d), got %d", tc.now.Day(), nextTime.Day())
+			}
+		})
+	}
+}

@@ -22,6 +22,8 @@ TARGET_BIN="${BIN_DIR}/aia"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 UNIT_FILE="${SYSTEMD_USER_DIR}/aia.service"
 SERVICE_NAME="aia.service"
+DATA_DIR="${HOME}/.local/share/aia"
+DB_FILE="${DATA_DIR}/aia.db"
 
 DEFAULT_PORT="7777"
 DEFAULT_HOST="127.0.0.1"
@@ -77,8 +79,10 @@ ensure_dirs() {
 }
 
 build_binary() {
-    echo -e "${BLUE}🔨 編譯最新 AIA 二進位執行檔...${NC}"
-    (cd "${GO_DIR}" && go build -o bin/aia ./cmd/aia)
+    echo -e "${BLUE}🔨 編譯最新 AIA 二進位執行檔 (Go 1.23.2)...${NC}"
+    export GOROOT="${GOROOT:-/usr/local/go-1.23.2}"
+    export PATH="${GOROOT}/bin:${PATH}"
+    (cd "${GO_DIR}" && "${GOROOT}/bin/go" build -o bin/aia ./cmd/aia)
     cp -f "${GO_DIR}/bin/aia" "${TARGET_BIN}"
     chmod +x "${TARGET_BIN}"
     echo -e "${GREEN}✓ 二進位執行檔已就緒: ${TARGET_BIN}${NC}"
@@ -302,21 +306,40 @@ restart_service() {
     show_status
 }
 
-uninstall_service() {
+stop_service() {
     if ! is_service_installed; then
-        echo -e "${YELLOW}ℹ️  AIA 背景服務尚未安裝，無需移除。${NC}"
+        echo -e "${YELLOW}ℹ️  AIA 背景服務尚未安裝。${NC}"
         return 0
     fi
 
-    echo -e "${YELLOW}🛑 正在停止並解除安裝 AIA 背景服務...${NC}"
+    echo -e "${YELLOW}🛑 正在停止 AIA 背景服務 (保留資料庫)...${NC}"
     systemctl --user stop "${SERVICE_NAME}" 2>/dev/null || true
-    systemctl --user disable "${SERVICE_NAME}" 2>/dev/null || true
-    rm -f "${UNIT_FILE}"
-    systemctl --user daemon-reload
 
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${GREEN}✓ AIA 背景服務已完全停止並解除註冊！${NC}"
-    echo -e "   註：您的資料庫及設定檔 (${CONFIG_DIR}) 依然安全保留。"
+    echo -e "${GREEN}✓ AIA 背景服務已停止！${NC}"
+    echo -e "   ℹ️  資料庫依然安全保留: ${DB_FILE}"
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+uninstall_service() {
+    if is_service_installed; then
+        echo -e "${YELLOW}🛑 正在停止並解除安裝 AIA 背景服務...${NC}"
+        systemctl --user stop "${SERVICE_NAME}" 2>/dev/null || true
+        systemctl --user disable "${SERVICE_NAME}" 2>/dev/null || true
+        rm -f "${UNIT_FILE}"
+        systemctl --user daemon-reload
+        echo -e "${GREEN}✓ AIA 背景服務已停止並解除註冊！${NC}"
+    else
+        echo -e "${YELLOW}ℹ️  AIA 背景服務尚未安裝。${NC}"
+    fi
+
+    # 清理資料庫 (AIA SQLite database files)
+    echo -e "${YELLOW}🧹 正在清理 AIA 資料庫檔案 (${DATA_DIR}/aia.db*)...${NC}"
+    rm -f "${DATA_DIR}/aia.db" "${DATA_DIR}/aia.db-shm" "${DATA_DIR}/aia.db-wal" "${DATA_DIR}/aia.db-journal" 2>/dev/null || true
+
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${GREEN}✓ AIA 背景服務已完全移除，且資料庫已清空重置！${NC}"
+    echo -e "   註：環境設定檔 (${CONFIG_DIR}) 依然保留。"
     echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
@@ -326,6 +349,9 @@ case "${1:-install}" in
         ;;
     uninstall)
         uninstall_service
+        ;;
+    stop)
+        stop_service
         ;;
     status)
         show_status
@@ -340,7 +366,7 @@ case "${1:-install}" in
         get_token
         ;;
     *)
-        echo "使用方式: $0 {install|uninstall|status|restart|logs|token}"
+        echo "使用方式: $0 {install|uninstall|stop|status|restart|logs|token}"
         exit 1
         ;;
 esac

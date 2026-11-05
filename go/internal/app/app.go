@@ -382,7 +382,7 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 	)
 	workerMgr.SetGovernanceService(govSvc)
 	workerMgr.SetLogRetention(cfg.Logging.RetainDays, execRepo)
-	workerMgr.SetAutonomyEngine(autonomyEng, 15*time.Minute)
+	workerMgr.SetAutonomyEngine(autonomyEng, 0) // 0 activates Taiwan Time schedule: 08:30, 13:00, 17:30, 21:00 (AIA-08 §12.2)
 
 	tracer := tracing.DefaultTracer()
 	metricsReg := metrics.DefaultRegistry()

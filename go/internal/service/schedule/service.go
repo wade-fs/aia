@@ -85,6 +85,10 @@ func (s *Service) ToggleActive(ctx context.Context, id domain.ID, active bool) e
 	return s.repo.Save(ctx, sch)
 }
 
+func (s *Service) DeleteSchedule(ctx context.Context, id domain.ID) error {
+	return s.repo.Delete(ctx, id)
+}
+
 // TriggerSchedule immediately executes the scheduled task template and updates next run time.
 func (s *Service) TriggerSchedule(ctx context.Context, id domain.ID) (*taskdomain.Task, error) {
 	sch, err := s.repo.Get(ctx, id)

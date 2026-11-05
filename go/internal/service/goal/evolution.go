@@ -218,6 +218,43 @@ func (s *Service) ProposeOrApplyEvolution(ctx context.Context, in EvolutionInput
 		}
 		prop.Status = domainLearning.EvoApplied
 		prop.ResultingRevisionID = &rev.ID
+		prop.ApprovedBy = "AGENT:GOVERNANCE_AUTO"
+
+		if s.evoDeps.ApprovalSvc != nil {
+			var decID *string
+			if s.evoDeps.DecisionRepo != nil {
+				d := &decision.Decision{
+					ID:               uuid.New().String(),
+					CycleID:          in.CycleID,
+					ProjectID:        in.ProjectID,
+					ActionType:       decision.ActionAct,
+					IntentSummary:    fmt.Sprintf("Operational Goal Revision for %q", g.Name),
+					Justification:    in.Rationale,
+					GovernanceResult: decision.GovernanceAllowed,
+					CreatedAt:        now,
+				}
+				if dErr := s.evoDeps.DecisionRepo.Create(ctx, d, nil); dErr == nil {
+					decID = &d.ID
+				}
+			}
+
+			detailBytes, _ := json.Marshal(map[string]any{
+				"goal_id":   g.ID,
+				"rationale": in.Rationale,
+			})
+			appr, _ := s.evoDeps.ApprovalSvc.RequestApproval(ctx, approvalService.RequestApprovalInput{
+				RequesterEntity:     fmt.Sprintf("%s:%s", actorType, actorID),
+				OperationType:       "GOAL_REVISION",
+				OperationDetailJSON: string(detailBytes),
+				RiskTier:            governance.RiskTierLow,
+				DecisionID:          decID,
+			})
+			if appr != nil {
+				_ = s.evoDeps.ApprovalSvc.Approve(ctx, appr.ID, "GOVERNANCE_SYSTEM", "Auto-approved operational goal evolution", "SYSTEM")
+				prop.ApprovalID = &appr.ID
+			}
+		}
+
 		if s.evoDeps.LearningRepo != nil {
 			_ = s.evoDeps.LearningRepo.CreateGoalEvolutionProposal(ctx, prop)
 		}

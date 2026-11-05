@@ -278,7 +278,21 @@ func (r *KnowledgeRepository) LinkClaimEvidence(ctx context.Context, link *knowl
 	ON CONFLICT(claim_id, evidence_id) DO UPDATE SET support_type = excluded.support_type, confidence_weight = excluded.confidence_weight`
 
 	_, err := r.db.RawDB().ExecContext(ctx, query, link.ClaimID, link.EvidenceID, link.SupportType, link.ConfidenceWeight)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Invalidation/Refutation trigger (AIA-16 §6.5 & AIA-18 §8.4):
+	// If refuting evidence is linked to an accepted claim, demote it to CONFLICTED.
+	if link.SupportType == knowledge.SupportTypeRefutes {
+		_, _ = r.db.RawDB().ExecContext(ctx, `
+			UPDATE claims
+			SET assertion_status = ?, is_knowledge = 0, updated_at = ?
+			WHERE id = ? AND assertion_status = ?
+		`, string(knowledge.AssertionConflicted), time.Now().UTC().Format(time.RFC3339), link.ClaimID, string(knowledge.AssertionAccepted))
+	}
+
+	return nil
 }
 
 // ListClaims retrieves claims optionally filtered by assertion_status (e.g. CONFLICTED, ACCEPTED).
@@ -328,6 +342,30 @@ func (r *KnowledgeRepository) GetClaimLinksForEvidence(ctx context.Context, evid
 		SELECT claim_id, evidence_id, support_type, confidence_weight
 		FROM claim_evidence_links WHERE evidence_id = ?
 	`, evidenceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []*knowledge.ClaimEvidenceLink
+	for rows.Next() {
+		var l knowledge.ClaimEvidenceLink
+		var supStr string
+		if err := rows.Scan(&l.ClaimID, &l.EvidenceID, &supStr, &l.ConfidenceWeight); err != nil {
+			return nil, err
+		}
+		l.SupportType = knowledge.SupportType(supStr)
+		links = append(links, &l)
+	}
+	return links, rows.Err()
+}
+
+// GetEvidenceLinksForClaim returns all evidence associations for a given claim ID.
+func (r *KnowledgeRepository) GetEvidenceLinksForClaim(ctx context.Context, claimID string) ([]*knowledge.ClaimEvidenceLink, error) {
+	rows, err := r.db.RawDB().QueryContext(ctx, `
+		SELECT claim_id, evidence_id, support_type, confidence_weight
+		FROM claim_evidence_links WHERE claim_id = ?
+	`, claimID)
 	if err != nil {
 		return nil, err
 	}

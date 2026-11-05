@@ -13,6 +13,7 @@ import (
 	"github.com/wade/aia/internal/autonomy/recall"
 	domainAutonomy "github.com/wade/aia/internal/domain/autonomy"
 	"github.com/wade/aia/internal/domain/governance"
+	domainProblem "github.com/wade/aia/internal/domain/problem"
 	goalService "github.com/wade/aia/internal/service/goal"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
 )
@@ -171,12 +172,19 @@ func (d *Discoverer) Discover(ctx context.Context, in DiscoverInput) ([]*domainA
 			if prio < 6 {
 				prio = 6
 			}
-			metaBytes, _ := json.Marshal(map[string]any{
+			autoProb := len(gap.MetricGaps) == 0
+			metaMap := map[string]any{
 				"goal_id":     g.ID,
 				"goal_name":   g.Name,
 				"gap_ratio":   gap.GapRatio,
 				"metric_gaps": gap.MetricGaps,
-			})
+			}
+			if autoProb {
+				metaMap["auto_create_problem"] = true
+				metaMap["problem_title"] = fmt.Sprintf("Plan & Decompose: %s", g.Name)
+				metaMap["problem_objective"] = fmt.Sprintf("Achieve goal %q: %s", g.Name, g.Description)
+			}
+			metaBytes, _ := json.Marshal(metaMap)
 
 			candidates = append(candidates, &domainAutonomy.CandidateInitiative{
 				ID:                  uuid.New().String(),
@@ -291,7 +299,7 @@ func (d *Discoverer) Discover(ctx context.Context, in DiscoverInput) ([]*domainA
 
 		// 5. Open Complex Problems requiring modeling or plan decomposition (AIA-22 §10.2)
 		for _, prob := range in.Recalled.ActiveProblems {
-			if prob == nil {
+			if prob == nil || prob.Status == domainProblem.StatusClosed || prob.Status == domainProblem.StatusResolved {
 				continue
 			}
 			summary := fmt.Sprintf("Analyze and Plan Problem: %s", prob.Title)

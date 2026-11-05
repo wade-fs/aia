@@ -262,18 +262,32 @@ func EvaluateGoalGap(g *domainGoal.Goal) GoalGapAssessment {
 	}
 
 	if g.TargetMetricJSON == "" || g.TargetMetricJSON == "{}" {
-		// If no quantitative metric JSON is defined, no quantitative metric gap is flagged automatically
+		// Active goal with no metrics requires planning and task decomposition
+		out.HasGap = true
+		out.GapRatio = 1.0
+		out.GapSummary = fmt.Sprintf("Goal %q requires planning and execution", g.Name)
 		return out
 	}
 
-	var targetMap map[string]float64
-	if err := json.Unmarshal([]byte(g.TargetMetricJSON), &targetMap); err != nil || len(targetMap) == 0 {
+	targetMap := make(map[string]float64)
+	var rawTarget any
+	if err := json.Unmarshal([]byte(g.TargetMetricJSON), &rawTarget); err == nil && rawTarget != nil {
+		extractNumericMetrics(rawTarget, "", targetMap)
+	}
+
+	if len(targetMap) == 0 {
+		out.HasGap = true
+		out.GapRatio = 1.0
+		out.GapSummary = fmt.Sprintf("Goal %q requires planning and execution", g.Name)
 		return out
 	}
 
-	currentMap := map[string]float64{}
+	currentMap := make(map[string]float64)
 	if g.CurrentMetricJSON != "" {
-		_ = json.Unmarshal([]byte(g.CurrentMetricJSON), &currentMap)
+		var rawCurrent any
+		if err := json.Unmarshal([]byte(g.CurrentMetricJSON), &rawCurrent); err == nil && rawCurrent != nil {
+			extractNumericMetrics(rawCurrent, "", currentMap)
+		}
 	}
 
 	var gaps []string
@@ -299,6 +313,35 @@ func EvaluateGoalGap(g *domainGoal.Goal) GoalGapAssessment {
 		out.GapSummary = fmt.Sprintf("Goal %q has unmet target metrics (%s)", g.Name, gaps[0])
 	}
 	return out
+}
+
+func extractNumericMetrics(val any, prefix string, out map[string]float64) {
+	switch v := val.(type) {
+	case float64:
+		if prefix != "" {
+			out[prefix] = v
+		}
+	case int:
+		if prefix != "" {
+			out[prefix] = float64(v)
+		}
+	case int64:
+		if prefix != "" {
+			out[prefix] = float64(v)
+		}
+	case map[string]any:
+		for k, inner := range v {
+			subKey := k
+			if prefix != "" {
+				subKey = prefix + "." + k
+			}
+			extractNumericMetrics(inner, subKey, out)
+			// Also add the bare leaf key for easier matching if not conflicting
+			if _, exists := out[k]; !exists {
+				extractNumericMetrics(inner, k, out)
+			}
+		}
+	}
 }
 
 func (s *Service) appendGoalEvent(ctx context.Context, goalID string, eventType string, payload map[string]any) {

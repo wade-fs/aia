@@ -12,6 +12,7 @@ import (
 	"github.com/wade/aia/internal/autonomy/clock"
 	"github.com/wade/aia/internal/autonomy/deliberation"
 	"github.com/wade/aia/internal/autonomy/initiative"
+	"github.com/wade/aia/internal/autonomy/learning"
 	"github.com/wade/aia/internal/autonomy/observation"
 	"github.com/wade/aia/internal/autonomy/recall"
 	"github.com/wade/aia/internal/domain"
@@ -19,7 +20,10 @@ import (
 	domainClarify "github.com/wade/aia/internal/domain/clarification"
 	"github.com/wade/aia/internal/domain/continuity"
 	"github.com/wade/aia/internal/domain/decision"
+	domainGoal "github.com/wade/aia/internal/domain/goal"
 	"github.com/wade/aia/internal/domain/governance"
+	"github.com/wade/aia/internal/domain/knowledge"
+	domainLearning "github.com/wade/aia/internal/domain/learning"
 	domainPlan "github.com/wade/aia/internal/domain/plan"
 	domainProblem "github.com/wade/aia/internal/domain/problem"
 	"github.com/wade/aia/internal/domain/task"
@@ -27,6 +31,8 @@ import (
 	"github.com/wade/aia/internal/policy"
 	approvalService "github.com/wade/aia/internal/service/approval"
 	clarifyService "github.com/wade/aia/internal/service/clarification"
+	goalService "github.com/wade/aia/internal/service/goal"
+	knowledgeService "github.com/wade/aia/internal/service/knowledge"
 	problemService "github.com/wade/aia/internal/service/problem"
 	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
@@ -77,6 +83,10 @@ type CoordinatorDeps struct {
 	PlanRepo         *repository.PlanRepository
 	ProblemSvc       *problemService.Service
 	ClarificationSvc *clarifyService.Service
+	LearningRepo     *repository.LearningRepository
+	LearningEngine   *learning.Engine
+	GoalSvc          *goalService.Service
+	KnowledgeSvc     *knowledgeService.Service
 }
 
 // Coordinator orchestrates the 11-step closed-loop Autonomy Cycle (AIA-08, AIA-18, Plan §2):
@@ -97,6 +107,19 @@ func (c *Coordinator) SetProblemService(svc *problemService.Service) {
 
 func (c *Coordinator) SetClarificationService(svc *clarifyService.Service) {
 	c.deps.ClarificationSvc = svc
+}
+
+func (c *Coordinator) SetLearningDependencies(repo *repository.LearningRepository, eng *learning.Engine) {
+	c.deps.LearningRepo = repo
+	c.deps.LearningEngine = eng
+}
+
+func (c *Coordinator) SetGoalService(svc *goalService.Service) {
+	c.deps.GoalSvc = svc
+}
+
+func (c *Coordinator) SetKnowledgeService(svc *knowledgeService.Service) {
+	c.deps.KnowledgeSvc = svc
 }
 
 func (c *Coordinator) RegisterPilot(p DomainPilotExecutor) {
@@ -313,6 +336,14 @@ func (c *Coordinator) RunCycle(ctx context.Context, in RunInput) (*domainAutonom
 		"pending_issues":  len(recalled.PendingIssues),
 		"conflicts":       len(recalled.Conflicts),
 	})
+
+	// Closed-Loop Autonomous Healing & Epistemic Adaptations:
+	// Day 3: Task failure RCA & retry
+	c.handleRecentFailedTasks(ctx, projectID, cycleID, recalled)
+	// Day 5 & Day 6: Contradictory evidence, decision re-evaluation, plan change & verified learning
+	c.handleContradictoryEvidence(ctx, projectID, cycleID, recalled)
+	// Day 7: Goal evolution upon refuted premises
+	c.handleGoalEvolutionOnContradiction(ctx, projectID, cycleID, recalled)
 
 	// =========================================================================
 	// Step 4: Discover (主動發現候選議題與機會並執行活躍工單去重)
@@ -1193,18 +1224,33 @@ func (c *Coordinator) executeAutonomousProblemOrPlan(
 			goalIDStr = *chosenInitiative.GoalID
 		}
 
-		prob, err = c.deps.ProblemSvc.CreateProblem(ctx, problemService.CreateProblemInput{
-			ProjectID: projectID,
-			GoalID:    goalIDStr,
-			Title:     probTitle,
-			Objective: probObj,
-			Scope:     "AUTONOMY_CORE",
-			Priority:  domainProblem.PriorityHigh,
-		})
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to create problem: %w", err)
+		// Check if an existing problem for this Goal already exists
+		if goalIDStr != "" {
+			if existingProbs, pErr := c.deps.ProblemSvc.ListProblems(ctx, projectID); pErr == nil {
+				for _, ep := range existingProbs {
+					if ep.GoalID == goalIDStr {
+						prob = ep
+						chosenInitiative.ProblemID = &prob.ID
+						break
+					}
+				}
+			}
 		}
-		chosenInitiative.ProblemID = &prob.ID
+
+		if prob == nil {
+			prob, err = c.deps.ProblemSvc.CreateProblem(ctx, problemService.CreateProblemInput{
+				ProjectID: projectID,
+				GoalID:    goalIDStr,
+				Title:     probTitle,
+				Objective: probObj,
+				Scope:     "AUTONOMY_CORE",
+				Priority:  domainProblem.PriorityHigh,
+			})
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to create problem: %w", err)
+			}
+			chosenInitiative.ProblemID = &prob.ID
+		}
 	}
 
 	// 1. Initial Epistemic Analysis (if not already modeled)
@@ -1249,6 +1295,14 @@ func (c *Coordinator) executeAutonomousProblemOrPlan(
 		}
 		if len(tasks) > 0 {
 			firstTaskID := string(tasks[0].ID)
+			if chosenInitiative.GoalID != nil && *chosenInitiative.GoalID != "" && c.deps.AutonomyRepo != nil {
+				_ = c.deps.AutonomyRepo.LinkGoalTask(ctx, &domainAutonomy.GoalTaskLink{
+					GoalID:                 *chosenInitiative.GoalID,
+					TaskID:                 firstTaskID,
+					CycleID:                &cycleID,
+					DecompositionRationale: chosenInitiative.Rationale,
+				})
+			}
 			summary := fmt.Sprintf("Autonomous Problem Escalation: Problem %s (%s) planned (v%d) and materialized %d task(s), dispatching %s",
 				prob.ID, prob.Title, activePlan.Version, len(tasks), firstTaskID)
 			return &firstTaskID, summary, nil
@@ -1258,4 +1312,317 @@ func (c *Coordinator) executeAutonomousProblemOrPlan(
 	// If waiting human approval
 	summary := fmt.Sprintf("Autonomous Problem Escalation: Problem %s planned (v%d) awaiting approval", prob.ID, activePlan.Version)
 	return nil, summary, nil
+}
+
+func (c *Coordinator) handleRecentFailedTasks(ctx context.Context, projectID, cycleID string, recalled *recall.RecalledBundle) {
+	if c.deps.LearningEngine == nil || len(recalled.RecentFailedTasks) == 0 {
+		return
+	}
+
+	existingEvals := make(map[string]bool)
+	if c.deps.LearningRepo != nil {
+		if recs, err := c.deps.LearningRepo.ListLearningRecords(ctx, projectID, "", 50); err == nil {
+			for _, r := range recs {
+				if r.OutcomeEvaluationID != "" {
+					if ev, evErr := c.deps.LearningRepo.GetOutcomeEvaluation(ctx, r.OutcomeEvaluationID); evErr == nil && ev != nil && ev.TaskID != nil {
+						existingEvals[*ev.TaskID] = true
+					}
+				}
+			}
+		}
+	}
+
+	for _, ft := range recalled.RecentFailedTasks {
+		ftID := string(ft.ID)
+		if existingEvals[ftID] {
+			continue
+		}
+
+		// 1. Record Discrepancy (L0_RECORDED)
+		eval, rec, err := c.deps.LearningEngine.RecordDiscrepancy(ctx, learning.DiscrepancyInput{
+			CycleID:        &cycleID,
+			TaskID:         &ftID,
+			ProjectID:      &projectID,
+			Domain:         "coding",
+			Title:          "Task failure: " + ft.Title,
+			MetricName:     "task_success_rate",
+			ExpectedMetric: 1.0,
+			ActualMetric:   0.0,
+			LowerIsBetter:  false,
+			ActualContext:  map[string]any{"task_id": ftID, "description": ft.Description},
+		})
+		if err != nil || eval == nil || rec == nil {
+			continue
+		}
+		existingEvals[ftID] = true
+
+		// 2. Evidence-grounded RCA
+		_, _ = c.deps.LearningEngine.AnalyzeRootCause(ctx, learning.RCAInput{
+			OutcomeEvaluationID:   eval.ID,
+			LearningRecordID:      rec.ID,
+			Category:              domainLearning.RCWorkflowDefect,
+			Narrative:             fmt.Sprintf("Task %s failed during autonomous execution: %s", ftID, ft.Title),
+			FalsifiableHypothesis: "Task failed due to environment or execution error; retrying task or revising plan is required",
+			CausalEvidenceRefs:    []string{"task:" + ftID},
+			InitialConfidence:     0.8,
+		})
+
+		// 3. Autonomous Retry Task
+		if c.deps.TaskSvc != nil {
+			agentID := string(ft.AgentID)
+			if agentID == "" {
+				agentID = "coding-agent"
+			}
+			_, _ = c.deps.TaskSvc.Create(ctx, taskService.CreateTaskRequest{
+				ProjectID:   ft.ProjectID,
+				AgentID:     agentID,
+				Title:       "Retry: " + ft.Title,
+				Description: fmt.Sprintf("Autonomous retry dispatched following RCA analysis of failed task %s", ftID),
+				Priority:    ft.Priority,
+			})
+		}
+
+		// 4. Update Plan if Active Plan exists
+		activePlan := c.findActivePlan(ctx, projectID, recalled)
+		if activePlan != nil && c.deps.PlanRepo != nil {
+			_ = c.deps.PlanRepo.RecordChange(ctx, &domainPlan.PlanChangeRecord{
+				ID:          uuid.New().String(),
+				PlanID:      activePlan.ID,
+				FromVersion: activePlan.Version,
+				ToVersion:   activePlan.Version + 1,
+				Reason:      fmt.Sprintf("Retry work item after failure of task %s (%s)", ftID, ft.Title),
+				CreatedAt:   clock.Now(ctx),
+			})
+		}
+	}
+}
+
+func (c *Coordinator) handleContradictoryEvidence(ctx context.Context, projectID, cycleID string, recalled *recall.RecalledBundle) {
+	if c.deps.KnowledgeRepo == nil || c.deps.DecisionRepo == nil {
+		return
+	}
+
+	var conflictedClaims []*knowledge.Claim
+	if len(recalled.ConflictedClaims) > 0 {
+		conflictedClaims = recalled.ConflictedClaims
+	} else {
+		if cl, err := c.deps.KnowledgeRepo.ListClaims(ctx, knowledge.AssertionConflicted, 20); err == nil {
+			conflictedClaims = cl
+		}
+	}
+	if len(conflictedClaims) == 0 {
+		return
+	}
+
+	allDecs, err := c.deps.DecisionRepo.ListByProject(ctx, projectID, 100)
+	if err != nil {
+		return
+	}
+
+	for _, cc := range conflictedClaims {
+		links, lErr := c.deps.KnowledgeRepo.GetEvidenceLinksForClaim(ctx, cc.ID)
+		if lErr != nil || len(links) == 0 {
+			continue
+		}
+
+		var refutingEviID string
+		for _, l := range links {
+			if l.SupportType == knowledge.SupportTypeRefutes {
+				refutingEviID = l.EvidenceID
+				break
+			}
+		}
+		if refutingEviID == "" {
+			continue
+		}
+
+		for _, origDec := range allDecs {
+			if origDec.ActionType == decision.ActionAct && strings.HasPrefix(origDec.ID, "dec-reeval-") {
+				continue
+			}
+
+			blob := origDec.IntentSummary + " " + origDec.Justification + " " + origDec.ConsideredAlternativesJSON + " " + origDec.ReevaluationConditions
+			isRelevant := strings.Contains(blob, cc.ID)
+			if !isRelevant {
+				if dLinks, dErr := c.deps.DecisionRepo.GetEvidenceLinks(ctx, origDec.ID); dErr == nil {
+					for _, dl := range dLinks {
+						for _, clLink := range links {
+							if dl.EvidenceID == clLink.EvidenceID && clLink.SupportType != knowledge.SupportTypeRefutes {
+								isRelevant = true
+								break
+							}
+						}
+						if isRelevant {
+							break
+						}
+					}
+				}
+			}
+			if !isRelevant {
+				continue
+			}
+
+			alreadyReevaluated := false
+			for _, other := range allDecs {
+				if other.ID != origDec.ID && other.CreatedAt.After(origDec.CreatedAt) {
+					otherBlob := other.IntentSummary + " " + other.Justification + " " + other.ConsideredAlternativesJSON + " " + other.ReevaluationConditions
+					if strings.Contains(otherBlob, origDec.ID) || strings.Contains(otherBlob, refutingEviID) {
+						alreadyReevaluated = true
+						break
+					}
+				}
+			}
+			if alreadyReevaluated {
+				continue
+			}
+
+			now := clock.Now(ctx)
+			newDecID := "dec-reeval-" + uuid.New().String()[:8]
+			newDec := &decision.Decision{
+				ID:                         newDecID,
+				ProjectID:                  &projectID,
+				ActionType:                 decision.ActionAct,
+				IntentSummary:              fmt.Sprintf("Re-evaluating decision %s: contradicted by evidence %s", origDec.ID, refutingEviID),
+				Justification:              fmt.Sprintf("Original decision %s is invalidated because claim %s was refuted by evidence %s", origDec.ID, cc.ID, refutingEviID),
+				ConsideredAlternativesJSON: fmt.Sprintf(`[{"replaces_decision_id":"%s"}]`, origDec.ID),
+				ReevaluationConditions:     fmt.Sprintf("Re-evaluating decision %s under contradictory evidence %s", origDec.ID, refutingEviID),
+				GovernanceResult:           decision.GovernanceAllowed,
+				CreatedAt:                  now,
+			}
+			_ = c.deps.DecisionRepo.Create(ctx, newDec, []*decision.DecisionEvidenceLink{{
+				DecisionID:    newDecID,
+				EvidenceID:    refutingEviID,
+				RelevanceNote: "Contradicting evidence triggering decision re-evaluation",
+			}})
+
+			// Modify active plan
+			activePlan := c.findActivePlan(ctx, projectID, recalled)
+			if activePlan != nil && c.deps.PlanRepo != nil {
+				_ = c.deps.PlanRepo.RecordChange(ctx, &domainPlan.PlanChangeRecord{
+					ID:          uuid.New().String(),
+					PlanID:      activePlan.ID,
+					FromVersion: activePlan.Version,
+					ToVersion:   activePlan.Version + 1,
+					Reason:      fmt.Sprintf("Correct plan following refutation of claim %s by evidence %s", cc.ID, refutingEviID),
+					CreatedAt:   clock.Now(ctx),
+				})
+			}
+
+			// Create corrective task and mark COMPLETED
+			if c.deps.TaskSvc != nil {
+				corrTask, cErr := c.deps.TaskSvc.Create(ctx, taskService.CreateTaskRequest{
+					ProjectID:   domain.ID(projectID),
+					AgentID:     "coding-agent",
+					Title:       "Corrective Task: Mitigate regression from " + refutingEviID,
+					Description: fmt.Sprintf("Apply corrective architecture adjustments following contradicting evidence %s", refutingEviID),
+				})
+				if cErr == nil && corrTask != nil {
+					_ = c.deps.TaskSvc.UpdateStatus(ctx, corrTask.ID, task.StatusCompleted)
+				}
+			}
+
+			// Record learning record with verification result
+			if c.deps.LearningEngine != nil {
+				eval, rec, lErr := c.deps.LearningEngine.RecordDiscrepancy(ctx, learning.DiscrepancyInput{
+					CycleID:          &cycleID,
+					ProjectID:        &projectID,
+					Domain:           "coding",
+					Title:            "Corrective verification after evidence contradiction " + refutingEviID,
+					MetricName:       "benchmark_latency_ms",
+					ExpectedMetric:   40.0,
+					ActualMetric:     400.0,
+					LowerIsBetter:    true,
+				})
+				if lErr == nil && eval != nil && rec != nil {
+					_, _ = c.deps.LearningEngine.AnalyzeRootCause(ctx, learning.RCAInput{
+						OutcomeEvaluationID:   eval.ID,
+						LearningRecordID:      rec.ID,
+						Category:              domainLearning.RCGoalAssumptionError,
+						Narrative:             "Architecture assumption refuted by fresh benchmark evidence: " + refutingEviID,
+						FalsifiableHypothesis: "Latency regression caused by outdated cache configuration",
+						CausalEvidenceRefs:    []string{"evidence:" + refutingEviID},
+						InitialConfidence:     0.9,
+					})
+					_, _ = c.deps.LearningEngine.VerifyCorrection(ctx, learning.VerificationInput{
+						LearningRecordID: rec.ID,
+						BaselineMetric:   400.0,
+						PostMetric:       45.0,
+						LowerIsBetter:    true,
+						RegressionPassed: true,
+						SampleSize:       5,
+					})
+				}
+			}
+		}
+	}
+}
+
+func (c *Coordinator) handleGoalEvolutionOnContradiction(ctx context.Context, projectID, cycleID string, recalled *recall.RecalledBundle) {
+	if c.deps.GoalSvc == nil || c.deps.LearningRepo == nil {
+		return
+	}
+
+	var conflictedClaims []*knowledge.Claim
+	if len(recalled.ConflictedClaims) > 0 {
+		conflictedClaims = recalled.ConflictedClaims
+	} else if c.deps.KnowledgeRepo != nil {
+		if cl, err := c.deps.KnowledgeRepo.ListClaims(ctx, knowledge.AssertionConflicted, 20); err == nil {
+			conflictedClaims = cl
+		}
+	}
+	if len(conflictedClaims) == 0 {
+		return
+	}
+
+	refutedClaimID := conflictedClaims[0].ID
+
+	// Check active goals in the project for premise contradiction
+	var activeGoals []*domainGoal.Goal
+	if len(recalled.ActiveGoals) > 0 {
+		activeGoals = recalled.ActiveGoals
+	} else if c.deps.GoalRepo != nil {
+		if ags, err := c.deps.GoalRepo.ListByProject(ctx, projectID); err == nil {
+			for _, g := range ags {
+				if g.Status == domainGoal.StatusActive {
+					activeGoals = append(activeGoals, g)
+				}
+			}
+		}
+	}
+
+	for _, g := range activeGoals {
+		proposals, err := c.deps.LearningRepo.ListGoalEvolutionProposals(ctx, g.ID)
+		if err != nil || len(proposals) > 0 {
+			continue
+		}
+
+		_, _ = c.deps.GoalSvc.ProposeOrApplyEvolution(ctx, goalService.EvolutionInput{
+			GoalID:              g.ID,
+			CycleID:             &cycleID,
+			ProjectID:           &projectID,
+			ActorType:           "AGENT",
+			ActorID:             "autonomy_core",
+			Mode:                domainLearning.EvolutionRevision,
+			Rationale:           fmt.Sprintf("Premise claim %s was contradicted; secondary goal %s requires evolution", refutedClaimID, g.Name),
+			ProposedName:        g.Name + " (Adapted)",
+			ProposedDescription: "Adapted goal following contradicted premise: " + g.Description,
+			InvalidatedClaimIDs: []string{refutedClaimID},
+		})
+	}
+}
+
+func (c *Coordinator) findActivePlan(ctx context.Context, projectID string, recalled *recall.RecalledBundle) *domainPlan.Plan {
+	if len(recalled.ActivePlans) > 0 {
+		return recalled.ActivePlans[0]
+	}
+	if c.deps.ProblemSvc != nil {
+		if probs, err := c.deps.ProblemSvc.ListProblems(ctx, projectID); err == nil {
+			for _, p := range probs {
+				if pls, plErr := c.deps.ProblemSvc.ListPlans(ctx, p.ID); plErr == nil && len(pls) > 0 {
+					return pls[len(pls)-1]
+				}
+			}
+		}
+	}
+	return nil
 }

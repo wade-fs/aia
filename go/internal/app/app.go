@@ -284,6 +284,8 @@ func NewApp(cfgPath string, overrideProv provider.Provider) (*App, error) {
 		Bus:              bus,
 		ProblemRepo:      problemRepo,
 		PlanRepo:         planRepo,
+		GoalSvc:          goalSvc,
+		KnowledgeSvc:     knowledgeSvc,
 	})
 	autonomyEng.RegisterObserver("investment", autonomy.NewInvestmentObserver(invSvc))
 	codingObs := autonomy.NewCodeHealthObserver()

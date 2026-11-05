@@ -17,7 +17,9 @@ import (
 	"github.com/wade/aia/internal/policy"
 	approvalService "github.com/wade/aia/internal/service/approval"
 	clarifyService "github.com/wade/aia/internal/service/clarification"
+	goalService "github.com/wade/aia/internal/service/goal"
 	"github.com/wade/aia/internal/service/investment"
+	knowledgeService "github.com/wade/aia/internal/service/knowledge"
 	problemService "github.com/wade/aia/internal/service/problem"
 	taskService "github.com/wade/aia/internal/service/task"
 	"github.com/wade/aia/internal/storage/sqlite/repository"
@@ -56,6 +58,8 @@ type Dependencies struct {
 	PlanRepo         *repository.PlanRepository
 	ProblemSvc       *problemService.Service
 	ClarificationSvc *clarifyService.Service
+	GoalSvc          *goalService.Service
+	KnowledgeSvc     *knowledgeService.Service
 	Config           EngineConfig
 }
 
@@ -169,6 +173,10 @@ func NewEngineWithDeps(deps Dependencies) *Engine {
 		PlanRepo:         deps.PlanRepo,
 		ProblemSvc:       deps.ProblemSvc,
 		ClarificationSvc: deps.ClarificationSvc,
+		LearningRepo:     deps.LearningRepo,
+		LearningEngine:   learnEng,
+		GoalSvc:          deps.GoalSvc,
+		KnowledgeSvc:     deps.KnowledgeSvc,
 	})
 
 	if deps.InvSvc != nil {
@@ -213,6 +221,18 @@ func (e *Engine) SetProblemService(svc *problemService.Service) {
 func (e *Engine) SetClarificationService(svc *clarifyService.Service) {
 	if e.coordinator != nil {
 		e.coordinator.SetClarificationService(svc)
+	}
+}
+
+func (e *Engine) SetGoalService(svc *goalService.Service) {
+	if e.coordinator != nil {
+		e.coordinator.SetGoalService(svc)
+	}
+}
+
+func (e *Engine) SetKnowledgeService(svc *knowledgeService.Service) {
+	if e.coordinator != nil {
+		e.coordinator.SetKnowledgeService(svc)
 	}
 }
 

@@ -46,7 +46,7 @@ AIA executes a **Dual-Track Evolution Model**:
 
 ## 3. Autonomy Milestones (M0 ～ M10)
 
-Progress is evaluated by verifiable, computable autonomous behavior rather than package or table count (see [AIA-13](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md) for M3–M7 quantitative acceptance thresholds):
+Progress is evaluated by verifiable, computable autonomous behavior rather than package or table count (see [Volume 4 (Benchmarks)](file:///home/wade/src/github/aia/docs/specifications/volume-4-self-correction-and-experiments.md) for M3–M7 quantitative acceptance thresholds):
 
 - **M0: Persistent Runtime** ── Crash-free runtime daemon, concurrent workers, SQLite persistence. *(Completed at Baseline `7597902`)*
 - **M1: Temporal Continuity** ── Restoration of Project state, goals, and pending issues from Event history across process termination. *(Completed — Phase 1)*
@@ -93,7 +93,7 @@ Progress is evaluated by verifiable, computable autonomous behavior rather than 
 - Automated outcome discrepancy detection, testable Root Cause Analysis (`root_cause_analyses`), and table-driven 3-Tier Runtime Profile (`TIER1_AUTO`, `TIER2_APPROVAL`, `TIER3_BLOCKED`).
 - Four Learning Maturity Levels (`L0_RECORDED`, `L1_APPLIED`, `L2_VERIFIED`, `L3_GENERALIZED`), 7 mandatory comparison fields (`Baseline`, `Hypothesis`, `Intervention`, `Verification`, `Regression`, `Follow-up`, `Confidence`), `PRE_POST_ONLY` confidence cap (`<= 0.45`), automatic regression rollback, and negative constraint suppression.
 - Governed Goal Evolution (`PERSISTENCE`, `OPTIMIZATION`, `REVISION`) with deterministic Anti-Goalpost-Moving enforcement.
-- Computable [AIA-13](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md) M3–M7 thresholds and Learning Effectiveness Acceptance Suite (`Scenarios A–E`).
+- Computable [Volume 4](file:///home/wade/src/github/aia/docs/specifications/volume-4-self-correction-and-experiments.md) M3–M7 thresholds and Learning Effectiveness Acceptance Suite (`Scenarios A–E`).
 
 ### Phase 5: Domain Experiments, Multi-Domain MVA & Cross-Domain Delegation *(Completed)*
 - **Phase 5A (Migration `012`)**: Generational Investment Decision Experiment (`G1` Frozen Rule-Based Control Baseline vs `G2 -> G2.1 -> G2.2` LLM Experimental Cohorts, isolated NT$100,000 ledgers, Brier + LogLoss event calibration separated from decision confidence, 5-regime classification matrix, and live `G1` Difference-in-Differences control verification bridged into Phase 4 `LearningEngine`).

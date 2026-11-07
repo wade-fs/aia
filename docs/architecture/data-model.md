@@ -11,7 +11,7 @@
 
 ## 1. 資料模型核心設計哲學 (Data Architecture Philosophy)
 
-依據 [AIA-08](file:///home/wade/src/github/aia/docs/specifications/AIA-08-Autonomy-Core-Specification.md)、[AIA-10](file:///home/wade/src/github/aia/docs/specifications/AIA-10-Continuity-and-Long-Term-Project-Management-Specification.md)、[AIA-15](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md)、[AIA-16](file:///home/wade/src/github/aia/docs/specifications/AIA-16-Data-Provenance-Evidence-and-Knowledge-Integrity-Specification.md) 與 [AIA-18](file:///home/wade/src/github/aia/docs/specifications/AIA-18-Autonomy-Core-Integration-and-End-to-End-Reference-Architecture.md)，AIA 採用「雙層狀態持久化模型」，並以「自主循環 (Autonomy Cycle)」為核心樞紐：
+依據 [Volume 1 (Foundations)](file:///home/wade/src/github/aia/docs/specifications/volume-1-system-foundations.md) 與 [Volume 2 (Cognitive Loop & Memory)](file:///home/wade/src/github/aia/docs/specifications/volume-2-cognitive-loop-and-planning.md)，AIA 採用「雙層狀態持久化模型」，並以「自主循環 (Autonomy Cycle)」為核心樞紐：
 
 ```text
  ┌────────────────────────────────────────────────────────────────────────┐
@@ -658,7 +658,7 @@ CREATE TABLE delegation_requests (
 
 ### 3.10 專案領域類別擴充 (Project Domain Type — Migration 013)
 
-依據 [AIA-15 §23/§24](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md)，專案需要宣告對應的主責領域 Agent（如 `investment`、`coding`、`writing`、`general`），以支援開機動態載入相應之 Domain Observer 與 Harness。
+依據 [Volume 6 (Domain Specializations)](file:///home/wade/src/github/aia/docs/specifications/volume-6-domain-specializations.md)，專案需要宣告對應的主責領域 Agent（如 `investment`、`coding`、`writing`、`general`），以支援開機動態載入相應之 Domain Observer 與 Harness。
 
 ```sql
 ALTER TABLE projects ADD COLUMN domain_type TEXT NOT NULL DEFAULT 'general';
@@ -669,7 +669,7 @@ CREATE INDEX IF NOT EXISTS idx_projects_domain_type ON projects(domain_type);
 
 ### 3.11 自主系統演化與安全自我修改 (Safe Self-Modification Proposals — Migration 014)
 
-依據 [AIA-14](file:///home/wade/src/github/aia/docs/specifications/AIA-14-System-Safe-Self-Modification-and-Evolution-Specification.md) §2 與 §3，系統演化提案在獨立工作區沙盒驗證，並依三級治理範圍審核：
+依據 [Volume 3 (Safety & Governance)](file:///home/wade/src/github/aia/docs/specifications/volume-3-safety-and-governance.md)，系統演化提案在獨立工作區沙盒驗證，並依三級治理範圍審核：
 
 - **Scope Level (`scope_level`)**:
   - `LEVEL_A_DOMAIN`: 領域腳本、Prompt、設定檔（沙盒測試通過後允許自主合併）
@@ -708,7 +708,7 @@ CREATE INDEX IF NOT EXISTS idx_selfmod_scope ON self_modification_proposals(scop
 
 ### 3.12 創作領域簡報與澄清問題 (Writing Domain Brief & Clarifications — Migration 015)
 
-專為小說創作領域建立結構化 CreativeBrief 與澄清提問記錄（依據 [AIA-20](file:///home/wade/src/github/aia/docs/specifications/AIA-20-Book-Manifest-and-Novel-Project-Specification.md)）。
+專為小說創作領域建立結構化 CreativeBrief 與澄清提問記錄（依據 [Volume 6 §4 (Writing Pilot)](file:///home/wade/src/github/aia/docs/specifications/volume-6-domain-specializations.md)）。
 
 ```sql
 CREATE TABLE IF NOT EXISTS writing_briefs (
@@ -754,7 +754,7 @@ CREATE INDEX IF NOT EXISTS idx_writing_clarifications_status ON writing_clarific
 
 ### 3.13 通用專案簡報與欄位變更歷程 (Generic Project Brief & Field History — Migration 016)
 
-依據 [AIA-21](file:///home/wade/src/github/aia/docs/specifications/AIA-21-Project-Brief-and-Clarification-Management-Specification.md) §4 與 §12，將創作領域的 Brief 機制提煉為全領域適用的通用專案簡報，並記錄不可竄改的欄位版本演化歷史。
+依據 [Volume 5 §5 (Project Brief)](file:///home/wade/src/github/aia/docs/specifications/volume-5-runtime-and-interaction.md)，將創作領域的 Brief 機制提煉為全領域適用的通用專案簡報，並記錄不可竄改的欄位版本演化歷史。
 
 ```sql
 CREATE TABLE IF NOT EXISTS project_briefs (
@@ -795,7 +795,7 @@ CREATE INDEX IF NOT EXISTS idx_brief_hist_key ON brief_field_history(project_id,
 
 ### 3.14 通用澄清請求與阻擋機制 (Generic Clarification Request Management — Migration 017)
 
-依據 [AIA-21](file:///home/wade/src/github/aia/docs/specifications/AIA-21-Project-Brief-and-Clarification-Management-Specification.md) §5 與 §12，跨專案通用澄清管理模組，提供多選題選項結構、阻擋性標記（`blocking = 1`）與過期時效。
+依據 [Volume 5 §5 (Clarification)](file:///home/wade/src/github/aia/docs/specifications/volume-5-runtime-and-interaction.md)，跨專案通用澄清管理模組，提供多選題選項結構、阻擋性標記（`blocking = 1`）與過期時效。
 
 ```sql
 CREATE TABLE IF NOT EXISTS clarification_requests (
@@ -825,7 +825,7 @@ CREATE INDEX IF NOT EXISTS idx_clarify_proj_field ON clarification_requests(proj
 
 ### 3.15 複雜問題建模、分析記錄與版本化計畫 (Complex Problem Modeling, Analysis & Versioned Plans — Migration 018)
 
-依據 [AIA-22](file:///home/wade/src/github/aia/docs/specifications/AIA-22-Complex-Problem-Analysis-and-Planning-Specification.md) §6 與 §12，針對開放式複雜問題建立多維度模型（目標、限制、事實、假設、未知、風險、驗收標準），保存推演分析紀錄，並維護具版本控制與演化審批的執行計畫。
+依據 [Volume 2 §5 (Complex Problem Analysis & Planning)](file:///home/wade/src/github/aia/docs/specifications/volume-2-cognitive-loop-and-planning.md)，針對開放式複雜問題建立多維度模型（目標、限制、事實、假設、未知、風險、驗收標準），保存推演分析紀錄，並維護具版本控制與演化審批的執行計畫。
 
 ```sql
 CREATE TABLE IF NOT EXISTS problems (
@@ -922,7 +922,7 @@ CREATE INDEX IF NOT EXISTS idx_plan_changes_plan ON plan_changes(plan_id);
 
 ### 3.16 自我修改驗證強化與監控度量 (Self-Modification Multi-Level Validation & Monitoring — Migration 019)
 
-依據 [AIA-14](file:///home/wade/src/github/aia/docs/specifications/AIA-14-Self-Modification-and-Safe-Code-Evolution-Specification.md) §4.6、§4.10 與 §7.1，為自我修改提案擴充事先說明的多層級驗證範圍 (`L1_SYNTAX` ~ `L6_AUTONOMY`)、結構化驗證結果，以及部署後運行度量指標（錯誤率、崩潰率、自主性退化監控）。
+依據 [Volume 3 §3 (Multi-Level Validation)](file:///home/wade/src/github/aia/docs/specifications/volume-3-safety-and-governance.md)，為自我修改提案擴充事先說明的多層級驗證範圍 (`L1_SYNTAX` ~ `L6_AUTONOMY`)、結構化驗證結果，以及部署後運行度量指標（錯誤率、崩潰率、自主性退化監控）。
 
 ```sql
 ALTER TABLE self_modification_proposals ADD COLUMN validation_plan_json TEXT NOT NULL DEFAULT '[]';

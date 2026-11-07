@@ -11,7 +11,7 @@
 
 ## 1. 遷移基本原則 (Migration Principles)
 
-依據 SQLite 特性與 [AIA-03](file:///home/wade/src/github/aia/docs/specifications/AIA-03-Go-Runtime-Implementation-Specification.md) 第 2.3 節規範，AIA 資料庫遷移恪守以下原則：
+依據 SQLite 特性與 [Volume 5 (Runtime Engine)](file:///home/wade/src/github/aia/docs/specifications/volume-5-runtime-and-interaction.md) 規範，AIA 資料庫遷移恪守以下原則：
 
 1. **現有資產 100% 保持相容 (Commit 7597902 凍結保護)**：
    - 既有 Migration Version 1 ～ 6（`initial_schema`、`audit_request_source_metadata`、`investment_core`、`investment_data_pipeline`、`investment_predictions_and_evaluations`、`schedules_and_automation`）已在代碼庫中運作正常。
@@ -188,11 +188,11 @@
 #### **`012_experiments_and_collaboration.sql`**
 *依賴：依賴 `008` 的 `goals`、`projects`、`011` 的 `correction_actions`/`learning_records` 與現有 `tasks`、`investment_*`。*
 - 建立 `experiments`：
-  - 嚴格遵循 [AIA-15](file:///home/wade/src/github/aia/docs/specifications/AIA-15-Autonomous-Experiment-Lifecycle-and-Domain-Integration-Specification.md) 完整的 11 個生命週期狀態：
+  - 嚴格遵循 [Volume 4 (Experiments)](file:///home/wade/src/github/aia/docs/specifications/volume-4-self-correction-and-experiments.md) 完整的 11 個生命週期狀態：
     `CHECK (status IN ('PROPOSED', 'PENDING_APPROVAL', 'READY', 'RUNNING', 'PAUSED', 'EVALUATING', 'NEEDS_REVISION', 'COMPLETED', 'STOPPED', 'FAILED', 'ARCHIVED'))`
   - 欄位：`project_id`, `primary_goal_id REFERENCES goals(id)`, `domain`, `owner_agent_id`, `name`, `hypothesis`, `experiment_type`, `baseline_metrics_json`, `current_metrics_json`, `iteration_count`。
 - 建立 `experiment_goal_links`：支援 Experiment ↔ Goal 多對多驗證關聯。
-- 建立 `experiment_generations`（支撐 [AIA-05 §20](file:///home/wade/src/github/aia/docs/specifications/AIA-05-Investment-Agent-Specification.md) 雙世代投資決策對照實驗）：
+- 建立 `experiment_generations`（支撐 [Volume 6 §2 (Investment Pilot)](file:///home/wade/src/github/aia/docs/specifications/volume-6-domain-specializations.md) 雙世代投資決策對照實驗）：
   - 隔離綁定 `portfolio_profile_id`（`UNIQUE(experiment_id, portfolio_profile_id)`）與世代代號（`G1`, `G2`, `G2.1`, `G2.2`）。
   - 強制不變量 `CHECK (role != 'CONTROL_BASELINE' OR is_frozen = 1)`，並附加 SQLite 防竄改觸發器 `trg_exp_gen_freeze_update` 與 `trg_exp_gen_freeze_delete`，硬性阻擋對凍結 `G1` 基準組之任何修改或刪除。
   - 關聯 `parent_generation_id`、`source_correction_id` 與 `source_learning_id`，構成不可覆寫之世代演化譜系。

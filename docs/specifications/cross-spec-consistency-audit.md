@@ -79,9 +79,9 @@ AIA 規格體系（AIA-00 至 AIA-19，共計 20 份文件、27,500+ 行）完�
 ### 2.1 自我修改分級名詞衝突 (Self-Modification Multi-Namespace Alignment)
 
 #### 【衝突現象】
-- [AIA-00](file:///home/wade/src/github/aia/docs/specifications/AIA-00-Overall-Architecture-and-Evolution-Roadmap-of-Specification.md) 第 5.13 節將自修分為：`Level 1 (行為修正)`、`Level 2 (能力修正)`、`Level 3 (核心系統修正)`。
-- [AIA-11](file:///home/wade/src/github/aia/docs/specifications/AIA-11-Self-Correction-and-Learning-Specification.md) 第 3 節定義了 `C0～C5` 授權等級。
-- [AIA-14](file:///home/wade/src/github/aia/docs/specifications/AIA-14-Self-Modification-and-Safe-Code-Evolution-Specification.md) 第 2 節定義了 `Level A/B/C`（修改範圍），第 5 節又定義了 `Level 1~6`（驗證深度）。
+- [AIA-00](file:///home/wade/src/github/aia/docs/specifications/volume-1-system-foundations.md) 第 5.13 節將自修分為：`Level 1 (行為修正)`、`Level 2 (能力修正)`、`Level 3 (核心系統修正)`。
+- [AIA-11](file:///home/wade/src/github/aia/docs/specifications/volume-4-self-correction-and-experiments.md) 第 3 節定義了 `C0～C5` 授權等級。
+- [AIA-14](file:///home/wade/src/github/aia/docs/specifications/volume-3-safety-and-governance.md) 第 2 節定義了 `Level A/B/C`（修改範圍），第 5 節又定義了 `Level 1~6`（驗證深度）。
 - 既有計畫容易將「修正內容 (如策略修正)」、「授權等級 (如 C3)」與「驗證深度 (如 V3)」混用，造成實作混亂。
 
 #### 【權威統一判定】
@@ -121,7 +121,7 @@ AIA 規格體系（AIA-00 至 AIA-19，共計 20 份文件、27,500+ 行）完�
 ### 2.2 治理層級 (Governance Tiers) 語意收斂
 
 #### 【衝突現象】
-- [AIA-17](file:///home/wade/src/github/aia/docs/specifications/AIA-17-Operational-Governance-and-Human-Oversight-Specification.md) 定義了 `G0~G3` 治理層級，但部分段落混稱「Phase G0~G3」，容易與系統實作 Roadmap 混淆。
+- [AIA-17](file:///home/wade/src/github/aia/docs/specifications/volume-3-safety-and-governance.md) 定義了 `G0~G3` 治理層級，但部分段落混稱「Phase G0~G3」，容易與系統實作 Roadmap 混淆。
 
 #### 【權威統一判定】
 1. **`G0` 至 `G3` 專指「治理架構層級 (Governance Tiers)」**：
@@ -136,8 +136,8 @@ AIA 規格體系（AIA-00 至 AIA-19，共計 20 份文件、27,500+ 行）完�
 ### 2.3 自主閉環步驟數統一 (Autonomy Cycle Steps)
 
 #### 【衝突現象】
-- [AIA-00](file:///home/wade/src/github/aia/docs/specifications/AIA-00-Overall-Architecture-and-Evolution-Roadmap-of-Specification.md) 與 [AIA-13](file:///home/wade/src/github/aia/docs/specifications/AIA-13-Autonomy-Evaluation-and-Benchmarking-Specification.md) 描述為 10 步驟循環。
-- [AIA-18](file:///home/wade/src/github/aia/docs/specifications/AIA-18-Autonomy-Core-Integration-and-End-to-End-Reference-Architecture.md) 第 11 節將其細化為 11 個步驟，在 `Decide` 與 `Execute` 之間顯式插入了 `Governance Check`。
+- [AIA-00](file:///home/wade/src/github/aia/docs/specifications/volume-1-system-foundations.md) 與 [AIA-13](file:///home/wade/src/github/aia/docs/specifications/volume-4-self-correction-and-experiments.md) 描述為 10 步驟循環。
+- [AIA-18](file:///home/wade/src/github/aia/docs/specifications/volume-1-system-foundations.md) 第 11 節將其細化為 11 個步驟，在 `Decide` 與 `Execute` 之間顯式插入了 `Governance Check`。
 
 #### 【權威統一判定】
 **以 AIA-18 的 11 步驟為全系統權威標準**：
@@ -321,8 +321,8 @@ Cycle 解答 9 大核心問題：①為什麼開始？②當時看到了什麼�
 ### 8.1 專案需求模型 (Project Brief) 與目標 (Goal) 的責任劃分 (AIA-09 vs AIA-21)
 
 #### 【衝突與混淆現象】
-- [AIA-09](file:///home/wade/src/github/aia/docs/specifications/AIA-09-Initiative-and-Goal-Evolution-Specification.md) 定義了 Goal 的生命週期、修訂與度量指標。
-- [AIA-21](file:///home/wade/src/github/aia/docs/specifications/AIA-21-Project-Brief-and-Clarification-Management-Specification.md) 定義了 Project Brief、Field Catalog、Field State（`UNKNOWN`、`DEFAULTED`、`ANSWERED` 等）與版本演進。
+- [AIA-09](file:///home/wade/src/github/aia/docs/specifications/volume-2-cognitive-loop-and-planning.md) 定義了 Goal 的生命週期、修訂與度量指標。
+- [AIA-21](file:///home/wade/src/github/aia/docs/specifications/volume-5-runtime-and-interaction.md) 定義了 Project Brief、Field Catalog、Field State（`UNKNOWN`、`DEFAULTED`、`ANSWERED` 等）與版本演進。
 - 若兩者邊界不清，容易出現將 Brief 當作第二個 Goal 系統，或將 Goal 的演進與 Brief 的欄位填補混淆。
 
 #### 【權威統一判定】
@@ -338,8 +338,8 @@ Cycle 解答 9 大核心問題：①為什麼開始？②當時看到了什麼�
 ### 8.2 澄清請求 (Clarification) 與治理審批 (Human Approval) 的邊界 (AIA-17 vs AIA-21)
 
 #### 【衝突現象】
-- [AIA-17](file:///home/wade/src/github/aia/docs/specifications/AIA-17-Operational-Governance-and-Human-Oversight-Specification.md) 定義了安全與風控審批（`WAITING_APPROVAL`），用於阻止越權操作（如高額花費、代碼自修合併）。
-- [AIA-21](file:///home/wade/src/github/aia/docs/specifications/AIA-21-Project-Brief-and-Clarification-Management-Specification.md) 引入澄清問答（`WAITING_FOR_INPUT`），用於向使用者獲取創作偏好或業務參數。
+- [AIA-17](file:///home/wade/src/github/aia/docs/specifications/volume-3-safety-and-governance.md) 定義了安全與風控審批（`WAITING_APPROVAL`），用於阻止越權操作（如高額花費、代碼自修合併）。
+- [AIA-21](file:///home/wade/src/github/aia/docs/specifications/volume-5-runtime-and-interaction.md) 引入澄清問答（`WAITING_FOR_INPUT`），用於向使用者獲取創作偏好或業務參數。
 - 兩者若混同，會使需求提問繞過治理，或讓普通提問引發繁重的風控審批。
 
 #### 【權威統一判定】
@@ -355,7 +355,7 @@ Cycle 解答 9 大核心問題：①為什麼開始？②當時看到了什麼�
 
 #### 【衝突與反模式現象】
 - 歷史過渡代碼曾在找不到專案時預設退回 `"yuan"`（元朝小說），導致新專案（如徒步環島、投資分析、唐代小說）在 ID 缺漏時污染或讀寫 `"yuan"` 專案。
-- [AIA-02](file:///home/wade/src/github/aia/docs/specifications/AIA-02-System-Architecture.md)、[AIA-10](file:///home/wade/src/github/aia/docs/specifications/AIA-10-Continuity-and-Long-Term-Project-Management-Specification.md) 與 [AIA-21](file:///home/wade/src/github/aia/docs/specifications/AIA-21-Project-Brief-and-Clarification-Management-Specification.md) 明確要求 Project 必須完全獨立隔離。
+- [AIA-02](file:///home/wade/src/github/aia/docs/specifications/volume-1-system-foundations.md)、[AIA-10](file:///home/wade/src/github/aia/docs/specifications/volume-2-cognitive-loop-and-planning.md) 與 [AIA-21](file:///home/wade/src/github/aia/docs/specifications/volume-5-runtime-and-interaction.md) 明確要求 Project 必須完全獨立隔離。
 
 #### 【權威統一判定】
 1. **全面禁止程式碼寫死任何實體專案 ID**：
@@ -369,7 +369,7 @@ Cycle 解答 9 大核心問題：①為什麼開始？②當時看到了什麼�
 ### 8.4 agy 執行上下文組裝管線 (Context Assembly Pipeline) (AIA-03 vs AIA-18 vs AIA-21)
 
 #### 【缺漏現象】
-- [AIA-03](file:///home/wade/src/github/aia/docs/specifications/AIA-03-Go-Runtime-Implementation-Specification.md) 與 [AIA-18](file:///home/wade/src/github/aia/docs/specifications/AIA-18-Autonomy-Core-Integration-and-End-to-End-Reference-Architecture.md) 定義了 Runtime Worker 與 agy Process 的啟動，但原先只將 `Task.Description` 作為 Prompt 傳入，遺漏了 Agent Profile、Domain Rules、Brief 與 Project Memory。
+- [AIA-03](file:///home/wade/src/github/aia/docs/specifications/volume-5-runtime-and-interaction.md) 與 [AIA-18](file:///home/wade/src/github/aia/docs/specifications/volume-1-system-foundations.md) 定義了 Runtime Worker 與 agy Process 的啟動，但原先只將 `Task.Description` 作為 Prompt 傳入，遺漏了 Agent Profile、Domain Rules、Brief 與 Project Memory。
 
 #### 【權威統一判定】
 **agy 啟動時必須由 Context Assembler 統一組裝完整執行上下文**：

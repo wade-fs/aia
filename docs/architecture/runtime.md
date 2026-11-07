@@ -90,7 +90,8 @@ Operates periodically (e.g., weekly or post-horizon) to inspect the fidelity of 
 ### LogRetentionPurger ([`worker.go`](file:///home/wade/src/github/aia/go/internal/worker/worker.go))
 - **Role:** Enforces operational log retention policy (`logging.retain_days` in `config.yaml`, AIA-19).
 - **Interval:** Periodic background sweep (default: 1 hour) and scheduled daily maintenance.
-- Purges expired execution logs, audit traces, and events beyond the retention boundary to keep SQLite database size constrained.
+- Purges expired execution logs and non-critical operational events (`execution_events`) beyond the retention boundary.
+- **Safety Invariant:** In accordance with Volume 2 & Volume 5, `event_history` (the immutable hash-chained continuity ground truth) and governance `audit_logs` are strictly excluded from retention purging.
 
 ### Autonomy AutoWakeWorker ([`worker.go`](file:///home/wade/src/github/aia/go/internal/worker/worker.go))
 - **Role:** Triggers periodic autonomous cycles for registered active projects (AIA-08/09).
@@ -108,30 +109,32 @@ Operates periodically (e.g., weekly or post-horizon) to inspect the fidelity of 
                     │ Submit
                     ▼
                ┌──────────┐
-               │  READY   │ ◄─── Retry on Transient Failure
+               │  READY   │ ◄─── Retry (FAILED -> READY) / 解除等待狀態
                └────┬─────┘
-                    │ TaskWorker Picks Up
+                    │ TaskWorker Picks Up (Claim Slot)
                     ▼
                ┌──────────┐
       ┌────────┤ RUNNING  ├────────┐
       │        └────┬─────┘        │
-      │ Requires    │ Success      │ Unrecoverable
-      │ Approval    ▼              │ Error
-      ▼        ┌───────────┐       ▼
-┌───────────┐  │ COMPLETED │  ┌────────┐
-│  WAITING  │  └───────────┘  │ FAILED │
-│ _APPROVAL │                 └────────┘
+      ▼             ▼              ▼
+┌───────────┐ ┌───────────┐  ┌───────────┐
+│  WAITING  │ │ COMPLETED │  │  FAILED   │
+│  STATES   │ └───────────┘  └───────────┘
 └─────┬─────┘
-      │ User Approves
-      └─────────► READY
+      │
+      ├── WAITING_FOR_INPUT   (User clarification needed; slot released)
+      ├── WAITING_APPROVAL    (Governance/safety policy approval needed; slot released)
+      ├── WAITING_DEPENDENCY  (Upstream tasks unfinished; slot released)
+      ├── WAITING_FOR_AUTH    (External authorization required; slot released)
+      └── PAUSED              (User or system pause; slot released)
 ```
 
 1. **`DRAFT`:** Initial task creation, arguments validation.
 2. **`READY`:** Enqueued for background execution.
-3. **`RUNNING`:** Actively claimed by a TaskWorker worker thread.
-4. **`WAITING_APPROVAL`:** Paused by policy rule awaiting user authorization via Web Console or CLI.
-5. **`COMPLETED`:** Output validated, artifacts saved, and status recorded.
-6. **`FAILED`:** Retries exhausted or terminal error encountered.
+3. **`RUNNING`:** Actively claimed by a TaskWorker worker thread (occupies execution slot).
+4. **`WAITING_*` / `PAUSED`:** Paused awaiting human input, policy authorization, upstream dependencies, or external auth. The TaskWorker execution slot is immediately released. Upon condition resolution, the task transitions back to `READY`.
+5. **`COMPLETED`:** Output validated, artifacts saved, and terminal status recorded.
+6. **`FAILED`:** Retries exhausted or terminal error encountered (allows re-queue via `FAILED -> READY` upon approved retry).
 
 ---
 

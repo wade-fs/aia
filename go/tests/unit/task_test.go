@@ -22,6 +22,9 @@ func TestTaskStateTransitions(t *testing.T) {
 		{task.StatusFailed, task.StatusReady}, // retry
 		{task.StatusRunning, task.StatusWaitingApproval},
 		{task.StatusWaitingApproval, task.StatusReady},
+		{task.StatusRunning, task.StatusPaused},
+		{task.StatusPaused, task.StatusReady},
+		{task.StatusReady, task.StatusPaused},
 	}
 
 	for _, tc := range validCases {

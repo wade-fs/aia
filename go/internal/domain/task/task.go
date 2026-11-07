@@ -17,6 +17,7 @@ const (
 	StatusWaitingApproval   TaskStatus = "WAITING_APPROVAL"
 	StatusWaitingDependency TaskStatus = "WAITING_DEPENDENCY"
 	StatusWaitingInput      TaskStatus = "WAITING_FOR_INPUT"
+	StatusPaused            TaskStatus = "PAUSED"
 	StatusCompleted         TaskStatus = "COMPLETED"
 	StatusFailed            TaskStatus = "FAILED"
 	StatusCancelled         TaskStatus = "CANCELLED"
@@ -71,18 +72,22 @@ func ValidateTransition(from, to TaskStatus) error {
 			return nil
 		}
 	case StatusReady:
-		if to == StatusRunning || to == StatusCancelled || to == StatusBlocked || to == StatusWaitingApproval || to == StatusWaitingInput {
+		if to == StatusRunning || to == StatusCancelled || to == StatusBlocked || to == StatusWaitingApproval || to == StatusWaitingInput || to == StatusPaused {
 			return nil
 		}
 	case StatusRunning:
-		if to == StatusCompleted || to == StatusFailed || to == StatusCancelled || to == StatusWaitingApproval || to == StatusBlocked || to == StatusReady || to == StatusWaitingAuth || to == StatusWaitingInput {
+		if to == StatusCompleted || to == StatusFailed || to == StatusCancelled || to == StatusWaitingApproval || to == StatusBlocked || to == StatusReady || to == StatusWaitingAuth || to == StatusWaitingInput || to == StatusPaused {
 			return nil
 		}
 	case StatusWaitingInput:
-		if to == StatusReady || to == StatusRunning || to == StatusCancelled || to == StatusBlocked || to == StatusFailed {
+		if to == StatusReady || to == StatusRunning || to == StatusCancelled || to == StatusBlocked || to == StatusFailed || to == StatusPaused {
 			return nil
 		}
 	case StatusWaitingAuth:
+		if to == StatusReady || to == StatusCancelled || to == StatusPaused {
+			return nil
+		}
+	case StatusPaused:
 		if to == StatusReady || to == StatusCancelled {
 			return nil
 		}

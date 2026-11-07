@@ -3,7 +3,7 @@
 **Project:** Autonomous Intelligence Architecture (AIA)  
 **Active Implementation Status:** **Phase 0 ～ Phase 6 Completed + Phase 7 Hardened Baseline (AIA-21, AIA-22, AIA-19, AIA-13, AIA-14, AIA-06 Implemented & Integrated)** (Phase 6 Safe Self-Modification, Multi-Tier Validation V1~V6 & Post-Deployment Monitoring; Universal Project Brief & Field History; Generic Clarification Management; Complex Problem Analysis, Autonomous Escalation & Versioned Planning Engine; Backup & Restore; Distributed Tracing; Operational Metrics; 16-Tab Web Console & Emergency Stop; Migrations `001` ～ `019` active)  
 **Historical Audit Baseline:** Commit [`7597902`](file:///home/wade/src/github/aia) ➔ Phase 3 Baseline [`b66b1c6`](file:///home/wade/src/github/aia) ➔ Phase 4 Baseline [`0e189d9`](file:///home/wade/src/github/aia) ➔ Phase 5A Baseline [`29d1cb3`](file:///home/wade/src/github/aia) ➔ Phase 5B Baseline ➔ Phase 6 Active Baseline ➔ AIA-21/22/19/13 Active  
-**Specification Baseline:** [docs/specifications/](file:///home/wade/src/github/aia/docs/specifications) (AIA-00 ～ AIA-22) v2.0  
+**Specification Baseline:** [docs/specifications/README.md](file:///home/wade/src/github/aia/docs/specifications/README.md) (Six Consolidated Volumes: `AIA-VOL-01` ～ `AIA-VOL-06`; historical `AIA-00` ～ `AIA-22` frozen baseline)  
 **Audit Report:** [docs/specifications/cross-spec-consistency-audit.md](file:///home/wade/src/github/aia/docs/specifications/cross-spec-consistency-audit.md)  
 **Last Updated:** 2026-11-05  
 

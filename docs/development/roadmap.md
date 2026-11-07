@@ -3,6 +3,7 @@
 **Project:** Autonomous Intelligence Architecture (AIA)  
 **Version:** v2.0 (Official Baseline)  
 **Baseline Roadmap:** Master Implementation Plan fulfilled across Phases 0–7  
+**Specification Baseline:** [docs/specifications/README.md](file:///home/wade/src/github/aia/docs/specifications/README.md) (Six Consolidated Volumes: `AIA-VOL-01` ～ `AIA-VOL-06`; historical `AIA-00` ～ `AIA-22` frozen baseline)  
 **Last Updated:** 2026-11-05  
 
 ---

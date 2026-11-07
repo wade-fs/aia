@@ -1,5 +1,9 @@
 # AIA-00 — 規格文件總體架構與演進藍圖
 
+> [!NOTE]
+> **架構重整與收攏公告 (Consolidated Architecture Specification)**
+> 本規範為 AIA 歷史基準規範（規格編號已於 AIA-22 永久封頂）。為杜絕規格膨脹與重複定義，本規範之現行核心標準已正式收攏重整至 **[Volume 1: System Foundations & Architecture](file:///home/wade/src/github/aia/docs/specifications/volume-1-system-foundations.md)**。最新架構與維護基準請以對應之 Volume 為主，完整六大核心卷軸總覽請參閱 [Specification Catalog (README.md)](file:///home/wade/src/github/aia/docs/specifications/README.md)。
+
 **Autonomous Intelligence Architecture**  
 **Version:** 2.0  
 **Document Type:** Master Specification Index & Evolution Blueprint  

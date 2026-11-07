@@ -1,5 +1,9 @@
 # AIA-19：Deployment, Operations & Observability Specification
 
+> [!NOTE]
+> **架構重整與收攏公告 (Consolidated Architecture Specification)**
+> 本規範為 AIA 歷史基準規範（規格編號已於 AIA-22 永久封頂）。為杜絕規格膨脹與重複定義，本規範之現行核心標準已正式收攏重整至 **[Volume 5: Runtime Engine, Operations & Interaction](file:///home/wade/src/github/aia/docs/specifications/volume-5-runtime-and-interaction.md)**。最新架構與維護基準請以對應之 Volume 為主，完整六大核心卷軸總覽請參閱 [Specification Catalog (README.md)](file:///home/wade/src/github/aia/docs/specifications/README.md)。
+
 **文件編號：** AIA-19  
 **文件名稱：** Deployment, Operations & Observability Specification  
 **版本：** 2.0  

@@ -227,4 +227,4 @@ aia worker purge-logs
 
 - **總體藍圖與記憶架構**：[docs/development/roadmap.md](file:///home/wade/src/github/aia/docs/development/roadmap.md) · [docs/architecture/memory.md](file:///home/wade/src/github/aia/docs/architecture/memory.md)
 - **實作現況與資料模型**：[implementation-status.md](file:///home/wade/src/github/aia/docs/development/implementation-status.md) · [data-model.md](file:///home/wade/src/github/aia/docs/architecture/data-model.md) · [security-model.md](file:///home/wade/src/github/aia/docs/architecture/security-model.md)
-- **正式規格書（v2.0）**：[docs/specifications/](file:///home/wade/src/github/aia/docs/specifications)（`AIA-00` 至 `AIA-22`）
+- **核心規格手冊（六大卷軸）**：[docs/specifications/README.md](file:///home/wade/src/github/aia/docs/specifications/README.md)（`AIA-VOL-01` 至 `AIA-VOL-06` 核心架構手冊；歷史 `AIA-00` 至 `AIA-22` 封頂收攏）

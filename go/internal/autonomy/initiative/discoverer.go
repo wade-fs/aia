@@ -251,7 +251,7 @@ func (d *Discoverer) Discover(ctx context.Context, in DiscoverInput) ([]*domainA
 			})
 		}
 
-		// 4. L3 Knowledge / Memory Contradictions (docs/memory.md §4)
+		// 4. L3 Knowledge / Memory Contradictions (docs/architecture/memory.md §4)
 		for _, conf := range in.Recalled.Conflicts {
 			if isDuplicateOfActiveTask(conf.Description) {
 				continue

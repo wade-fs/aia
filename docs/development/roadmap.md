@@ -117,6 +117,13 @@ Progress is evaluated by verifiable, computable autonomous behavior rather than 
   - **Multi-Level Verification & Retry Loop**: Diagnostic RCA parsing on failure, automatic repair retry loop bounded by `MaxRetries`, and review outcome handling (`REQUEST_CHANGES`, `DEFERRED`, `REJECTED`, `APPROVED`).
   - **Zero-Residual Rollback**: Automatic clean teardown of worktrees, branch pruning, and zero workspace pollution on verification failure.
 - **Autonomous System Evolution Engine (`internal/autonomy/self_evolution_engine.go`)**: Coordinates periodic autonomous inspection, hypothesis generation, modification proposal creation, sandbox verification, and end-to-end evolution cycles.
+- **Phase 6 Readiness & Entry Gate Verification (G1–G5 All Passed)**:
+  - Validated across 5 behavioral acceptance scenarios in [`phase6_readiness_scenarios_test.go`](file:///home/wade/src/github/aia/go/tests/integration/phase6_readiness_scenarios_test.go) with persisted YAML evidence in `.aia/evidence/phase6_readiness/`:
+    - **Scenario A (G1 - Writing)**: Real project comprehension (`novel/yuan` 6 volumes, 540 chapters, 90+ character constraints).
+    - **Scenario B (G2 - Writing)**: Adaptive conflict detection (distinguishing fiction vs historical hard contradictions).
+    - **Scenario C (G3 - Coding)**: Real execution in isolated Git Worktree with L2 test verification and 0 workspace pollution.
+    - **Scenario D (G4 - Multi-Domain)**: Autonomous failure detection & self-healing code patch retry loop.
+    - **Scenario E (G5 - Coding)**: Zero-residual clean rollback upon unrecoverable error (SHA & workspace 100% preserved).
 
 ### Phase 7: Universal Brief, Clarification, Complex Problem Planning & Systemic Hardening *(Data, Services & Cycle Integration Completed; Behavioral Verification Active)*
 - **Universal Project Brief & Dynamic Clarification (AIA-21)**:

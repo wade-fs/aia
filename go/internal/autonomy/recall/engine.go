@@ -29,7 +29,7 @@ var (
 	ErrFactMissingProvenanceRef   = errors.New("memory governance violation: FACT_BASED memory cannot be VERIFIED without EVIDENCE or SOURCE reference")
 )
 
-// MemoryConflict describes a detected contradiction preserved for reconciliation rather than silent overwrite (docs/memory.md §4).
+// MemoryConflict describes a detected contradiction preserved for reconciliation rather than silent overwrite (docs/architecture/memory.md §4).
 type MemoryConflict struct {
 	Topic       string   `json:"topic"`
 	ClaimIDs    []string `json:"claim_ids,omitempty"`
@@ -73,7 +73,7 @@ type RecallInput struct {
 	MaxMemories  int
 }
 
-// Engine implements L1–L5 Associative Retrieval and Memory Integrity Governance (docs/memory.md).
+// Engine implements L1–L5 Associative Retrieval and Memory Integrity Governance (docs/architecture/memory.md).
 type Engine struct {
 	eventRepo      *repository.EventHistoryRepository
 	knowledgeRepo  *repository.KnowledgeRepository
@@ -258,7 +258,7 @@ func (e *Engine) Recall(ctx context.Context, in RecallInput) (*RecalledBundle, e
 				if err != nil || evi == nil {
 					continue
 				}
-				// Temporal Management (docs/memory.md §4 Rule 4): exclude expired evidence
+				// Temporal Management (docs/architecture/memory.md §4 Rule 4): exclude expired evidence
 				if evi.ValidUntil != nil && now.After(*evi.ValidUntil) {
 					continue
 				}
@@ -375,7 +375,7 @@ func (e *Engine) Recall(ctx context.Context, in RecallInput) (*RecalledBundle, e
 	return bundle, nil
 }
 
-// ValidateMemoryWrite enforces the Provenance Integrity Matrix (AIA-ARCH-DATA-01 §3.6B, docs/memory.md §4).
+// ValidateMemoryWrite enforces the Provenance Integrity Matrix (AIA-ARCH-DATA-01 §3.6B, docs/architecture/memory.md §4).
 func ValidateMemoryWrite(m *memory.Memory) error {
 	if m == nil {
 		return fmt.Errorf("nil memory")

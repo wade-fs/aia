@@ -247,7 +247,7 @@ Cycle 解答 9 大核心問題：①為什麼開始？②當時看到了什麼�
 - **領域特化層**：既有 `investment_decision_evidence` 與 `investment_raw_documents` 保留金融專屬欄位，透過外鍵或關聯引用共用 Evidence，互補而不競爭。
 
 ### 4.5 一致性記憶架構與五層權威體系 (Consistent Memory Architecture & Authority Tiers)
-依據 [docs/memory.md](file:///home/wade/src/github/aia/docs/memory.md)，解決 AIA-10、AIA-16 與 AIA-18 對記憶責任定義分散之問題：
+依據 [docs/architecture/memory.md](file:///home/wade/src/github/aia/docs/architecture/memory.md)，解決 AIA-10、AIA-16 與 AIA-18 對記憶責任定義分散之問題：
 
 1. **四種記憶明確劃分 (4 Memory Types)**：
    - **情節記憶 (Episodic)**：曾經發生的事件、決策與客觀結果，歷史不可竄改。
